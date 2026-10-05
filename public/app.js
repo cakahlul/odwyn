@@ -1,9 +1,11 @@
 import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses } from './ui.js';
 import { renderChat, insertMessages, renderRuns, renderRoutines, renderFiles, renderActivity } from './views.js';
 import { setupBrowser, updateBrowser } from './browser-ui.js';
+import { setupCustomization, applyProfile, openCustomization } from './customize.js';
 
 let state = null, conversationId = null, view = 'chat', filter = 'all', signature = '', busy = false, attachments = [];
 hydrateIcons(); setupBrowser(() => state);
+setupCustomization(() => state, async profile => { state.customization = profile; signature = ''; render(); await refresh(); });
 const mobile = matchMedia('(max-width: 760px)');
 function setNavigation(open) {
   document.body.classList.toggle('nav-open',open);
@@ -23,6 +25,7 @@ function navigate(next = 'chat', id = null) {
 
 function render() {
   if (!state) return;
+  applyProfile(state.customization);
   $('#run-status').hidden = !state.jobs.some(job => activeStatuses.includes(job.status));
   $('.connection').classList.toggle('connected', !!state.runtime.account);
   $('#connection-label').textContent = state.runtime.account ? 'Codex connected' : 'Connect Codex';
@@ -40,7 +43,7 @@ function render() {
   $('#routine-note').textContent = routines.length ? `${routines.length} routine${routines.length === 1 ? '' : 's'} on my clock.` : 'Your time. Your pace.';
   $('#routine-note-detail').textContent = routines.length ? 'A little ahead of the day.' : "Set a routine. I'll keep track.";
   $('#composer-area').hidden = view !== 'chat';
-  const nextSignature = JSON.stringify({ view, conversationId, filter, data: view === 'chat' ? [conversation?.messages, state.jobs.filter(j => j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : state.files });
+  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, data: view === 'chat' ? [conversation?.messages, state.jobs.filter(j => j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : state.files });
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
@@ -159,4 +162,5 @@ document.addEventListener('keydown', event => {
 $('#view').innerHTML = '<div class="loading-state" role="status"><img src="/mark.svg" width="48" height="48" alt=""><p>Making room for your day…</p></div>';
 await refresh();
 const initial = location.hash.slice(1).split('/'); if (['chat','runs','routines','files'].includes(initial[0])) navigate(initial[0],initial[1] || null);
+if (state && !state.customization) openCustomization(true);
 setInterval(() => { if (!document.hidden) void refresh(); }, 1000);

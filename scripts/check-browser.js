@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { createApp } from '../server.js';
 import { Codex } from '../codex.js';
+import { palettes, defaults } from '../public/profile.js';
 
 const directory = mkdtempSync(join(tmpdir(),'sidekick-ui-'));
 const root = resolve(import.meta.dir,'..'); const artifacts = join(root,'artifacts'); mkdirSync(artifacts,{recursive:true});
@@ -25,6 +26,77 @@ const audit = async label => {
 };
 try {
   await page.goto(server.url.href); await page.getByRole('heading',{name:'What can I take off your plate?'}).waitFor();
+  await page.locator('#customize-dialog[open]').waitFor();
+  await page.screenshot({path:join(artifacts,'customize-look.png'),fullPage:true});
+  for (const [key,palette] of Object.entries(palettes)) {
+    await page.locator(`input[name=palette][value=${key}]`).check();
+    assert.equal(await page.locator('#profile-preview').evaluate(node=>node.style.getPropertyValue('--paper')),palette.vars.paper,'Palette updates the preview');
+    assert.equal(await page.locator(':root').evaluate(node=>node.style.getPropertyValue('--paper')),palettes.paper.vars.paper,'Unsaved palette does not change the app');
+    await audit(`${key} preview`);
+  }
+  await page.locator('#customize-next').click();
+  await page.locator('input[name=shape][value=cat]').check();
+  for (const [name,value] of Object.entries({bodyColor:'#a6bd8e',eyeColor:'#26333f',mouthColor:'#8c3545'})) await page.locator(`input[name=${name}]`).fill(value);
+  await page.locator('select[name=eyes]').selectOption('wink');
+  await page.locator('select[name=mouth]').selectOption('grin');
+  await page.locator('select[name=accessory]').selectOption('spark');
+  await page.locator('#agent-name-input').fill('Pip');
+  await page.locator('#agent-specialization').fill('Travel planning & research');
+  assert.equal(await page.locator('#preview-brand-name').textContent(),'Pip');
+  assert.equal(await page.locator('#preview-mascot svg g').first().getAttribute('fill'),'#a6bd8e');
+  await page.screenshot({path:join(artifacts,'customize-agent.png'),fullPage:true});
+  await audit('Avatar editor');
+  await page.locator('#agent-name-input').press('Enter');
+  assert.equal(await page.locator('[data-profile-step="2"]').isVisible(),true,'Enter advances the wizard before saving');
+  await page.locator('#owner-name-input').fill('Alex');
+  await page.locator('input[name=tone][value=crisp]').check();
+  assert.match(await page.locator('#preview-reply').textContent(),/Alex.*top three/s);
+  await audit('Communication editor');
+  await page.locator('#customize-save').click();
+  await page.locator('#customize-dialog').waitFor({state:'hidden'});
+  assert.equal(await page.locator('#agent-name').textContent(),'Pip');
+  assert.equal(await page.locator('#owner-name').textContent(),'Alex');
+  assert.equal(app.runtime.state.customization.name,'Pip');
+  assert.equal(app.runtime.state.customization.specialization,'Travel planning & research');
+  assert.equal(app.runtime.state.customization.tone,'crisp');
+  assert.match(await page.locator('link[rel=icon]').getAttribute('href'),/^data:image\/svg\+xml/);
+  await page.reload(); await page.locator('#agent-name').filter({hasText:'Pip'}).waitFor();
+  assert.equal(await page.locator('#customize-dialog').evaluate(node=>node.open),false,'Saved profile skips onboarding');
+  await page.locator('#settings-open').click(); await page.locator('#customize-open').click();
+  await page.locator('[data-custom-step="1"]').click();
+  assert.equal(await page.locator('#agent-name-input').inputValue(),'Pip','Settings restores saved choices');
+  assert.equal(await page.locator('input[name=shape][value=cat]').isChecked(),true);
+  await page.locator('#agent-name-input').fill(''); await page.locator('[data-custom-step="2"]').click(); await page.locator('#customize-save').click();
+  assert.equal(await page.locator('[data-profile-step="1"]').isVisible(),true,'Invalid name returns to the right step');
+  await page.locator('#agent-name-input').fill('Momo'); await page.locator('[data-custom-step="0"]').click();
+  await page.locator('input[name=palette][value=fern]').check();
+  await page.locator('#customize-close').click();
+  assert.equal(await page.locator('#agent-name').textContent(),'Pip','Cancel keeps saved identity');
+  await page.locator('#settings-open').click(); await page.locator('#customize-open').click();
+  await page.setViewportSize({width:320,height:700});
+  await page.screenshot({path:join(artifacts,'customize-mobile.png'),fullPage:true});
+  await page.locator('#customize-preview').click();
+  await page.waitForFunction(()=>document.querySelector('#profile-preview').getBoundingClientRect().top<=document.querySelector('.profile-layout').getBoundingClientRect().top+2);
+  assert.ok(await page.locator('.preview-brand').evaluate(node=>node.getBoundingClientRect().top<400),'Mobile preview is reachable');
+  await page.screenshot({path:join(artifacts,'customize-mobile-preview.png'),fullPage:true});
+  await page.locator('#customize-preview').click();
+  await page.waitForFunction(()=>document.querySelector('.profile-layout').scrollTop<2);
+  for (const step of [0,1,2]) {
+    await page.locator(`[data-custom-step="${step}"]`).click();
+    assert.equal(await page.locator('#customize-dialog').evaluate(node=>node.scrollWidth>node.clientWidth),false,'Mobile wizard fits its dialog');
+    const action = await page.locator(step === 2 ? '#customize-save' : '#customize-next').boundingBox();
+    assert.ok(action.y+action.height<=700,'Mobile wizard keeps its action visible');
+    await audit(`Mobile wizard step ${step}`);
+  }
+  await page.locator('#customize-close').click(); await page.setViewportSize({width:1440,height:960});
+  for (const key of Object.keys(palettes)) {
+    await page.locator('#settings-open').click(); await page.locator('#customize-open').click();
+    await page.locator(`input[name=palette][value=${key}]`).check();
+    await page.locator('[data-custom-step="2"]').click(); await page.locator('#customize-save').click();
+    await page.locator('#customize-dialog').waitFor({state:'hidden'});
+    assert.equal(await page.locator(':root').evaluate(node=>node.style.getPropertyValue('--paper')),palettes[key].vars.paper);
+    await audit(`${key} workspace`);
+  }
   assert.equal(await page.locator('#browser-toggle').getAttribute('aria-expanded'),'false');
   const composer = await page.locator('#composer').boundingBox();
   const suggestions = await page.locator('.suggestions').boundingBox();
@@ -139,7 +211,11 @@ const budget = 2000000;
   }
   await page.keyboard.press('Control+k'); await page.locator('#search-input').fill('example.com'); await page.locator('#search-results').getByRole('button',{name:/Read https:\/\/example.com/}).click();
   await page.locator('#messages').getByText('Read https://example.com and tell me what it says.',{exact:true}).waitFor();
+  app.runtime.state.customization = null; app.runtime.changed();
+  await page.reload(); await page.locator('#customize-dialog[open]').waitFor();
+  await page.locator('#customize-defaults').click(); await page.locator('#customize-dialog').waitFor({state:'hidden'});
+  assert.deepEqual(app.runtime.state.customization,defaults,'Keep defaults completes onboarding');
   assert.deepEqual(errors,[]);
-  console.log('PASS: chat, task stop, search, memory, schedules, uploads, real browser takeover, 320/768/1024/1440 layouts, no console errors' + (process.env.SIDEKICK_AXE_PATH ? ', WCAG accessibility checks.' : '.'));
+  console.log('PASS: onboarding, palettes, avatar editor, profile persistence and settings, chat, task stop, search, memory, schedules, uploads, real browser takeover, 320/768/1024/1440 layouts, no console errors' + (process.env.SIDEKICK_AXE_PATH ? ', WCAG accessibility checks.' : '.'));
   console.log(`Screenshots: ${artifacts}`);
 } finally { await browser.close(); server.stop(true); await app.close(); rmSync(directory,{recursive:true,force:true}); }
