@@ -2,71 +2,64 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#19191b"><meta name="description" content="A private workspace for your browser assistant.">
-  <title>Sidekick — Workspace</title><link rel="icon" href="/mark.svg"><link rel="stylesheet" href="/style.css">
+  <meta name="theme-color" content="#f8f7f2"><meta name="description" content="Your personal assistant, with a browser and time to help.">
+  <title>Sidekick — your personal +1</title><link rel="icon" href="/mark.svg"><link rel="stylesheet" href="/style.css">
 </head>
-<body class="browser-closed">
-  <a class="skip-link" href="#main">Skip to content</a>
+<body>
+  <a class="skip-link" href="#main">Skip to conversation</a>
   <div class="shell">
     <aside class="sidebar" aria-label="Workspace navigation">
-      <a href="#chat" class="brand" data-new-chat><img src="/mark.svg" alt="" width="26" height="26"><span>sidekick</span><span class="brand-label">PERSONAL</span></a>
-      <button class="search-button" id="search-open"><span data-icon="search"></span><span>Search</span><kbd>⌘ K</kbd></button>
-      <button class="new-chat" id="new-chat"><span data-icon="plus"></span>New task<kbd>⌘ N</kbd></button>
-      <div class="section-label">Workspace</div>
+      <a href="#chat" class="brand"><img src="/mark.svg" alt="" width="33" height="33"><span>sidekick<span class="brand-dot">.</span></span></a>
+      <button class="new-chat" id="new-chat"><span class="plus">+</span> A fresh start <kbd>⌘ N</kbd></button>
       <nav class="navigation">
-        <button data-view="chat" class="nav-item active"><span data-icon="chat"></span>Overview</button>
+        <button data-view="chat" class="nav-item active"><span data-icon="chat"></span>Chat<span class="nav-meta">01</span></button>
         <button data-view="runs" class="nav-item"><span data-icon="activity"></span>Task runs<span class="nav-count" id="run-count">0</span></button>
         <button data-view="routines" class="nav-item"><span data-icon="clock"></span>Routines</button>
         <button data-view="files" class="nav-item"><span data-icon="folder"></span>Files & results</button>
       </nav>
-      <div class="history-label">Recent conversations</div>
-      <div id="history" class="history"><p class="sidebar-empty">No conversations yet</p></div>
+      <div class="history-label"><span>CONVERSATIONS</span><button class="icon-button" id="search-open" aria-label="Search conversations"><span data-icon="search"></span></button></div>
+      <div id="history" class="history"><p class="sidebar-empty">Room for your next idea.</p></div>
       <div class="sidebar-bottom">
-        <div class="routine-summary"><span data-icon="clock"></span><span id="routine-note">No active routines</span><button class="icon-button" data-view="routines" aria-label="Manage routines"><span data-icon="arrow-up-right"></span></button></div>
-        <button class="owner-button" id="settings-open"><span class="owner-avatar">P</span><span>Personal account<small>Settings & memory</small></span><span data-icon="settings"></span></button>
+        <div class="little-note"><span class="note-pin"></span><span id="routine-note">Your time. Your pace.</span><small id="routine-note-detail">Set a routine. I'll keep track.</small></div>
+        <button class="owner-button" id="settings-open"><span class="owner-avatar">Y</span><span>Your space<small>Personal workspace</small></span><span data-icon="settings"></span></button>
       </div>
     </aside>
     <button class="nav-scrim" id="nav-scrim" aria-label="Close navigation" tabindex="-1"></button>
     <main id="main" class="main" tabindex="-1">
       <header class="topbar">
-        <div class="breadcrumb"><button class="icon-button mobile-menu" id="menu-button" aria-label="Open navigation" aria-expanded="false"><span data-icon="menu"></span></button><span class="workspace-label">Workspace</span><span class="breadcrumb-slash">/</span><span id="page-title">Overview</span></div>
-        <div class="header-actions"><button class="connection" id="connection-button"><span class="status-dot"></span><span id="connection-label">Connecting</span></button><button class="browser-toggle" id="browser-toggle" aria-label="Toggle browser panel" aria-expanded="false"><span data-icon="panel"></span><span>Browser</span></button></div>
+        <div class="breadcrumb"><button class="icon-button mobile-menu" id="menu-button" aria-label="Open navigation" aria-expanded="false"><span data-icon="menu"></span></button><span class="workspace-label">Personal space</span><span class="breadcrumb-slash">/</span><span id="page-title">New conversation</span></div>
+        <div class="header-actions"><button class="connection" id="connection-button"><span class="status-dot"></span><span id="connection-label">Connecting…</span></button><button class="icon-button browser-toggle" id="browser-toggle" aria-label="Toggle browser panel" aria-expanded="true"><span data-icon="panel"></span></button></div>
       </header>
       <div id="view" class="view"></div>
       <section class="composer-area" id="composer-area" aria-label="Message your assistant">
         <div id="attachments" class="attachments"></div>
         <form id="composer" class="composer">
           <label class="sr-only" for="prompt">What would you like Sidekick to do?</label>
-          <textarea id="prompt" rows="3" maxlength="20000" placeholder="Describe a task. Add links, context, or a file…"></textarea>
-          <div class="composer-toolbar">
-            <div class="composer-tools"><button type="button" class="icon-button" id="attach-button" aria-label="Attach a file"><span data-icon="paperclip"></span></button><button type="button" id="schedule-open" class="composer-tool" aria-label="Schedule a task"><span data-icon="clock"></span><span>Schedule</span></button><label class="permission-picker"><span data-icon="shield"></span><select id="interaction-mode" aria-label="Browser interaction permission"><option value="confirm">Ask before acting</option><option value="allow">Allow this run</option></select></label></div>
-            <button type="submit" class="send-button" id="send-button" aria-label="Send message"><span class="send-label">Run task</span><span data-icon="arrow-up-right"></span></button>
-          </div>
+          <textarea id="prompt" rows="2" maxlength="20000" placeholder="A task, a question, a little thing you keep putting off…"></textarea>
+          <div class="composer-toolbar"><div class="composer-tools"><button type="button" class="icon-button" id="attach-button" aria-label="Attach a file"><span data-icon="paperclip"></span></button><button type="button" id="schedule-open" class="composer-tool"><span data-icon="clock"></span><span>For later</span></button><label class="permission-picker"><span data-icon="shield"></span><select id="interaction-mode" aria-label="Browser interaction permission"><option value="confirm">Confirm interactions</option><option value="allow">Allow interactions this run</option></select></label></div><button type="submit" class="send-button" id="send-button" aria-label="Send message"><span data-icon="arrow-up"></span></button></div>
         </form>
-        <div class="composer-footnote"><span>Actions follow your instructions and permissions.</span><span><kbd>↵</kbd> send <span class="shortcut-separator">·</span> <kbd>⇧ ↵</kbd> new line</span></div>
+        <div class="composer-footnote"><span><span class="tiny-mark">✳</span> A little help goes a long way.</span><span>Enter to send <span class="key-symbol">↵</span></span></div>
       </section>
-      <section id="start-panel" class="start-panel" aria-label="Task suggestions and recent work" hidden></section>
-      <footer class="workspace-footer"><span>Sidekick <span class="footer-separator">/</span> Personal workspace</span><button class="text-button" data-settings-open>Account settings<span data-icon="arrow-up-right"></span></button></footer>
     </main>
-    <aside class="browser-panel" id="browser-panel" aria-label="Assistant browser and activity" inert>
-      <header class="browser-heading"><span data-icon="globe"></span><strong>Browser session</strong><button class="icon-button" id="browser-expand" aria-label="Expand browser" aria-pressed="false"><span data-icon="expand"></span></button><button class="icon-button" id="browser-close" aria-label="Close browser panel"><span data-icon="close"></span></button></header>
-      <div class="panel-tabs" role="tablist" aria-label="Browser panel"><button class="selected" id="browser-tab" role="tab" aria-selected="true" aria-controls="browser-content">Live view</button><button id="activity-tab" role="tab" aria-selected="false" aria-controls="activity-content" tabindex="-1">Activity<span id="activity-count"></span></button></div>
-      <div id="browser-content" role="tabpanel" aria-labelledby="browser-tab" tabindex="0">
+    <aside class="browser-panel" id="browser-panel" aria-label="Assistant browser and activity">
+      <header class="browser-heading"><span class="browser-heading-icon" data-icon="globe"></span><strong>On the other side</strong><button class="icon-button" id="browser-close" aria-label="Close browser panel"><span data-icon="close"></span></button></header>
+      <div class="panel-tabs" role="tablist" aria-label="Browser panel"><button class="selected" id="browser-tab" role="tab" aria-selected="true" aria-controls="browser-content">Browser</button><button id="activity-tab" role="tab" aria-selected="false" aria-controls="activity-content">Activity<span id="activity-count"></span></button></div>
+      <div id="browser-content" role="tabpanel" aria-labelledby="browser-tab">
         <div class="browser-address"><span data-icon="lock"></span><span id="browser-url">No page open</span><button class="icon-button" id="browser-refresh" aria-label="Refresh browser preview"><span data-icon="refresh"></span></button></div>
-        <div class="browser-viewport" id="browser-viewport"><div class="browser-empty"><span data-icon="globe"></span><h2>No browser session</h2><p>Open a website or start a task.<br>Your session persists between runs.</p><button id="open-browser" class="secondary-button">Open browser<span data-icon="arrow-up-right"></span></button></div></div>
-        <div class="browser-control-row"><span class="control-state" id="control-state">Not started</span><button id="takeover-button" class="secondary-button">Take control<span data-icon="cursor"></span></button></div>
+        <div class="browser-viewport" id="browser-viewport"><div class="browser-empty"><div class="empty-browser-art"><span></span><i></i><i></i><i></i><div class="empty-cursor">↖</div></div><h2>A window into the work.</h2><p>Watch pages come to life here.<br>Take over whenever you need to.</p><button id="open-browser" class="secondary-button">Open browser<span data-icon="arrow-up-right"></span></button></div></div>
+        <div class="browser-control-row"><span class="control-state" id="control-state">Browser resting</span><button id="takeover-button" class="text-button">Take control<span data-icon="cursor"></span></button></div>
         <form id="browser-navigate" class="takeover-form" hidden><input id="navigate-url" aria-label="Website address" placeholder="https://example.com" type="url"><button class="icon-button" aria-label="Navigate"><span data-icon="arrow-up-right"></span></button></form>
-        <div id="takeover-controls" class="takeover-controls" hidden><p>Click a field in the preview, then enter text below. Hand back control when finished.</p><form id="browser-type"><input id="browser-text" type="password" aria-label="Text to type into the browser" placeholder="Type into the focused field" autocomplete="off"><button class="secondary-button">Type</button></form><div class="browser-keys"><button data-key="Tab">Tab</button><button data-key="Enter">Enter ↵</button><button data-key="Backspace">⌫</button><button data-key="Escape">Esc</button><button data-scroll="-600">Scroll ↑</button><button data-scroll="600">Scroll ↓</button></div><button id="browser-back" class="text-button">← Back</button></div>
-        <div class="panel-note"><span data-icon="shield"></span><p>Use takeover for passwords, MFA and confirmations. The assistant pauses while you have control.</p></div>
+        <div id="takeover-controls" class="takeover-controls" hidden><p>Click the preview to focus a field. Type below, then send. Keyboard controls stay inside the browser.</p><form id="browser-type"><input id="browser-text" type="password" aria-label="Text to type into the browser" placeholder="Type into the focused field" autocomplete="off"><button class="secondary-button">Type</button></form><div class="browser-keys"><button data-key="Tab">Tab</button><button data-key="Enter">Enter ↵</button><button data-key="Backspace">⌫</button><button data-key="Escape">Esc</button><button data-scroll="-600">Scroll ↑</button><button data-scroll="600">Scroll ↓</button></div><button id="browser-back" class="text-button">← Back</button></div>
+        <div class="panel-note"><span data-icon="shield"></span><p>Your browser session stays on your server. You can step in for sign-ins and confirmations.</p></div>
       </div>
-      <div id="activity-content" role="tabpanel" aria-labelledby="activity-tab" tabindex="0" hidden><div id="activity-list" class="activity-list"></div></div>
-      <footer class="panel-footer"><span class="status-dot"></span><span id="panel-footer-text">Session stored on your server</span></footer>
+      <div id="activity-content" role="tabpanel" aria-labelledby="activity-tab" hidden><div id="activity-list" class="activity-list"></div></div>
+      <footer class="panel-footer"><span class="small-orbit">↻</span><span id="panel-footer-text">One thing at a time. Done properly.</span></footer>
     </aside>
   </div>
   <input type="file" id="file-input" hidden>
-  <dialog id="settings-dialog" class="modal" aria-labelledby="settings-title"><form method="dialog" class="modal-top"><span class="eyebrow">Account & preferences</span><button class="icon-button" aria-label="Close settings"><span data-icon="close"></span></button></form><h2 id="settings-title">Settings</h2><p class="modal-description">Connect your account and set context for future tasks.</p><section class="account-box"><span data-icon="link"></span><div><strong id="account-title">Codex subscription</strong><p id="account-description">Connect your ChatGPT account to start working.</p></div><button id="connect-account" class="secondary-button">Connect</button></section><div id="login-instructions" class="login-instructions" hidden></div><form id="preferences-form"><label for="preferences">Memory</label><p class="field-hint">Preferences, context, timezone. Enter passwords through browser takeover.</p><textarea id="preferences" rows="5" maxlength="8000" placeholder="Based in Jakarta. Keep replies short. Prefer morning flights."></textarea><div class="form-footer"><small id="settings-status" role="status"></small><button class="primary-button">Save memory<span data-icon="check"></span></button></div></form></dialog>
-  <dialog id="schedule-dialog" class="modal" aria-labelledby="schedule-title"><form method="dialog" class="modal-top"><span class="eyebrow">Scheduled task</span><button class="icon-button" aria-label="Close schedule form"><span data-icon="close"></span></button></form><h2 id="schedule-title">New routine</h2><p class="modal-description">Run a task once or on a recurring schedule.</p><form id="schedule-form"><label for="schedule-prompt">Instructions</label><textarea id="schedule-prompt" required rows="3" maxlength="20000" placeholder="Check the KPI dashboard and report changes that need attention."></textarea><div class="form-columns"><div><label for="schedule-at">First run</label><input id="schedule-at" type="datetime-local" required></div><div><label for="schedule-interval">Repeat</label><select id="schedule-interval"><option value="0">Once</option><option value="60">Every hour</option><option value="1440" selected>Every day</option><option value="10080">Every week</option></select></div></div><p class="field-hint">Local timezone. Browser interactions require your confirmation.</p><div class="form-footer"><small id="schedule-status" role="status"></small><button class="primary-button">Set routine<span data-icon="arrow-up-right"></span></button></div></form></dialog>
-  <dialog id="search-dialog" class="modal search-modal" aria-label="Search conversations"><form method="dialog" class="modal-top"><span class="eyebrow">Search conversations</span><button class="icon-button" aria-label="Close search"><span data-icon="close"></span></button></form><label class="sr-only" for="search-input">Search conversations</label><input id="search-input" type="search" placeholder="Search titles and messages…"><div id="search-results"></div></dialog>
+  <dialog id="settings-dialog" class="modal"><form method="dialog" class="modal-top"><span class="eyebrow">MAKE YOURSELF AT HOME</span><button class="icon-button" aria-label="Close settings"><span data-icon="close"></span></button></form><h2>Your Sidekick.</h2><p class="modal-description">A few details make the help feel more like you.</p><section class="account-box"><span class="account-logo" data-icon="link"></span><div><strong id="account-title">Codex subscription</strong><p id="account-description">Connect your ChatGPT account to start working.</p></div><button id="connect-account" class="secondary-button">Connect</button></section><div id="login-instructions" class="login-instructions" hidden></div><form id="preferences-form"><label for="preferences">What should I remember?</label><p class="field-hint">Preferences, context, timezone. Keep passwords in browser takeover.</p><textarea id="preferences" rows="5" maxlength="8000" placeholder="I'm based in Jakarta. Keep replies short. Prefer morning flights."></textarea><div class="form-footer"><small id="settings-status" role="status"></small><button class="primary-button">Save memory<span data-icon="check"></span></button></div></form></dialog>
+  <dialog id="schedule-dialog" class="modal"><form method="dialog" class="modal-top"><span class="eyebrow">A LITTLE AHEAD OF YOU</span><button class="icon-button" aria-label="Close schedule form"><span data-icon="close"></span></button></form><h2>Put it on my clock.</h2><p class="modal-description">Schedule a task once, or make it a regular thing.</p><form id="schedule-form"><label for="schedule-prompt">What needs doing?</label><textarea id="schedule-prompt" required rows="3" maxlength="20000" placeholder="Check the KPI dashboard and summarize anything that needs attention."></textarea><div class="form-columns"><div><label for="schedule-at">First run</label><input id="schedule-at" type="datetime-local" required></div><div><label for="schedule-interval">Repeat</label><select id="schedule-interval"><option value="0">Just once</option><option value="60">Every hour</option><option value="1440" selected>Every day</option><option value="10080">Every week</option></select></div></div><p class="field-hint">Uses your local timezone. Browser interactions wait for confirmation.</p><div class="form-footer"><small id="schedule-status" role="status"></small><button class="primary-button">Set routine<span data-icon="arrow-up-right"></span></button></div></form></dialog>
+  <dialog id="search-dialog" class="modal search-modal"><form method="dialog" class="modal-top"><span class="eyebrow">FIND THAT THING</span><button class="icon-button" aria-label="Close search"><span data-icon="close"></span></button></form><label class="sr-only" for="search-input">Search conversations</label><input id="search-input" type="search" placeholder="Search conversations…"><div id="search-results"></div></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
   <script type="module" src="/app.js"></script>
 </body>

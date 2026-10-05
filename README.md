@@ -27,7 +27,7 @@ The app uses Codex App Server with ChatGPT subscription authentication. It does 
 ## Using it
 
 - **Chat:** give an outcome; follow-up messages continue the same Codex thread.
-- **Browser:** open the live view from the header, expand it for readable website interactions, or inspect the Activity tab. **Take control** pauses subsequent agent actions. Click the page, use the typing box and keys, then **Hand back**. Answer the assistant's pending question after completing a sign-in; reply drafts survive takeover updates.
+- **Browser:** view screenshots, tabs and activity. **Take control** pauses subsequent agent actions. Click the page, use the typing box and keys, then **Hand back**. Answer the assistant's pending question after completing a sign-in.
 - **Confirm interactions:** approve individual clicks, typing, uploads and browser dialogs. **Allow this run** permits browser interactions for that task. Authorizing spending, sending or deletion requires clear instructions separately.
 - **Routines:** queue work once or repeatedly, with a minimum 15-minute interval. Pause or delete routines from the app. Execution does not depend on keeping the web app open.
 - **Files & results:** upload files for website forms; retrieve downloads and saved screenshots. Uploads are limited to 20 MB. This browser-only version does not parse local documents.
@@ -121,4 +121,4 @@ For optional WCAG checks, install `@axe-core/playwright` outside this project an
 
 Bun HTTP and SQLite, native HTML/CSS/JavaScript, Playwright Chromium, and [Codex App Server](https://learn.chatgpt.com/docs/app-server). Playwright is the only runtime package. Browser tools are registered through App Server dynamic tools; assistant messages and task progress use the real protocol.
 
-UI references: [Linear's interface refresh](https://linear.app/now/behind-the-latest-design-refresh) and [its interface design process](https://linear.app/now/how-we-redesigned-the-linear-ui). Sidekick uses charcoal surfaces, a restrained lime accent, system typography and an original geometric mark. The overview places task creation above actual recent work, prioritizes tasks needing input, and opens browser controls on demand. Task runs include an input-needed filter.
+UI references: [Nexus sidebar exploration](https://dribbble.com/shots/26923064-Nexus-AI-Chat-Application-Sidebar-Options-Exploration) and [Molleya chat dashboard](https://dribbble.com/shots/27205623-Molleya-aio-AI-Chat-Knowledge-Management-Dashboard-UI). Sidekick uses original SVG artwork, system fonts, warm paper/sage colors and an orange accent.
