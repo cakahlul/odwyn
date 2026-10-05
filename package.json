@@ -1,0 +1,15 @@
+{
+  "name": "sidekick",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "bun scripts/setup.js",
+    "start": "bun server.js",
+    "test": "bun test",
+    "check:browser": "bun scripts/check-browser.js",
+    "check:codex": "bun scripts/check-codex.js",
+    "browser:install": "playwright install chromium"
+  },
+  "dependencies": { "playwright": "1.58.2" }
+}

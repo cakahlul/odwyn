@@ -1,0 +1,10 @@
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { resolve } from 'node:path';
+
+const root = resolve(import.meta.dir, '..');
+if (!existsSync(`${root}/.env`)) {
+  writeFileSync(`${root}/.env`, `SIDEKICK_USER=owner\nSIDEKICK_PASSWORD=${randomBytes(24).toString('base64url')}\nPORT=4317\nSIDEKICK_ORIGIN=\n`, { mode: 0o600 });
+}
+mkdirSync(`${root}/data`, { recursive: true, mode: 0o700 });
+console.log('Ready. Credentials are in .env. Run bun start, then connect your Codex subscription in Settings.');
