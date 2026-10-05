@@ -1,6 +1,6 @@
 import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses } from './ui.js';
-import { renderChat, insertMessages, renderRuns, renderRoutines, renderFiles, renderActivity } from './views.js';
-import { setupBrowser, updateBrowser } from './browser-ui.js';
+import { renderChat, renderStartPanel, insertMessages, renderRuns, renderRoutines, renderFiles, renderActivity } from './views.js';
+import { setupBrowser, updateBrowser, setBrowserVisible } from './browser-ui.js';
 
 let state = null, conversationId = null, view = 'chat', filter = 'all', signature = '', busy = false, attachments = [];
 hydrateIcons(); setupBrowser(() => state);
@@ -14,7 +14,9 @@ function setNavigation(open) {
 mobile.addEventListener('change', () => setNavigation(false)); setNavigation(false);
 
 function navigate(next = 'chat', id = null) {
+  if (document.body.classList.contains('browser-expanded')) setBrowserVisible(false);
   view = next; conversationId = id; signature = ''; render();
+  $('#main').scrollTop = 0;
   setNavigation(false);
   if (view === 'chat') $('#prompt').focus();
   history.replaceState(null, '', id ? `#chat/${id}` : `#${view}`);
@@ -25,31 +27,48 @@ function render() {
   const activeCount = state.jobs.filter(job => activeStatuses.includes(job.status)).length;
   $('#run-count').textContent = activeCount;
   $('.connection').classList.toggle('connected', !!state.runtime.account);
-  $('#connection-label').textContent = state.runtime.account ? 'Codex connected' : 'Connect Codex';
+  $('#connection-label').textContent = state.runtime.account ? 'Connected' : 'Connect account';
   $('#connection-button').title = state.runtime.connectionError || (state.runtime.account ? `${state.runtime.account.planType} subscription` : 'Connect your subscription in Settings');
   const conversation = state.conversations.find(c => c.id === conversationId);
-  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { runs:'Task runs', routines:'Routines', files:'Files & results' }[view];
+  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'Overview' : { runs:'Task runs', routines:'Routines', files:'Files & results' }[view];
+  const starting = view === 'chat' && !conversation;
+  $('#main').classList.toggle('starting',starting);
+  $('#start-panel').hidden = !starting;
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active',button.dataset.view === view));
-  $('#history').innerHTML = state.conversations.length ? state.conversations.map(c => {
+  const historyMarkup = state.conversations.length ? state.conversations.map(c => {
     const job = state.jobs.find(job => job.conversationId === c.id);
     return `<button class="history-item ${c.id === conversationId && view === 'chat' ? 'selected' : ''}" data-conversation="${esc(c.id)}"><span class="history-bullet ${job?.status === 'running' ? 'running' : ''}"></span><span>${esc(c.title)}</span>${job?.status === 'waiting' ? '<span class="needs-you-dot" title="Needs your input">!</span>' : ''}</button>`;
-  }).join('') : '<p class="sidebar-empty">Room for your next idea.</p>';
+  }).join('') : '<p class="sidebar-empty">No conversations yet</p>';
+  if ($('#history').innerHTML !== historyMarkup) $('#history').innerHTML = historyMarkup;
   const routines = state.schedules.filter(s => s.enabled);
-  $('#routine-note').textContent = routines.length ? `${routines.length} routine${routines.length === 1 ? '' : 's'} on my clock.` : 'Your time. Your pace.';
-  $('#routine-note-detail').textContent = routines.length ? 'A little ahead of the day.' : "Set a routine. I'll keep track.";
+  $('#routine-note').textContent = `${routines.length} active routine${routines.length === 1 ? '' : 's'}`;
+  if (starting) {
+    const markup = renderStartPanel(state);
+    if ($('#start-panel').innerHTML !== markup) $('#start-panel').innerHTML = markup;
+  }
   $('#composer-area').hidden = view !== 'chat';
   const nextSignature = JSON.stringify({ view, conversationId, filter, data: view === 'chat' ? [conversation?.messages, state.jobs.filter(j => j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : state.files });
   if (signature !== nextSignature) {
+    const answerForm = $('[data-answer-job]');
+    const answer = answerForm?.querySelector('textarea');
+    const draft = answer ? { request:answerForm.dataset.request, text:answer.value, focused:document.activeElement === answer, start:answer.selectionStart, end:answer.selectionEnd } : null;
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
     $('#view').innerHTML = view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state) : renderFiles(state);
     if (view === 'chat') insertMessages(state,conversationId);
+    const replacement = $('[data-answer-job]');
+    if (draft && replacement?.dataset.request === draft.request) {
+      const textarea = replacement.querySelector('textarea'); textarea.value = draft.text;
+      if (draft.focused) { textarea.focus({preventScroll:true}); textarea.setSelectionRange(draft.start,draft.end); }
+    }
     $('#view').scrollTop = nearBottom ? $('#view').scrollHeight : previousScroll;
     signature = nextSignature;
   }
   renderActivity(state,conversationId); updateBrowser(state);
   const disabled = !!state.jobs.find(job => job.conversationId === conversationId && activeStatuses.includes(job.status));
   $('#send-button').disabled = disabled || busy; $('#send-button').title = disabled ? 'Finish or stop the active run before a follow-up.' : 'Send message';
+  $('.send-label').textContent = conversation ? 'Send' : 'Run task';
+  $('#prompt').rows = starting ? 3 : 2;
   if ($('#settings-dialog').open) updateAccount();
 }
 
@@ -100,7 +119,7 @@ $('#attach-button').onclick = () => $('#file-input').click();
 $('#file-input').onchange = async () => {
   const file = $('#file-input').files[0]; if (!file) return;
   const form = new FormData(); form.append('file',file);
-  await perform(async () => { const saved = await api('/api/files',form); attachments.push(saved); $('#attachments').innerHTML = attachments.map(f => `<span class="attachment-chip">${icon('paperclip')}${esc(f.name)}<button type="button" data-remove-attachment="${esc(f.id)}" aria-label="Remove ${esc(f.name)}">${icon('close')}</button></span>`).join(''); toast('File ready for your task.'); });
+  await perform(async () => { const saved = await api('/api/files',form); attachments.push(saved); $('#attachments').innerHTML = attachments.map(f => `<span class="attachment-chip">${icon('paperclip')}${esc(f.name)}<button type="button" data-remove-attachment="${esc(f.id)}" aria-label="Remove ${esc(f.name)}">${icon('close')}</button></span>`).join(''); toast('File uploaded.'); });
   $('#file-input').value = '';
 };
 $('#composer').onsubmit = async event => {
@@ -115,11 +134,11 @@ $('#composer').onsubmit = async event => {
 };
 $('#prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#composer').requestSubmit(); } };
 $('#prompt').oninput = () => { $('#prompt').style.height = 'auto'; $('#prompt').style.height = Math.min($('#prompt').scrollHeight,190) + 'px'; };
-$('#preferences-form').onsubmit = event => { event.preventDefault(); void perform(async () => { await api('/api/preferences',{ text:$('#preferences').value },'PUT'); $('#settings-status').textContent = 'Remembered. Applies to your next run.'; }); };
+$('#preferences-form').onsubmit = event => { event.preventDefault(); void perform(async () => { await api('/api/preferences',{ text:$('#preferences').value },'PUT'); $('#settings-status').textContent = 'Saved. Applies to your next task.'; }); };
 $('#connect-account').onclick = () => perform(async () => { $('#connect-account').disabled = true; try { await api(state?.runtime.account ? '/api/account/refresh' : '/api/account/login',{}); } finally { $('#connect-account').disabled = false; } });
 $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(async () => {
   await api('/api/schedules',{ prompt:$('#schedule-prompt').value, at:new Date($('#schedule-at').value).toISOString(), intervalMinutes:Number($('#schedule-interval').value), interactionMode:'confirm' });
-  $('#schedule-dialog').close(); navigate('routines'); toast('On my clock.');
+  $('#schedule-dialog').close(); navigate('routines'); toast('Routine created.');
 }); };
 
 document.addEventListener('click', event => {
@@ -127,6 +146,7 @@ document.addEventListener('click', event => {
   if (target.dataset.view) navigate(target.dataset.view);
   if (target.dataset.conversation) { $('#search-dialog').close(); navigate('chat',target.dataset.conversation); }
   if (target.hasAttribute('data-new-chat')) navigate();
+  if (target.hasAttribute('data-settings-open')) openSettings();
   if (target.dataset.prompt) { $('#prompt').value = target.dataset.prompt; $('#prompt').focus(); $('#prompt').dispatchEvent(new Event('input')); }
   if (target.hasAttribute('data-schedule-open')) openSchedule();
   if (target.hasAttribute('data-upload')) $('#file-input').click();
@@ -154,7 +174,7 @@ document.addEventListener('keydown', event => {
   }
 });
 
-$('#view').innerHTML = '<div class="loading-state" role="status"><img src="/mark.svg" width="48" height="48" alt=""><p>Making room for your day…</p></div>';
+$('#view').innerHTML = '<div class="loading-state" role="status"><p>Loading workspace…</p></div>';
 await refresh();
 const initial = location.hash.slice(1).split('/'); if (['chat','runs','routines','files'].includes(initial[0])) navigate(initial[0],initial[1] || null);
 setInterval(() => { if (!document.hidden) void refresh(); }, 1000);

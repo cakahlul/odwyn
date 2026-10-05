@@ -24,38 +24,71 @@ const audit = async label => {
   assert.deepEqual(result.violations.map(v=>({id:v.id,impact:v.impact,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))})),[],`${label} accessibility`);
 };
 try {
-  await page.goto(server.url.href); await page.getByRole('heading',{name:'What can I take off your plate?'}).waitFor();
+  await page.goto(server.url.href); await page.getByRole('heading',{name:'What needs doing?'}).waitFor();
   await page.screenshot({path:join(artifacts,'desktop.png'),fullPage:true});
   await audit('Welcome');
-  await page.getByRole('button',{name:'Go down a rabbit hole'}).click();
+  await page.getByRole('button',{name:'Research',exact:true}).click();
   assert.match(await page.locator('#prompt').inputValue(),/Research/);
   await page.locator('#prompt').fill('Read https://example.com and tell me what it says.'); await page.locator('#prompt').press('Enter');
   await page.getByText('Connect Codex in Settings to begin.').waitFor();
+  await page.screenshot({path:join(artifacts,'conversation.png'),fullPage:true}); await audit('Conversation');
   await page.getByRole('button',{name:'Stop',exact:true}).click();
+  // Test a real owner-input wait without spending subscription allowance.
+  const job = app.runtime.state.jobs[0]; app.runtime.active = job;
+  const ownerInput = app.runtime.waitForOwner(job,{type:'question',title:'Sign-in needed',detail:'Sign in to the dashboard, then reply when finished.'});
+  await page.locator('#owner-answer').fill('Signed in. Continue with the dashboard.');
+  await page.screenshot({path:join(artifacts,'approval.png'),fullPage:true}); await audit('Owner input');
+  await page.getByRole('button',{name:'Take browser control'}).click();
+  await page.getByText('You have control',{exact:true}).first().waitFor();
+  assert.equal(await page.locator('#owner-answer').inputValue(),'Signed in. Continue with the dashboard.','Owner draft survives takeover updates');
+  await page.getByRole('button',{name:'Hand back'}).click();
+  await page.getByRole('button',{name:'Continue',exact:true}).click(); await ownerInput;
+  await page.getByRole('button',{name:'Stop',exact:true}).click();
+  await page.getByRole('button',{name:'Close browser panel'}).click();
   await page.getByRole('button',{name:'Task runs'}).click(); await page.getByText('Stopped',{exact:true}).first().waitFor();
+  await page.getByRole('button',{name:/Needs input/}).click(); await page.getByRole('heading',{name:'No input needed'}).waitFor();
   await page.getByRole('button',{name:'Routines',exact:true}).click(); await page.getByRole('button',{name:'New routine'}).click();
   await page.locator('#schedule-prompt').fill('Check my KPI dashboard each morning.'); await page.getByRole('button',{name:'Set routine'}).click();
   await page.getByRole('heading',{name:'Check my KPI dashboard each morning.'}).waitFor();
   await page.getByRole('button',{name:'Pause routine'}).click(); await page.getByText('Paused',{exact:true}).waitFor();
+  await page.screenshot({path:join(artifacts,'routines.png'),fullPage:true}); await audit('Routines');
   await page.locator('#file-input').setInputFiles({name:'brief.txt',mimeType:'text/plain',buffer:Buffer.from('Browser assistant brief')});
   await page.getByRole('button',{name:'Files & results'}).click(); await page.getByRole('link',{name:/brief\.txt/}).waitFor();
   await page.locator('#settings-open').click(); await page.locator('#preferences').fill('Based in Jakarta. Prefer morning flights.'); await page.getByRole('button',{name:'Save memory'}).click();
-  await page.getByText('Remembered. Applies to your next run.').waitFor(); await audit('Settings');
+  await page.getByText('Saved. Applies to your next task.').waitFor(); await audit('Settings');
   await page.getByRole('button',{name:'Close settings'}).click(); await page.locator('#new-chat').click();
-  await page.getByRole('button',{name:'Open browser',exact:true}).click();
+  await page.getByRole('button',{name:'Toggle browser panel'}).click();
+  await page.getByRole('button',{name:'Take control',exact:true}).click();
   await page.locator('#browser-image').waitFor(); await page.locator('#navigate-url').fill('https://example.com'); await page.locator('#browser-navigate').evaluate(form=>form.requestSubmit());
   await page.locator('#browser-url').filter({hasText:'https://example.com'}).waitFor({timeout:45_000});
   await page.getByRole('button',{name:'Hand back'}).click();
-  await page.screenshot({path:join(artifacts,'browser.png'),fullPage:true});
+  await page.getByText('Session ready',{exact:true}).waitFor();
+  await page.screenshot({path:join(artifacts,'browser.png'),fullPage:true}); await audit('Browser');
+  await page.getByRole('button',{name:'Expand browser',exact:true}).click();
+  assert.equal(await page.locator('#main').evaluate(node=>node.inert),true);
+  assert.ok((await page.locator('#browser-panel').boundingBox()).width>800);
+  await page.screenshot({path:join(artifacts,'browser-expanded.png'),fullPage:true}); await audit('Expanded browser');
+  await page.getByRole('button',{name:'Shrink browser',exact:true}).click();
+  assert.equal(await page.locator('#main').evaluate(node=>node.inert),false);
+  await page.getByRole('button',{name:'Expand browser',exact:true}).click(); await page.locator('#new-chat').click();
+  assert.equal(await page.locator('#main').evaluate(node=>node.inert),false,'Navigation restores the task workspace');
+  assert.equal(await page.locator('#browser-panel').evaluate(node=>node.inert),true);
+  await page.getByRole('button',{name:'Toggle browser panel'}).click();
+  await page.getByRole('tab',{name:'Live view'}).focus(); await page.keyboard.press('ArrowRight');
+  assert.equal(await page.getByRole('tab',{name:/Activity/}).getAttribute('aria-selected'),'true');
+  await page.keyboard.press('ArrowLeft'); await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#browser-panel').evaluate(node=>node.inert),true);
+  await page.screenshot({path:join(artifacts,'workspace.png'),fullPage:true});
   for (const width of [320,768,1024,1440]) {
-    await page.setViewportSize({width,height:900}); await page.reload(); await page.getByRole('heading',{name:'What can I take off your plate?'}).waitFor();
+    await page.setViewportSize({width,height:900}); await page.reload(); await page.getByRole('heading',{name:'What needs doing?'}).waitFor();
     await page.waitForTimeout(250);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`No horizontal overflow at ${width}`);
     if (width === 320) {
       assert.equal(await page.locator('.sidebar').evaluate(node=>node.inert),true);
       await page.screenshot({path:join(artifacts,'mobile.png'),fullPage:true});
+      await audit('Mobile workspace');
       await page.getByRole('button',{name:'Open navigation'}).click(); await page.getByRole('button',{name:'Routines',exact:true}).click();
-      await page.getByRole('heading',{name:'Ahead of the day.'}).waitFor();
+      await page.getByRole('heading',{name:'Routines',exact:true}).waitFor();
       await audit('Mobile routines');
       await page.getByRole('button',{name:'Open navigation'}).click(); await page.locator('#new-chat').click();
     }
@@ -63,6 +96,6 @@ try {
   await page.keyboard.press('Control+k'); await page.locator('#search-input').fill('example.com'); await page.locator('#search-results').getByRole('button',{name:/Read https:\/\/example.com/}).click();
   await page.locator('#messages').getByText('Read https://example.com and tell me what it says.',{exact:true}).waitFor();
   assert.deepEqual(errors,[]);
-  console.log('PASS: chat, task stop, search, memory, schedules, uploads, real browser takeover, 320/768/1024/1440 layouts, no console errors' + (process.env.SIDEKICK_AXE_PATH ? ', WCAG accessibility checks.' : '.'));
+  console.log('PASS: chat, task filters, search, memory, schedules, uploads, owner reply preservation, real browser takeover/expansion, keyboard tabs, 320/768/1024/1440 layouts, no console errors' + (process.env.SIDEKICK_AXE_PATH ? ', WCAG accessibility checks.' : '.'));
   console.log(`Screenshots: ${artifacts}`);
 } finally { await browser.close(); server.stop(true); await app.close(); rmSync(directory,{recursive:true,force:true}); }

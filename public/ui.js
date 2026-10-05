@@ -1,6 +1,8 @@
 export const $ = selector => document.querySelector(selector);
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 const paths = {
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  expand: '<path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/>',
   chat: '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 10 10 0 0 1-4-.8L3 21l1.8-5a9 9 0 1 1 16.2-4.5Z"/>',
   activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   folder: '<path d="M3 7V5h6l3 3h9v12H3V7Z"/>', search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
@@ -46,5 +48,3 @@ export function richText(text) {
   });
   return container;
 }
-
-export const mascot = `<svg class="mascot" viewBox="0 0 240 180" fill="none" aria-hidden="true"><path d="M25 131c-13-30 4-68 35-87M171 36c23 4 42 20 43 40" stroke="#b9bcb2" stroke-width="1.5" stroke-dasharray="4 6"/><path d="m192 27 4 10 11 2-9 7 1 11-9-7-10 4 4-10-6-9 11 1Z" fill="#ff6946"/><ellipse cx="118" cy="161" rx="53" ry="6" fill="#e6e7df"/><path d="M67 98c-14 0-24 7-23 19 1 9 14 12 26 3m103-28c14-2 28 3 26 15-1 9-16 15-28 10" stroke="#292b28" stroke-width="3" stroke-linecap="round"/><path d="M91 142v15m50-15 6 14" stroke="#292b28" stroke-width="4" stroke-linecap="round"/><path d="M68 74c0-27 20-40 54-40 32 0 52 13 52 40v39c0 27-22 40-53 40-32 0-53-13-53-40V74Z" fill="#b8d7ec" stroke="#292b28" stroke-width="2.5"/><path d="M76 67c5-17 18-24 39-25" stroke="#fffaf1" stroke-width="5" stroke-linecap="round"/><g class="mascot-eyes"><path d="M100 79v14m38-14v14" stroke="#292b28" stroke-width="6" stroke-linecap="round"/></g><path d="M110 108q10 9 21 0" stroke="#292b28" stroke-width="3" stroke-linecap="round"/><path d="M126 140h48l-6-30h-45l3 30Z" fill="#fffaf1" stroke="#292b28" stroke-width="2"/><path d="M123 140h57" stroke="#292b28" stroke-width="3" stroke-linecap="round"/><circle cx="146" cy="125" r="4" fill="#ff6946"/><path d="m41 40 3-12m-11 8 13 3" stroke="#292b28" stroke-width="2" stroke-linecap="round"/><circle cx="205" cy="123" r="3" fill="#292b28"/></svg>`;

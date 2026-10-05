@@ -1,10 +1,19 @@
 import { $, esc, icon, api, handleError } from './ui.js';
 
-let frame = null; let frameBusy = false; let getState; let emptyMarkup;
+let frame = null; let frameBusy = false; let getState; let emptyMarkup; let previouslyControlled = false;
 export function setBrowserVisible(visible) {
   document.body.classList.toggle('browser-closed', !visible);
+  $('#browser-panel').inert = !visible;
   $('#browser-toggle').setAttribute('aria-expanded', String(visible));
+  if (!visible) setBrowserExpanded(false);
   if (visible) void refreshFrame();
+}
+
+function setBrowserExpanded(expanded) {
+  document.body.classList.toggle('browser-expanded',expanded);
+  $('#main').inert = expanded;
+  $('#browser-expand').setAttribute('aria-pressed',String(expanded));
+  $('#browser-expand').setAttribute('aria-label',expanded ? 'Shrink browser' : 'Expand browser');
 }
 
 export async function refreshFrame() {
@@ -40,15 +49,18 @@ export async function refreshFrame() {
 export function updateBrowser(state) {
   const controlled = state.runtime.takeover;
   $('#takeover-button').innerHTML = controlled ? `Hand back ${icon('play')}` : `Take control ${icon('cursor')}`;
-  $('#control-state').textContent = controlled ? 'You’re in control' : state.runtime.activeJobId ? 'Sidekick is working' : state.runtime.browserOpen ? 'Ready when you are' : 'Browser resting';
+  $('#control-state').textContent = controlled ? 'You have control' : state.runtime.activeJobId ? 'Agent has control' : state.runtime.browserOpen ? 'Session ready' : 'Not started';
   $('#takeover-controls').hidden = !controlled; $('#browser-navigate').hidden = !controlled;
   $('#browser-viewport').classList.toggle('controlled', controlled);
-  $('#panel-footer-text').textContent = controlled ? 'Finish your step, then hand the browser back.' : 'One thing at a time. Done properly.';
-  if (controlled) setBrowserVisible(true);
+  $('#panel-footer-text').textContent = controlled ? 'Agent paused until you hand back control' : 'Session stored on your server';
+  $('#browser-toggle').classList.toggle('owner-controls',controlled);
+  $('#browser-toggle>span:last-child').textContent = controlled ? 'You have control' : 'Browser';
+  if (controlled && !previouslyControlled) setBrowserVisible(true);
+  previouslyControlled = controlled;
 }
 
-async function control() {
-  try { await api('/api/browser/takeover', { enabled: !getState()?.runtime.takeover }); await refreshFrame(); }
+async function control(enabled) {
+  try { await api('/api/browser/takeover', { enabled: typeof enabled === 'boolean' ? enabled : !getState()?.runtime.takeover }); setBrowserVisible(true); await refreshFrame(); }
   catch (error) { handleError(error); }
 }
 async function action(input) {
@@ -60,20 +72,26 @@ export function setupBrowser(stateGetter) {
   getState = stateGetter;
   emptyMarkup = $('#browser-viewport').innerHTML;
   $('#browser-toggle').onclick = () => setBrowserVisible(document.body.classList.contains('browser-closed'));
-  $('#browser-close').onclick = () => setBrowserVisible(false);
+  $('#browser-close').onclick = () => { setBrowserVisible(false); $('#browser-toggle').focus(); };
+  $('#browser-expand').onclick = () => setBrowserExpanded(!document.body.classList.contains('browser-expanded'));
   $('#browser-refresh').onclick = refreshFrame;
   $('#takeover-button').onclick = control;
   $('#browser-viewport').addEventListener('click', event => { if (event.target.closest('#open-browser')) void control(); });
-  $('#browser-tab').onclick = () => {
-    $('#browser-content').hidden = false; $('#activity-content').hidden = true;
-    $('#browser-tab').classList.add('selected'); $('#activity-tab').classList.remove('selected');
-    $('#browser-tab').setAttribute('aria-selected','true'); $('#activity-tab').setAttribute('aria-selected','false');
-  };
-  $('#activity-tab').onclick = () => {
-    $('#browser-content').hidden = true; $('#activity-content').hidden = false;
-    $('#activity-tab').classList.add('selected'); $('#browser-tab').classList.remove('selected');
-    $('#browser-tab').setAttribute('aria-selected','false'); $('#activity-tab').setAttribute('aria-selected','true');
-  };
+  const tabs = [$('#browser-tab'),$('#activity-tab')];
+  tabs.forEach((tab,index) => {
+    tab.onclick = () => {
+      $('#browser-content').hidden = index !== 0; $('#activity-content').hidden = index !== 1;
+      tabs.forEach((item,i) => { item.classList.toggle('selected',i === index); item.setAttribute('aria-selected',String(i === index)); item.tabIndex = i === index ? 0 : -1; });
+    };
+    tab.onkeydown = event => {
+      if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+      event.preventDefault(); const next = tabs[event.key === 'Home' ? 0 : event.key === 'End' ? 1 : 1-index]; next.click(); next.focus();
+    };
+  });
+  document.addEventListener('click',event => { if (event.target.closest('[data-takeover]')) void control(true); });
+  document.addEventListener('keydown',event => {
+    if (event.key === 'Escape' && !document.querySelector('dialog[open]') && !document.body.classList.contains('browser-closed')) { setBrowserVisible(false); $('#browser-toggle').focus(); }
+  });
   $('#browser-navigate').onsubmit = event => { event.preventDefault(); void action({ action:'navigate', url:$('#navigate-url').value }); };
   $('#browser-type').onsubmit = event => { event.preventDefault(); const text = $('#browser-text').value; $('#browser-text').value = ''; void action({ action:'type', text }); };
   $('#browser-back').onclick = () => action({ action:'back' });
