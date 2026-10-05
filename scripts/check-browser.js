@@ -31,6 +31,8 @@ try {
   for (const [key,palette] of Object.entries(palettes)) {
     await page.locator(`input[name=palette][value=${key}]`).check();
     assert.equal(await page.locator('#profile-preview').evaluate(node=>node.style.getPropertyValue('--paper')),palette.vars.paper,'Palette updates the preview');
+    assert.equal(await page.locator('.preview-brand .mark-body').evaluate(node=>getComputedStyle(node).fill),await page.locator('.preview-brand .brand-dot').evaluate(node=>getComputedStyle(node).color),'Sidekick preview logo follows its palette accent');
+    assert.equal(await page.locator('.preview-brand .mark-face').evaluate(node=>getComputedStyle(node).fill),await page.locator('.preview-app').evaluate(node=>getComputedStyle(node).backgroundColor),'Sidekick preview face follows its palette surface');
     assert.equal(await page.locator(':root').evaluate(node=>node.style.getPropertyValue('--paper')),palettes.paper.vars.paper,'Unsaved palette does not change the app');
     await audit(`${key} preview`);
   }
@@ -56,7 +58,7 @@ try {
   await page.locator('#customize-dialog').waitFor({state:'hidden'});
   assert.equal(await page.locator('#agent-name').textContent(),'Pip');
   assert.equal(await page.locator('.brand-word').textContent(),'sidekick.','Product branding remains after naming the agent');
-  assert.equal(await page.locator('.brand img').getAttribute('src'),'/mark.svg','Product logo stays distinct from the agent avatar');
+  assert.equal(await page.locator('.brand .product-mark').count(),1,'Product logo stays distinct from the agent avatar');
   assert.equal(await page.title(),'Sidekick · Pip','Browser title includes product and agent');
   assert.equal(await page.locator('#owner-name').textContent(),'Alex');
   assert.equal(app.runtime.state.customization.name,'Pip');
@@ -98,6 +100,7 @@ try {
     await page.locator('[data-custom-step="2"]').click(); await page.locator('#customize-save').click();
     await page.locator('#customize-dialog').waitFor({state:'hidden'});
     assert.equal(await page.locator(':root').evaluate(node=>node.style.getPropertyValue('--paper')),palettes[key].vars.paper);
+    assert.equal(await page.locator('.brand .mark-body').evaluate(node=>getComputedStyle(node).fill),await page.locator('.brand-dot').first().evaluate(node=>getComputedStyle(node).color),'Saved palette colors the Sidekick logo');
     await audit(`${key} workspace`);
   }
   assert.equal(await page.locator('#browser-toggle').getAttribute('aria-expanded'),'false');
@@ -107,6 +110,22 @@ try {
   assert.equal(await page.locator('.welcome em,.scribble,.little-note').count(),0,'Welcome has no decorative type or slogans');
   assert.equal(await page.locator('.routine-summary').isVisible(),false,'No schedule teaser without an actual routine');
   assert.equal(await page.locator('.owner-avatar').evaluate(node=>getComputedStyle(node).backgroundColor),await page.locator('.nav-item.active').evaluate(node=>getComputedStyle(node).backgroundColor),'Owner avatar follows the selected palette');
+  const mascotStage = page.getByRole('button',{name:'Animate agent avatar'});
+  assert.ok((await mascotStage.boundingBox()).width>=170,'Desktop gives the mascot more room');
+  const transform = await page.locator('.mascot').evaluate(node=>getComputedStyle(node).transform);
+  await page.waitForFunction(before=>getComputedStyle(document.querySelector('.mascot')).transform!==before,transform);
+  await mascotStage.hover();
+  assert.equal(await page.locator('.mascot').evaluate(node=>getComputedStyle(node).animationName),'mascot-greeting','Hover changes the mascot reaction');
+  await mascotStage.focus(); await page.keyboard.press('Space');
+  assert.equal(await mascotStage.getAttribute('aria-pressed'),'false');
+  assert.equal(await page.locator('.mascot').evaluate(node=>getComputedStyle(node).animationPlayState),'paused','Keyboard can pause the animation');
+  await page.keyboard.press('Space');
+  assert.equal(await mascotStage.getAttribute('aria-pressed'),'true');
+  await page.mouse.move(400,800);
+  await page.emulateMedia({reducedMotion:'reduce'});
+  assert.equal(await page.locator('.mascot').evaluate(node=>getComputedStyle(node).animationName),'none','Reduced motion keeps the mascot still');
+  assert.equal(await page.locator('.mascot-spark').first().evaluate(node=>getComputedStyle(node).animationName),'none','Reduced motion disables sparkles');
+  await page.emulateMedia({reducedMotion:'no-preference'});
   assert.equal(await page.locator('#prompt').evaluate(node=>getComputedStyle(node).fontSize),'16px');
   await page.screenshot({path:join(artifacts,'desktop.png'),fullPage:true});
   await audit('Welcome');
@@ -237,9 +256,13 @@ const budget = 2000000;
   await page.locator('#messages').getByText('Check the KPI dashboard.',{exact:true}).waitFor();
   await page.getByRole('link',{name:'Sidekick home'}).click();
   await page.locator('.welcome h1').waitFor();
+  await mascotStage.click();
   recentFixture[2].messages.push({id:'desk-update',role:'assistant',text:'The desk comparison is updated.',at:at(1)}); app.runtime.changed();
   await page.waitForFunction(()=>document.querySelector('.recent-conversation')?.dataset.conversation === 'desk');
   assert.deepEqual(await recentRows.evaluateAll(nodes=>nodes.map(node=>node.dataset.conversation)),['desk','hotel','kpi'],'Recent list refreshes when an older conversation gets a reply');
+  assert.equal(await mascotStage.getAttribute('aria-pressed'),'false','Pause survives background updates');
+  assert.equal(await page.locator('.mascot').evaluate(node=>getComputedStyle(node).animationPlayState),'paused');
+  await mascotStage.click();
   app.runtime.state.jobs.push({id:'activity-check',conversationId:'flights',status:'completed',createdAt:at(-120),events:[{id:'event-check',label:'Read page',at:at(2)}],files:[]}); app.runtime.changed();
   await page.waitForFunction(()=>document.querySelector('.recent-conversation')?.dataset.conversation === 'flights');
   assert.deepEqual(await recentRows.evaluateAll(nodes=>nodes.map(node=>node.dataset.conversation)),['flights','desk','hotel'],'Browser activity also updates recency');

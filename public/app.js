@@ -130,6 +130,11 @@ $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(a
 
 document.addEventListener('click', event => {
   const target = event.target.closest('button,a'); if (!target) return;
+  if (target.hasAttribute('data-mascot-toggle')) {
+    const paused = document.body.classList.toggle('mascot-paused');
+    target.setAttribute('aria-pressed',String(!paused));
+    target.title = `${paused ? 'Resume' : 'Pause'} avatar animation`;
+  }
   if (target.dataset.view) navigate(target.dataset.view);
   if (target.dataset.conversation) { $('#search-dialog').close(); navigate('chat',target.dataset.conversation); }
   if (target.hasAttribute('data-new-chat')) navigate();
