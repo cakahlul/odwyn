@@ -38,6 +38,27 @@ try {
   await page.getByText('Connect Codex in Settings to begin.').waitFor();
   await page.screenshot({path:join(artifacts,'conversation.png'),fullPage:true});
   await page.getByRole('button',{name:'Stop',exact:true}).click();
+  const conversation = app.runtime.state.conversations[0];
+  conversation.messages.push({id:'scroll-check',role:'assistant',text:Array.from({length:80},(_,i)=>`History line ${i+1}`).join('\n'),at:new Date().toISOString()});
+  app.runtime.changed();
+  await page.locator('#messages').getByText(/History line 80/).waitFor();
+  for (const width of [1440,320]) {
+    await page.setViewportSize({width,height:900});
+    assert.equal((await page.locator('.topbar').boundingBox()).y,0,'Long chat keeps the header visible');
+    assert.ok(await page.locator('#view').evaluate(node=>node.scrollHeight>node.clientHeight),'Long chat has its own scrollbar');
+    const composerBox = await page.locator('#composer').boundingBox();
+    assert.ok(composerBox.y+composerBox.height <= 900,'Composer stays visible');
+    await page.locator('#view').evaluate(node=>node.scrollTo({top:node.scrollHeight,behavior:'instant'}));
+    const bottom = await page.locator('#view').evaluate(node=>node.scrollTop);
+    await page.locator('#view').hover(); await page.mouse.wheel(0,-500);
+    await page.waitForFunction(bottom=>document.querySelector('#view').scrollTop < bottom-100,bottom);
+  }
+  const readingPosition = await page.locator('#view').evaluate(node=>node.scrollTop);
+  conversation.messages.push({id:'scroll-update',role:'assistant',text:'New reply while reading earlier messages.',at:new Date().toISOString()});
+  app.runtime.changed();
+  await page.getByText('New reply while reading earlier messages.',{exact:true}).waitFor();
+  assert.ok(Math.abs(await page.locator('#view').evaluate(node=>node.scrollTop)-readingPosition)<2,'New replies preserve the reading position');
+  await page.setViewportSize({width:1440,height:960});
   await page.getByRole('button',{name:'Task runs'}).click(); await page.getByText('Stopped',{exact:true}).first().waitFor();
   await page.getByRole('button',{name:'Routines',exact:true}).click(); await page.getByRole('button',{name:'New routine'}).click();
   await page.locator('#schedule-prompt').fill('Check my KPI dashboard each morning.'); await page.getByRole('button',{name:'Set routine'}).click();
