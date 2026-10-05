@@ -40,10 +40,10 @@ export async function refreshFrame() {
 export function updateBrowser(state) {
   const controlled = state.runtime.takeover;
   $('#takeover-button').innerHTML = controlled ? `Hand back ${icon('play')}` : `Take control ${icon('cursor')}`;
-  $('#control-state').textContent = controlled ? 'You’re in control' : state.runtime.activeJobId ? 'Sidekick is working' : state.runtime.browserOpen ? 'Ready when you are' : 'Browser resting';
+  $('#control-state').textContent = controlled ? 'You’re in control' : state.runtime.activeJobId ? `${state.customization?.name || 'Sidekick'} is working` : state.runtime.browserOpen ? 'Browser open' : 'Browser closed';
   $('#takeover-controls').hidden = !controlled; $('#browser-navigate').hidden = !controlled;
   $('#browser-viewport').classList.toggle('controlled', controlled);
-  $('#panel-footer-text').textContent = controlled ? 'Finish your step, then hand the browser back.' : 'One thing at a time. Done properly.';
+  $('#panel-footer-text').textContent = controlled ? 'Finish your step, then hand the browser back.' : 'Browser actions appear in the Activity tab.';
   if (controlled) setBrowserVisible(true);
 }
 

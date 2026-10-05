@@ -25,7 +25,7 @@ const audit = async label => {
   assert.deepEqual(result.violations.map(v=>({id:v.id,impact:v.impact,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))})),[],`${label} accessibility`);
 };
 try {
-  await page.goto(server.url.href); await page.getByRole('heading',{name:'What can I take off your plate?'}).waitFor();
+  await page.goto(server.url.href); await page.getByRole('heading',{name:/^Message /,level:1}).waitFor();
   await page.locator('#customize-dialog[open]').waitFor();
   await page.screenshot({path:join(artifacts,'customize-look.png'),fullPage:true});
   for (const [key,palette] of Object.entries(palettes)) {
@@ -55,6 +55,9 @@ try {
   await page.locator('#customize-save').click();
   await page.locator('#customize-dialog').waitFor({state:'hidden'});
   assert.equal(await page.locator('#agent-name').textContent(),'Pip');
+  assert.equal(await page.locator('.brand-word').textContent(),'sidekick.','Product branding remains after naming the agent');
+  assert.equal(await page.locator('.brand img').getAttribute('src'),'/mark.svg','Product logo stays distinct from the agent avatar');
+  assert.equal(await page.title(),'Sidekick · Pip','Browser title includes product and agent');
   assert.equal(await page.locator('#owner-name').textContent(),'Alex');
   assert.equal(app.runtime.state.customization.name,'Pip');
   assert.equal(app.runtime.state.customization.specialization,'Travel planning & research');
@@ -101,10 +104,13 @@ try {
   const composer = await page.locator('#composer').boundingBox();
   const suggestions = await page.locator('.suggestions').boundingBox();
   assert.ok(composer.width > 900 && composer.y < 480 && composer.y + composer.height < suggestions.y,'Chat is wide and above suggestions');
+  assert.equal(await page.locator('.welcome em,.scribble,.little-note').count(),0,'Welcome has no decorative type or slogans');
+  assert.equal(await page.locator('.routine-summary').isVisible(),false,'No schedule teaser without an actual routine');
+  assert.equal(await page.locator('.owner-avatar').evaluate(node=>getComputedStyle(node).backgroundColor),await page.locator('.nav-item.active').evaluate(node=>getComputedStyle(node).backgroundColor),'Owner avatar follows the selected palette');
   assert.equal(await page.locator('#prompt').evaluate(node=>getComputedStyle(node).fontSize),'16px');
   await page.screenshot({path:join(artifacts,'desktop.png'),fullPage:true});
   await audit('Welcome');
-  await page.getByRole('button',{name:'Go down a rabbit hole'}).click();
+  await page.getByRole('button',{name:'Research a topic'}).click();
   assert.match(await page.locator('#prompt').inputValue(),/Research/);
   await page.locator('#prompt').fill('Read https://example.com and tell me what it says.'); await page.locator('#prompt').press('Enter');
   await page.getByText('Connect Codex in Settings to begin.').waitFor();
@@ -182,7 +188,10 @@ const budget = 2000000;
   await page.getByRole('button',{name:'Routines',exact:true}).click(); await page.getByRole('button',{name:'New routine'}).click();
   await page.locator('#schedule-prompt').fill('Check my KPI dashboard each morning.'); await page.getByRole('button',{name:'Set routine'}).click();
   await page.getByRole('heading',{name:'Check my KPI dashboard each morning.'}).waitFor();
+  assert.equal(await page.locator('#routine-note').textContent(),'Check my KPI dashboard each morning.');
+  assert.equal(await page.locator('.routine-summary').isVisible(),true,'Actual upcoming routine appears in sidebar');
   await page.getByRole('button',{name:'Pause routine'}).click(); await page.getByText('Paused',{exact:true}).waitFor();
+  assert.equal(await page.locator('.routine-summary').isVisible(),false,'Paused routine removes upcoming summary');
   await page.locator('#file-input').setInputFiles({name:'brief.txt',mimeType:'text/plain',buffer:Buffer.from('Browser assistant brief')});
   await page.getByRole('button',{name:'Files & results'}).click(); await page.getByRole('link',{name:/brief\.txt/}).waitFor();
   await page.locator('#settings-open').click(); await page.locator('#preferences').fill('Based in Jakarta. Prefer morning flights.'); await page.getByRole('button',{name:'Save memory'}).click();
@@ -195,7 +204,7 @@ const budget = 2000000;
   await page.getByRole('button',{name:'Hand back'}).click();
   await page.screenshot({path:join(artifacts,'browser.png'),fullPage:true});
   for (const width of [320,768,1024,1440]) {
-    await page.setViewportSize({width,height:900}); await page.reload(); await page.getByRole('heading',{name:'What can I take off your plate?'}).waitFor();
+    await page.setViewportSize({width,height:900}); await page.reload(); await page.getByRole('heading',{name:/^Message /,level:1}).waitFor();
     await page.waitForTimeout(250);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`No horizontal overflow at ${width}`);
     if (width === 320) {
@@ -204,18 +213,47 @@ const budget = 2000000;
       await page.screenshot({path:join(artifacts,'mobile.png'),fullPage:true});
       await audit('Mobile welcome');
       await page.getByRole('button',{name:'Open navigation'}).click(); await page.getByRole('button',{name:'Routines',exact:true}).click();
-      await page.getByRole('heading',{name:'Ahead of the day.'}).waitFor();
+      await page.getByRole('heading',{name:'Routines',exact:true}).waitFor();
       await audit('Mobile routines');
       await page.getByRole('button',{name:'Open navigation'}).click(); await page.locator('#new-chat').click();
     }
   }
   await page.keyboard.press('Control+k'); await page.locator('#search-input').fill('example.com'); await page.locator('#search-results').getByRole('button',{name:/Read https:\/\/example.com/}).click();
   await page.locator('#messages').getByText('Read https://example.com and tell me what it says.',{exact:true}).waitFor();
+  const now = Date.now(), at = seconds => new Date(now+seconds*1000).toISOString();
+  const recentFixture = [
+    {id:'hotel',title:'Hotel shortlist',createdAt:at(-5000),messages:[{id:'hotel-message',role:'user',text:'Revisit the hotel shortlist.',at:at(-8)}]},
+    {id:'flights',title:'Morning flights',createdAt:at(-120),messages:[{id:'flights-message',role:'user',text:'Compare morning flights.',at:at(-120)}]},
+    {id:'desk',title:'Desk comparison',createdAt:at(-3000),messages:[{id:'desk-message',role:'user',text:'Compare standing desks.',at:at(-300)}]},
+    {id:'kpi',title:'KPI dashboard',createdAt:at(-2000),messages:[{id:'kpi-message',role:'user',text:'Check the KPI dashboard.',at:at(-60)}]},
+  ];
+  app.runtime.state.conversations = recentFixture; app.runtime.state.jobs = []; app.runtime.changed();
+  await page.locator('#new-chat').click();
+  const recentRows = page.locator('.recent-conversation');
+  await page.waitForFunction(()=>document.querySelector('.recent-conversation')?.dataset.conversation === 'hotel');
+  assert.deepEqual(await recentRows.evaluateAll(nodes=>nodes.map(node=>node.dataset.conversation)),['hotel','kpi','flights'],'Top three use last activity, not creation order');
+  assert.equal(await page.locator('[data-prompt]').count(),0,'History replaces example tasks');
+  await recentRows.nth(1).focus(); await page.keyboard.press('Enter');
+  await page.locator('#messages').getByText('Check the KPI dashboard.',{exact:true}).waitFor();
+  await page.getByRole('link',{name:'Sidekick home'}).click();
+  await page.locator('.welcome h1').waitFor();
+  recentFixture[2].messages.push({id:'desk-update',role:'assistant',text:'The desk comparison is updated.',at:at(1)}); app.runtime.changed();
+  await page.waitForFunction(()=>document.querySelector('.recent-conversation')?.dataset.conversation === 'desk');
+  assert.deepEqual(await recentRows.evaluateAll(nodes=>nodes.map(node=>node.dataset.conversation)),['desk','hotel','kpi'],'Recent list refreshes when an older conversation gets a reply');
+  app.runtime.state.jobs.push({id:'activity-check',conversationId:'flights',status:'completed',createdAt:at(-120),events:[{id:'event-check',label:'Read page',at:at(2)}],files:[]}); app.runtime.changed();
+  await page.waitForFunction(()=>document.querySelector('.recent-conversation')?.dataset.conversation === 'flights');
+  assert.deepEqual(await recentRows.evaluateAll(nodes=>nodes.map(node=>node.dataset.conversation)),['flights','desk','hotel'],'Browser activity also updates recency');
+  assert.equal(await page.locator('.history-item').first().getAttribute('data-conversation'),'flights','Sidebar uses the same activity order');
+  await page.screenshot({path:join(artifacts,'recent-conversations.png'),fullPage:true}); await audit('Recent conversations');
+  await page.setViewportSize({width:320,height:900});
+  await page.waitForFunction(()=>document.querySelector('.sidebar').getBoundingClientRect().right<=0);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Recent conversations fit mobile');
+  await page.screenshot({path:join(artifacts,'recent-conversations-mobile.png'),fullPage:true}); await audit('Mobile recent conversations');
   app.runtime.state.customization = null; app.runtime.changed();
   await page.reload(); await page.locator('#customize-dialog[open]').waitFor();
   await page.locator('#customize-defaults').click(); await page.locator('#customize-dialog').waitFor({state:'hidden'});
   assert.deepEqual(app.runtime.state.customization,defaults,'Keep defaults completes onboarding');
   assert.deepEqual(errors,[]);
-  console.log('PASS: onboarding, palettes, avatar editor, profile persistence and settings, chat, task stop, search, memory, schedules, uploads, real browser takeover, 320/768/1024/1440 layouts, no console errors' + (process.env.SIDEKICK_AXE_PATH ? ', WCAG accessibility checks.' : '.'));
+  console.log('PASS: recent conversation ordering and updates, upcoming routine summary, onboarding, palettes, avatar editor, profile persistence and settings, chat, task stop, search, memory, schedules, uploads, real browser takeover, 320/768/1024/1440 layouts, no console errors' + (process.env.SIDEKICK_AXE_PATH ? ', WCAG accessibility checks.' : '.'));
   console.log(`Screenshots: ${artifacts}`);
 } finally { await browser.close(); server.stop(true); await app.close(); rmSync(directory,{recursive:true,force:true}); }

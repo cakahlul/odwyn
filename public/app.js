@@ -1,5 +1,5 @@
-import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses } from './ui.js';
-import { renderChat, insertMessages, renderRuns, renderRoutines, renderFiles, renderActivity } from './views.js';
+import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date } from './ui.js';
+import { renderChat, insertMessages, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
 import { setupBrowser, updateBrowser } from './browser-ui.js';
 import { setupCustomization, applyProfile, openCustomization } from './customize.js';
 
@@ -31,19 +31,20 @@ function render() {
   $('#connection-label').textContent = state.runtime.account ? 'Codex connected' : 'Connect Codex';
   $('#connection-button').title = state.runtime.connectionError || (state.runtime.account ? `${state.runtime.account.planType} subscription` : 'Connect your subscription in Settings');
   const conversation = state.conversations.find(c => c.id === conversationId);
-  $('#prompt').placeholder = conversation ? 'Reply or ask a follow-up…' : 'A task, a question, a little thing you keep putting off…';
+  $('#prompt').placeholder = conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { runs:'Task runs', routines:'Routines', files:'Files & results' }[view];
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active',button.dataset.view === view));
-  $('#history').innerHTML = state.conversations.length ? state.conversations.map(c => {
+  $('#history').innerHTML = state.conversations.length ? recentConversations(state).map(c => {
     const job = state.jobs.find(job => job.conversationId === c.id);
     return `<button class="history-item ${c.id === conversationId && view === 'chat' ? 'selected' : ''}" data-conversation="${esc(c.id)}"><span class="history-bullet ${job?.status === 'running' ? 'running' : ''}"></span><span>${esc(c.title)}</span>${job?.status === 'waiting' ? '<span class="needs-you-dot" title="Needs your input">!</span>' : ''}</button>`;
-  }).join('') : '<p class="sidebar-empty">Room for your next idea.</p>';
-  const routines = state.schedules.filter(s => s.enabled);
-  $('#routine-note').textContent = routines.length ? `${routines.length} routine${routines.length === 1 ? '' : 's'} on my clock.` : 'Your time. Your pace.';
-  $('#routine-note-detail').textContent = routines.length ? 'A little ahead of the day.' : "Set a routine. I'll keep track.";
+  }).join('') : '<p class="sidebar-empty">No conversations yet.</p>';
+  const nextRoutine = state.schedules.filter(s=>s.enabled).sort((a,b)=>Date.parse(a.nextAt)-Date.parse(b.nextAt))[0];
+  $('.routine-summary').hidden = !nextRoutine;
+  $('#routine-note').textContent = nextRoutine?.prompt || '';
+  $('#routine-note-detail').textContent = nextRoutine ? `Next: ${date(nextRoutine.nextAt)}` : '';
   $('#composer-area').hidden = view !== 'chat';
-  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, data: view === 'chat' ? [conversation?.messages, state.jobs.filter(j => j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : state.files });
+  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, data: view === 'chat' ? [conversation?.messages || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : state.files });
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
@@ -124,7 +125,7 @@ $('#preferences-form').onsubmit = event => { event.preventDefault(); void perfor
 $('#connect-account').onclick = () => perform(async () => { $('#connect-account').disabled = true; try { await api(state?.runtime.account ? '/api/account/refresh' : '/api/account/login',{}); } finally { $('#connect-account').disabled = false; } });
 $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(async () => {
   await api('/api/schedules',{ prompt:$('#schedule-prompt').value, at:new Date($('#schedule-at').value).toISOString(), intervalMinutes:Number($('#schedule-interval').value), interactionMode:'confirm' });
-  $('#schedule-dialog').close(); navigate('routines'); toast('On my clock.');
+  $('#schedule-dialog').close(); navigate('routines'); toast('Routine scheduled.');
 }); };
 
 document.addEventListener('click', event => {

@@ -10,16 +10,16 @@ export function applyProfile(profile) {
   const p = {...defaults,...profile}, signature = JSON.stringify(p);
   if (signature === lastApplied) return;
   lastApplied = signature; setPalette(document.documentElement,p.palette);
-  $('#agent-name').textContent = p.name === 'Sidekick' ? 'sidekick' : p.name;
-  $('.brand').title = p.name;
+  $('#agent-name').textContent = p.name;
+  $('.agent-identity').title = p.name;
   document.querySelectorAll('[data-agent-avatar]').forEach(node=>node.innerHTML=avatarSvg(p));
   $('#owner-name').textContent = p.ownerName || 'Your space';
   $('.owner-avatar').textContent = Array.from(p.ownerName || 'You')[0].toUpperCase();
-  $('#settings-title').textContent = `Your ${p.name}.`;
+  $('#settings-title').textContent = 'Settings';
   $('#settings-agent-name').textContent = p.name;
   $('#settings-profile-summary').textContent = `${palettes[p.palette].name} · ${choices.tone[p.tone]}`;
   $('label[for="prompt"]').textContent = `What would you like ${p.name} to do?`;
-  document.title = `${p.name} — your personal +1`;
+  document.title = p.name === 'Sidekick' ? 'Sidekick' : `Sidekick · ${p.name}`;
   $('link[rel="icon"]').href = `data:image/svg+xml,${encodeURIComponent(avatarSvg(p))}`;
   $('meta[name="theme-color"]').content = palettes[p.palette].vars.paper;
 }
@@ -29,7 +29,8 @@ function preview() {
   setPalette($('#profile-preview'),p.palette);
   $('#preview-brand-name').textContent = $('#preview-agent-name').textContent = p.name;
   $('#preview-owner').textContent = p.ownerName || 'You';
-  $('#preview-specialty').textContent = p.specialization || 'A little help goes a long way.';
+  $('#preview-heading').textContent = `Message ${p.name}`;
+  $('#preview-specialty').textContent = p.specialization || 'Ask a question or give a task.';
   $('#preview-reply').textContent = sampleReply(p);
   for (const id of ['preview-brand-avatar','preview-message-avatar','preview-mascot']) $(`#${id}`).innerHTML = avatarSvg(p);
   document.querySelectorAll('#avatar-choices label').forEach(label=>label.querySelector('span').innerHTML=avatarSvg({...p,shape:label.querySelector('input').value}));
@@ -49,7 +50,7 @@ export function openCustomization(onboarding = false) {
   firstRun = onboarding; const draft = {...defaults,...getState()?.customization};
   $('#settings-dialog').close(); $('#customize-form').reset();
   for (const [key,value] of Object.entries(draft)) $('#customize-form').elements.namedItem(key).value = value;
-  $('#customize-eyebrow').textContent = firstRun ? 'WELCOME TO YOUR SPACE' : 'YOUR KIND OF SIDEKICK';
+  $('#customize-eyebrow').textContent = firstRun ? 'FIRST-TIME SETUP' : 'APPEARANCE & PERSONALITY';
   $('#customize-save').childNodes[0].textContent = firstRun ? 'Save & start' : 'Save changes';
   $('#customize-defaults').hidden = !firstRun; $('#customize-status').textContent = '';
   showStep(0); preview(); $('#customize-dialog').showModal();
