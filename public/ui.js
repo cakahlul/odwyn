@@ -1,3 +1,5 @@
+import { Marked, Renderer } from '/vendor/marked.js';
+
 export const $ = selector => document.querySelector(selector);
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 const paths = {
@@ -29,21 +31,24 @@ let toastTimer;
 export function toast(message) { const node = $('#toast'); node.textContent = message; node.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { node.hidden = true; }, 5000); }
 export function handleError(error) { toast(error.message || 'Something went wrong. Try again.'); }
 
+function answerLink(href, label, title = '') {
+  try { if (!['http:','https:','mailto:'].includes(new URL(href).protocol)) return label; }
+  catch { return label; }
+  return `<a href="${esc(href)}" title="${esc(title)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+}
+
+const markdown = new Marked({ gfm:true, breaks:true, renderer: {
+  // Replies are untrusted: escape raw HTML and allow only safe link protocols.
+  html({ text }) { return esc(text); },
+  link({ href, title, tokens }) { return answerLink(href,this.parser.parseInline(tokens),title); },
+  image({ href, text, title }) { return answerLink(href,esc(text || 'View image'),title); },
+  heading({ depth, tokens }) { const level = Math.min(depth+1,6); return `<h${level}>${this.parser.parseInline(tokens)}</h${level}>`; },
+  table(token) { return `<div class="table-scroll" tabindex="0" role="region" aria-label="Comparison table">${Renderer.prototype.table.call(this,token)}</div>`; },
+} });
+
 export function richText(text) {
   const container = document.createElement('div'); container.className = 'message-text';
-  const blocks = String(text || '').split(/```(?:\w+)?\n?([\s\S]*?)```/g);
-  blocks.forEach((block, index) => {
-    if (index % 2) { const pre = document.createElement('pre'); const code = document.createElement('code'); code.textContent = block; pre.append(code); container.append(pre); return; }
-    const paragraph = document.createElement('div');
-    let offset = 0;
-    for (const match of block.matchAll(/\*\*([^*]+)\*\*|`([^`]+)`|https?:\/\/[^\s<>]+/g)) {
-      paragraph.append(document.createTextNode(block.slice(offset, match.index)));
-      if (match[1] || match[2]) { const node = document.createElement(match[1] ? 'strong' : 'code'); node.textContent = match[1] || match[2]; paragraph.append(node); }
-      else { const link = document.createElement('a'); link.href = match[0].replace(/[).,;]+$/, ''); link.textContent = match[0]; link.target = '_blank'; link.rel = 'noopener noreferrer'; paragraph.append(link); }
-      offset = match.index + match[0].length;
-    }
-    paragraph.append(document.createTextNode(block.slice(offset))); container.append(paragraph);
-  });
+  container.innerHTML = markdown.parse(String(text || ''));
   return container;
 }
 

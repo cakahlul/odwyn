@@ -28,6 +28,7 @@ function render() {
   $('#connection-label').textContent = state.runtime.account ? 'Codex connected' : 'Connect Codex';
   $('#connection-button').title = state.runtime.connectionError || (state.runtime.account ? `${state.runtime.account.planType} subscription` : 'Connect your subscription in Settings');
   const conversation = state.conversations.find(c => c.id === conversationId);
+  $('#prompt').placeholder = conversation ? 'Reply or ask a follow-up…' : 'A task, a question, a little thing you keep putting off…';
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { runs:'Task runs', routines:'Routines', files:'Files & results' }[view];
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active',button.dataset.view === view));

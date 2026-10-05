@@ -45,6 +45,7 @@ try {
   for (const width of [1440,320]) {
     await page.setViewportSize({width,height:900});
     assert.equal((await page.locator('.topbar').boundingBox()).y,0,'Long chat keeps the header visible');
+    assert.ok(await page.locator('#view').evaluate(node=>node.clientHeight>innerHeight*.72),'Conversation gets most of the screen');
     assert.ok(await page.locator('#view').evaluate(node=>node.scrollHeight>node.clientHeight),'Long chat has its own scrollbar');
     const composerBox = await page.locator('#composer').boundingBox();
     assert.ok(composerBox.y+composerBox.height <= 900,'Composer stays visible');
@@ -59,6 +60,52 @@ try {
   await page.getByText('New reply while reading earlier messages.',{exact:true}).waitFor();
   assert.ok(Math.abs(await page.locator('#view').evaluate(node=>node.scrollTop)-readingPosition)<2,'New replies preserve the reading position');
   await page.setViewportSize({width:1440,height:960});
+  const answer = `## Your weekend shortlist
+
+Three places near **Summarecon Mall Serpong**, each with a different reason to go.
+
+| Hotel | Best for | Why choose it |
+| --- | --- | --- |
+| [Atria Hotel Gading Serpong](https://www.parador-hotels.com/atria-hotel-gading-serpong) | Mall visits & an easy weekend | Pool, gym and a relaxed base near the mall. |
+| [Episode Gading Serpong](https://episodegadingserpong.jhlcollections.com/) | A family staycation | Distinctive rooms and a [staycation package](https://episodegadingserpong.jhlcollections.com/offers/). |
+| [JHL Solitaire](https://jhlsolitairegadingserpong.jhlcollections.com/) | A little splurge | Larger rooms, spa experiences and time by the pool. |
+
+### Before you book
+
+- Confirm the final weekend rate.
+- Check breakfast and cancellation terms.
+
+> My pick: Atria for convenience; Episode for family time.
+
+Use \`confirm\` mode for booking.
+
+\`\`\`js
+const budget = 2000000;
+\`\`\``;
+  conversation.messages = [{id:'formatted-answer',role:'assistant',text:answer,at:new Date().toISOString()}];
+  app.runtime.changed();
+  await page.getByRole('heading',{name:'Your weekend shortlist'}).waitFor();
+  const rendered = page.locator('.message-text');
+  assert.equal(await rendered.locator('tbody tr').count(),3);
+  assert.equal(await rendered.getByRole('link',{name:'Atria Hotel Gading Serpong'}).getAttribute('href'),'https://www.parador-hotels.com/atria-hotel-gading-serpong');
+  assert.equal(await rendered.locator('ul li').count(),2);
+  assert.match(await rendered.locator('pre code').textContent(),/const budget = 2000000/);
+  assert.ok(await page.evaluate(async()=>{
+    const {richText} = await import('/ui.js');
+    const node = richText('<img src=x onerror="alert(1)">\n\n[Unsafe](javascript:alert(1))\n\n![Remote image](https://example.com/tracking.png)\n\n[Encoded](&#106;avascript:alert(1))\n\n<svg onload="alert(1)"></svg>');
+    return !node.querySelector('img,script,iframe,svg,[onerror],[onload],a[href^="javascript:"]');
+  }),'Markdown cannot inject HTML, unsafe links or remote images');
+  await page.locator('#view').evaluate(node=>node.scrollTo({top:0,behavior:'instant'}));
+  await page.screenshot({path:join(artifacts,'answer.png'),fullPage:true});
+  await audit('Formatted answer');
+  await page.setViewportSize({width:320,height:900});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Table stays inside the mobile conversation');
+  await page.locator('.table-scroll').focus(); await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(()=>document.querySelector('.table-scroll').scrollLeft>0);
+  await page.screenshot({path:join(artifacts,'answer-mobile.png'),fullPage:true});
+  await page.setViewportSize({width:1440,height:960});
+  conversation.messages.unshift({id:'original-prompt',role:'user',text:'Read https://example.com and tell me what it says.',at:new Date().toISOString()});
+  app.runtime.changed();
   await page.getByRole('button',{name:'Task runs'}).click(); await page.getByText('Stopped',{exact:true}).first().waitFor();
   await page.getByRole('button',{name:'Routines',exact:true}).click(); await page.getByRole('button',{name:'New routine'}).click();
   await page.locator('#schedule-prompt').fill('Check my KPI dashboard each morning.'); await page.getByRole('button',{name:'Set routine'}).click();
