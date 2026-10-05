@@ -15,6 +15,7 @@ mobile.addEventListener('change', () => setNavigation(false)); setNavigation(fal
 
 function navigate(next = 'chat', id = null) {
   view = next; conversationId = id; signature = ''; render();
+  $('#main').scrollTop = 0;
   setNavigation(false);
   if (view === 'chat') $('#prompt').focus();
   history.replaceState(null, '', id ? `#chat/${id}` : `#${view}`);
@@ -28,6 +29,7 @@ function render() {
   $('#connection-label').textContent = state.runtime.account ? 'Codex connected' : 'Connect Codex';
   $('#connection-button').title = state.runtime.connectionError || (state.runtime.account ? `${state.runtime.account.planType} subscription` : 'Connect your subscription in Settings');
   const conversation = state.conversations.find(c => c.id === conversationId);
+  $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { runs:'Task runs', routines:'Routines', files:'Files & results' }[view];
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active',button.dataset.view === view));
   $('#history').innerHTML = state.conversations.length ? state.conversations.map(c => {
@@ -114,7 +116,7 @@ $('#composer').onsubmit = async event => {
   busy = false; render();
 };
 $('#prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#composer').requestSubmit(); } };
-$('#prompt').oninput = () => { $('#prompt').style.height = 'auto'; $('#prompt').style.height = Math.min($('#prompt').scrollHeight,190) + 'px'; };
+$('#prompt').oninput = () => { $('#prompt').style.height = 'auto'; $('#prompt').style.height = Math.min($('#prompt').scrollHeight,260) + 'px'; };
 $('#preferences-form').onsubmit = event => { event.preventDefault(); void perform(async () => { await api('/api/preferences',{ text:$('#preferences').value },'PUT'); $('#settings-status').textContent = 'Remembered. Applies to your next run.'; }); };
 $('#connect-account').onclick = () => perform(async () => { $('#connect-account').disabled = true; try { await api(state?.runtime.account ? '/api/account/refresh' : '/api/account/login',{}); } finally { $('#connect-account').disabled = false; } });
 $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(async () => {

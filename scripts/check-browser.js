@@ -25,12 +25,18 @@ const audit = async label => {
 };
 try {
   await page.goto(server.url.href); await page.getByRole('heading',{name:'What can I take off your plate?'}).waitFor();
+  assert.equal(await page.locator('#browser-toggle').getAttribute('aria-expanded'),'false');
+  const composer = await page.locator('#composer').boundingBox();
+  const suggestions = await page.locator('.suggestions').boundingBox();
+  assert.ok(composer.width > 900 && composer.y < 480 && composer.y + composer.height < suggestions.y,'Chat is wide and above suggestions');
+  assert.equal(await page.locator('#prompt').evaluate(node=>getComputedStyle(node).fontSize),'16px');
   await page.screenshot({path:join(artifacts,'desktop.png'),fullPage:true});
   await audit('Welcome');
   await page.getByRole('button',{name:'Go down a rabbit hole'}).click();
   assert.match(await page.locator('#prompt').inputValue(),/Research/);
   await page.locator('#prompt').fill('Read https://example.com and tell me what it says.'); await page.locator('#prompt').press('Enter');
   await page.getByText('Connect Codex in Settings to begin.').waitFor();
+  await page.screenshot({path:join(artifacts,'conversation.png'),fullPage:true});
   await page.getByRole('button',{name:'Stop',exact:true}).click();
   await page.getByRole('button',{name:'Task runs'}).click(); await page.getByText('Stopped',{exact:true}).first().waitFor();
   await page.getByRole('button',{name:'Routines',exact:true}).click(); await page.getByRole('button',{name:'New routine'}).click();
@@ -42,6 +48,7 @@ try {
   await page.locator('#settings-open').click(); await page.locator('#preferences').fill('Based in Jakarta. Prefer morning flights.'); await page.getByRole('button',{name:'Save memory'}).click();
   await page.getByText('Remembered. Applies to your next run.').waitFor(); await audit('Settings');
   await page.getByRole('button',{name:'Close settings'}).click(); await page.locator('#new-chat').click();
+  await page.getByRole('button',{name:'Toggle browser panel'}).click();
   await page.getByRole('button',{name:'Open browser',exact:true}).click();
   await page.locator('#browser-image').waitFor(); await page.locator('#navigate-url').fill('https://example.com'); await page.locator('#browser-navigate').evaluate(form=>form.requestSubmit());
   await page.locator('#browser-url').filter({hasText:'https://example.com'}).waitFor({timeout:45_000});
@@ -53,7 +60,9 @@ try {
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`No horizontal overflow at ${width}`);
     if (width === 320) {
       assert.equal(await page.locator('.sidebar').evaluate(node=>node.inert),true);
+      assert.equal(await page.locator('#prompt').evaluate(node=>getComputedStyle(node).fontSize),'16px');
       await page.screenshot({path:join(artifacts,'mobile.png'),fullPage:true});
+      await audit('Mobile welcome');
       await page.getByRole('button',{name:'Open navigation'}).click(); await page.getByRole('button',{name:'Routines',exact:true}).click();
       await page.getByRole('heading',{name:'Ahead of the day.'}).waitFor();
       await audit('Mobile routines');
