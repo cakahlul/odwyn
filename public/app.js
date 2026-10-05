@@ -23,8 +23,7 @@ function navigate(next = 'chat', id = null) {
 
 function render() {
   if (!state) return;
-  const activeCount = state.jobs.filter(job => activeStatuses.includes(job.status)).length;
-  $('#run-count').textContent = activeCount;
+  $('#run-status').hidden = !state.jobs.some(job => activeStatuses.includes(job.status));
   $('.connection').classList.toggle('connected', !!state.runtime.account);
   $('#connection-label').textContent = state.runtime.account ? 'Codex connected' : 'Connect Codex';
   $('#connection-button').title = state.runtime.connectionError || (state.runtime.account ? `${state.runtime.account.planType} subscription` : 'Connect your subscription in Settings');
