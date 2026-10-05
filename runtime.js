@@ -75,7 +75,7 @@ export class Runtime {
       conversation.threadId = response.thread.id; job.threadId = response.thread.id; this.changed();
       const fileContext = this.state.files.filter(file => file.kind === 'upload').slice(-20).map(file => ({ id: file.id, name: file.name }));
       const recovery = job.recovering ? '\nThis run resumes interrupted work. Read the current browser and check which steps already happened. Do not repeat a submission, purchase, send or delete without verifying and getting authorization.' : '';
-      const turn = await this.codex.request('turn/start', { threadId: job.threadId, input: [{ type: 'text', text: job.prompt + recovery + (fileContext.length ? `\nAvailable owner-uploaded files: ${JSON.stringify(fileContext)}` : '') }], sandboxPolicy: { type: 'readOnly', networkAccess: false }, approvalPolicy: 'on-request' });
+      const turn = await this.codex.request('turn/start', { threadId: job.threadId, effort: 'medium', input: [{ type: 'text', text: job.prompt + recovery + (fileContext.length ? `\nAvailable owner-uploaded files: ${JSON.stringify(fileContext)}` : '') }], sandboxPolicy: { type: 'readOnly', networkAccess: false }, approvalPolicy: 'on-request' });
       if (this.active !== job) return;
       job.turnId ||= turn.turn.id; this.changed();
     } catch (error) { if (this.active === job) this.finish(job, 'failed', error.message); }

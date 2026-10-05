@@ -23,10 +23,11 @@ test('real tool protocol pauses interactions until exact approval and resumes th
   const dir = mkdtempSync(join(tmpdir(), 'sidekick-runtime-'));
   const store = openStore(dir); const codex = new FakeCodex(); const browserCalls = [];
   const browser = { last: { url: 'https://example.com', elements: [{ ref: '0', label: 'Submit' }] }, action: async args => { browserCalls.push(args); return { text: 'Done', elements: [] }; } };
-  const runtime = new Runtime({ store, codex, browser, workspace: dir });
+  const runtime = new Runtime({ store, codex, browser, workspace: dir, model: 'gpt-6.1-sol' });
   await runtime.refreshAccount();
   const job = runtime.submit({ prompt: 'Fill this form' });
   await runtime.drain();
+  expect(codex.calls.find(c => c.method === 'thread/start').params.model).toBe('gpt-6.1-sol');
   const handle = runtime.handleRequest({ id: 77, method: 'item/tool/call', params: { threadId: 'thread-test', turnId: 'turn-test', tool: 'sidekick_browser', arguments: { action: 'click', ref: '0', reason: 'Submit the requested form' } } });
   await Bun.sleep(10);
   expect(job.status).toBe('waiting'); expect(browserCalls).toHaveLength(0);
@@ -40,6 +41,7 @@ test('real tool protocol pauses interactions until exact approval and resumes th
   const next = runtime.submit({ prompt: 'What happened?', conversationId: job.conversationId });
   await runtime.drain();
   expect(codex.calls.some(c => c.method === 'thread/resume' && c.params.threadId === 'thread-test')).toBe(true);
+  expect(codex.calls.filter(c => c.method === 'turn/start').map(c => c.params.effort)).toEqual(['medium','medium']);
   await runtime.cancel(next.id); runtime.close(); store.close(); rmSync(dir, { recursive: true });
 });
 

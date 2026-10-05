@@ -12,7 +12,7 @@ export class Codex extends EventEmitter {
   start() {
     if (this.ready) return this.ready;
     mkdirSync(this.home, { recursive: true, mode: 0o700 }); mkdirSync(this.workspace, { recursive: true, mode: 0o700 });
-    const args = ['app-server', '--listen', 'stdio://', '-c', 'project_doc_max_bytes=0', '-c', 'web_search="disabled"'];
+    const args = ['app-server', '--listen', 'stdio://', '-c', `model=${JSON.stringify(process.env.SIDEKICK_MODEL || 'gpt-6.1-sol')}`, '-c', 'model_reasoning_effort="medium"', '-c', 'project_doc_max_bytes=0', '-c', 'web_search="disabled"'];
     for (const feature of ['shell_tool','unified_exec','apps','plugins','multi_agent','code_mode','view_image','skill_search','skill_mcp_dependency_install','shell_snapshot','sleep_tool']) args.push('-c', `features.${feature}=false`);
     // Also suppress MCP servers when an explicitly supplied home has existing integrations.
     try { for (const name of Object.keys(Bun.TOML.parse(readFileSync(join(this.home, 'config.toml'), 'utf8')).mcp_servers || {})) args.push('-c', `mcp_servers.${name}.enabled=false`); } catch {}

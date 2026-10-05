@@ -86,7 +86,7 @@ Chromium installation on Linux follows [Playwright's browser instructions](https
 | `SIDEKICK_ORIGIN` | Local loopback origin, or your exact public HTTPS origin |
 | `SIDEKICK_DATA_DIR` | Project's `data` directory |
 | `SIDEKICK_CODEX_HOME` | `data/codex`; dedicated subscription sign-in and threads |
-| `SIDEKICK_MODEL` | `gpt-6.1-sol`; use a model available to your account |
+| `SIDEKICK_MODEL` | `gpt-6.1-sol` (Sol 6.1), with medium reasoning on every turn |
 | `SIDEKICK_BROWSER_EXECUTABLE` | Optional absolute Chromium executable path |
 | `SIDEKICK_HEADLESS` | `true`; `false` requires a desktop/display |
 | `BUN_PATH` | Optional absolute Bun interpreter path when starting PM2 |
