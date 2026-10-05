@@ -11,7 +11,7 @@ export function openStore(directory) {
   chmodSync(filename, 0o600);
   db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL)');
   const row = db.query('SELECT value FROM state WHERE id=1').get();
-  const state = { conversations: [], jobs: [], schedules: [], files: [], preferences: '', ...JSON.parse(row?.value || '{}') };
+  const state = { conversations: [], jobs: [], schedules: [], files: [], preferences: '', customization: null, ...JSON.parse(row?.value || '{}') };
   const query = db.query('INSERT INTO state VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET value=excluded.value');
   return { state, save: () => query.run(JSON.stringify(state)), close: () => db.close() };
 }

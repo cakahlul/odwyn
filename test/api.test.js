@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { createApp } from '../server.js';
+import { defaults } from '../public/profile.js';
+import { openStore } from '../store.js';
 
 test('API protects files and browser control, persists uploads and validates schedules', async () => {
   const directory = mkdtempSync(join(tmpdir(),'sidekick-api-'));
@@ -16,6 +18,14 @@ test('API protects files and browser control, persists uploads and validates sch
   try {
     expect((await app.fetch(new Request('https://assistant.test/api/state'))).status).toBe(401);
     expect((await request('/api/jobs','POST',{prompt:'Read a website'},{origin:'https://evil.test'})).status).toBe(403);
+    const profile = {...defaults,name:'Pip',ownerName:'Alex',specialization:'Travel planning',palette:'harbor',shape:'cat',tone:'crisp'};
+    expect((await request('/api/customization','PUT',profile,{origin:'https://evil.test'})).status).toBe(403);
+    expect((await request('/api/customization','PUT',profile)).status).toBe(200);
+    expect((await request('/api/customization','PUT',{...profile,bodyColor:'red" onload="alert(1)'})).status).toBe(400);
+    expect((await request('/api/customization','PUT',{...profile,name:'',palette:'__proto__'})).status).toBe(400);
+    expect((await request('/api/customization','PUT',{...profile,specialization:'x'.repeat(501)})).status).toBe(400);
+    expect((await (await request('/api/state')).json()).customization).toEqual(profile);
+    const persisted = openStore(directory); expect(persisted.state.customization).toEqual(profile); persisted.close();
     expect((await request('/api/browser/action','POST',{action:'navigate',url:'https://example.com'})).status).toBe(409);
     const job = await (await request('/api/jobs','POST',{prompt:'Read a website'})).json();
     expect(job.status).toBe('queued');

@@ -6,6 +6,7 @@ import { openStore } from './store.js';
 import { Codex } from './codex.js';
 import { Browser } from './browser.js';
 import { Runtime } from './runtime.js';
+import { validateProfile } from './public/profile.js';
 
 const root = import.meta.dir;
 const headers = {
@@ -85,6 +86,10 @@ export function createApp(options = {}) {
           if (req.method === 'DELETE') store.state.schedules.splice(index, 1);
           else { const input = await json(req); if (typeof input.enabled !== 'boolean') throw new Error('Choose enabled or paused.'); store.state.schedules[index].enabled = input.enabled; }
           runtime.changed(); return response({ ok: true });
+        }
+        if (pathname === '/api/customization' && req.method === 'PUT') {
+          store.state.customization = validateProfile(await json(req));
+          runtime.changed(); return response(store.state.customization);
         }
         if (pathname === '/api/preferences' && req.method === 'PUT') {
           const input = await json(req); if (typeof input.text !== 'string' || input.text.length > 8000) throw new Error('Memory must be at most 8,000 characters.');

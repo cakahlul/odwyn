@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../store.js';
 import { Runtime } from '../runtime.js';
+import { defaults } from '../public/profile.js';
 
 class FakeCodex extends EventEmitter {
   child = {}; calls = []; replies = [];
@@ -22,12 +23,15 @@ class FakeCodex extends EventEmitter {
 test('real tool protocol pauses interactions until exact approval and resumes the same thread', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sidekick-runtime-'));
   const store = openStore(dir); const codex = new FakeCodex(); const browserCalls = [];
+  store.state.customization = {...defaults,name:'Pip',ownerName:'Alex',specialization:'Travel planning',tone:'crisp'};
   const browser = { last: { url: 'https://example.com', elements: [{ ref: '0', label: 'Submit' }] }, action: async args => { browserCalls.push(args); return { text: 'Done', elements: [] }; } };
   const runtime = new Runtime({ store, codex, browser, workspace: dir, model: 'gpt-6.1-sol' });
   await runtime.refreshAccount();
   const job = runtime.submit({ prompt: 'Fill this form' });
   await runtime.drain();
   expect(codex.calls.find(c => c.method === 'thread/start').params.model).toBe('gpt-6.1-sol');
+  const identity = codex.calls.find(c => c.method === 'thread/start').params.developerInstructions;
+  expect(identity).toContain('"Pip"'); expect(identity).toContain('"Alex"'); expect(identity).toContain('Travel planning'); expect(identity).toContain('Concise and direct');
   const handle = runtime.handleRequest({ id: 77, method: 'item/tool/call', params: { threadId: 'thread-test', turnId: 'turn-test', tool: 'sidekick_browser', arguments: { action: 'click', ref: '0', reason: 'Submit the requested form' } } });
   await Bun.sleep(10);
   expect(job.status).toBe('waiting'); expect(browserCalls).toHaveLength(0);
@@ -38,9 +42,11 @@ test('real tool protocol pauses interactions until exact approval and resumes th
   codex.emit('notification', { method: 'item/completed', params: { threadId: 'thread-test', turnId: 'turn-test', item: { id: 'message-1', type: 'agentMessage', text: 'Form submitted.', phase: 'final_answer' } } });
   codex.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-test', turn: { id: 'turn-test', status: 'completed' } } });
   expect(job.status).toBe('completed');
+  store.state.customization = {...store.state.customization,name:'Momo',tone:'playful'};
   const next = runtime.submit({ prompt: 'What happened?', conversationId: job.conversationId });
   await runtime.drain();
   expect(codex.calls.some(c => c.method === 'thread/resume' && c.params.threadId === 'thread-test')).toBe(true);
+  expect(codex.calls.find(c => c.method === 'thread/resume').params.developerInstructions).toContain('"Momo"');
   expect(codex.calls.filter(c => c.method === 'turn/start').map(c => c.params.effort)).toEqual(['medium','medium']);
   await runtime.cancel(next.id); runtime.close(); store.close(); rmSync(dir, { recursive: true });
 });
