@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { createApp } from '../server.js';
 import { defaults } from '../public/profile.js';
-import { openStore } from '../store.js';
+import { openStore, createJob } from '../store.js';
 
 test('API protects files and browser control, persists uploads and validates schedules', async () => {
-  const directory = mkdtempSync(join(tmpdir(),'sidekick-api-'));
+  const directory = mkdtempSync(join(tmpdir(),'odwyn-api-'));
   const codex = new EventEmitter(); codex.request = async () => ({ account:null }); codex.stop = () => {};
   const browser = { frame:async () => null, close:async () => {}, serial:async fn => fn(), start:async () => {} };
   const app = createApp({ directory, user:'owner', password:'test-password-long-enough', origin:'https://assistant.test', codex, browser });
@@ -17,6 +17,10 @@ test('API protects files and browser control, persists uploads and validates sch
   const request = (path, method='GET', body, extra={}) => app.fetch(new Request(`https://assistant.test${path}`, { method, headers:{...headers,...extra}, ...(body ? { body:JSON.stringify(body) } : {}) }));
   try {
     expect((await app.fetch(new Request('https://assistant.test/api/state'))).status).toBe(401);
+    expect((await app.fetch(new Request('https://assistant.test/api/images?url=http://127.0.0.1/image'))).status).toBe(401);
+    expect((await request('/api/images?url=http://127.0.0.1/image')).status).toBe(400);
+    expect((await request('/api/images')).status).toBe(400);
+    expect((await request('/api/images?url=https://example.com/image','GET',null,{'sec-fetch-site':'cross-site'})).status).toBe(403);
     expect((await request('/api/jobs','POST',{prompt:'Read a website'},{origin:'https://evil.test'})).status).toBe(403);
     const profile = {...defaults,name:'Pip',ownerName:'Alex',specialization:'Travel planning',palette:'harbor',shape:'cat',tone:'crisp'};
     expect((await request('/api/customization','PUT',profile,{origin:'https://evil.test'})).status).toBe(403);
@@ -26,6 +30,51 @@ test('API protects files and browser control, persists uploads and validates sch
     expect((await request('/api/customization','PUT',{...profile,specialization:'x'.repeat(501)})).status).toBe(400);
     expect((await (await request('/api/state')).json()).customization).toEqual(profile);
     const persisted = openStore(directory); expect(persisted.state.customization).toEqual(profile); persisted.close();
+    const primary = app.runtime.state.agents[0];
+    const added = await (await request('/api/agents','POST',{...profile,name:'Scout'})).json();
+    expect(added.customization.name).toBe('Scout');
+    expect((await request(`/api/customization?agentId=${added.id}`,'PUT',{...profile,name:'Researcher'})).status).toBe(200);
+    expect(app.runtime.state.customization.name).toBe('Pip');
+    const otherJob = await (await request('/api/jobs','POST',{prompt:'Separate chat',agentId:added.id})).json();
+    expect(otherJob.agentId).toBe(added.id);
+    const shared = await request('/api/jobs','POST',{prompt:'Continue with Pip',agentId:primary.id,conversationId:otherJob.conversationId});
+    expect(shared.status).toBe(201);
+    const sharedJob = await shared.json(); expect(sharedJob.agentId).toBe(primary.id); expect(sharedJob.conversationId).toBe(otherJob.conversationId);
+    await request(`/api/jobs/${sharedJob.id}/cancel`,'POST',{});
+    expect((await request(`/api/conversations/${otherJob.conversationId}`,'PATCH',{title:'Travel plans'},{origin:'https://evil.test'})).status).toBe(403);
+    expect((await request(`/api/conversations/${otherJob.conversationId}`,'PATCH',{title:'  Travel plans  '})).status).toBe(200);
+    for (const title of ['', 'x'.repeat(71), 'Bad\nname']) expect((await request(`/api/conversations/${otherJob.conversationId}`,'PATCH',{title})).status).toBe(400);
+    expect(app.runtime.state.conversations.find(c=>c.id===otherJob.conversationId).title).toBe('Travel plans');
+    expect((await request('/api/conversations/00000000-0000-0000-0000-000000000000','PATCH',{title:'Missing'})).status).toBe(404);
+
+    expect((await request('/api/jobs','POST',{prompt:'Unknown agent',agentId:'missing'})).status).toBe(400);
+    await request(`/api/jobs/${otherJob.id}/cancel`,'POST',{});
+    const creates = await Promise.all(Array.from({length:5},(_,i) => request('/api/agents','POST',{...profile,name:`Agent ${i}`})));
+    expect(creates.filter(r => r.status===201)).toHaveLength(3);
+    expect(creates.filter(r => r.status===400)).toHaveLength(2);
+    expect((await request('/api/agents','POST',profile)).status).toBe(400);
+    expect(app.runtime.state.agents).toHaveLength(5);
+    const savedAgents = openStore(directory); expect(savedAgents.state.agents).toHaveLength(5); expect(savedAgents.state.agents[1].customization.name).toBe('Researcher'); savedAgents.close();
+    const members = [primary.id,added.id];
+    expect((await request('/api/rooms','POST',{title:'Planning room',memberIds:members},{origin:'https://evil.test'})).status).toBe(403);
+    expect((await request('/api/rooms','POST',{title:'Bad room',memberIds:[primary.id]})).status).toBe(400);
+    const roomResponse = await request('/api/rooms','POST',{title:'Planning room',memberIds:members});
+    expect(roomResponse.status).toBe(201); const room = await roomResponse.json();
+    expect((await request(`/api/rooms/${room.id}`,'PATCH',{title:'Weekend planning',memberIds:members})).status).toBe(200);
+    expect((await request(`/api/rooms/${room.id}/messages`,'POST',{prompt:'Discuss options'})).status).toBe(400);
+    expect((await request('/api/jobs','POST',{conversationId:room.id,agentId:app.runtime.state.agents[2].id,prompt:'Not a participant'})).status).toBe(400);
+    for (const id of members) app.runtime.accounts.set(id,{account:{type:'test'}});
+    // Keep this API fixture queued; runtime turn routing is covered separately.
+    app.runtime.takeover = true;
+    const discussion = await request(`/api/rooms/${room.id}/messages`,'POST',{prompt:'Discuss options'});
+    expect(discussion.status).toBe(201); expect((await discussion.json()).jobs).toHaveLength(2);
+    expect((await request(`/api/rooms/${room.id}/messages`,'POST',{prompt:'Overlapping round'})).status).toBe(400);
+    expect((await request(`/api/rooms/${room.id}`,'PATCH',{title:'Busy edit',memberIds:members})).status).toBe(400);
+    expect((await request(`/api/rooms/${room.id}/cancel`,'POST',{})).status).toBe(200);
+    app.runtime.takeover = false;
+    for (const id of members) app.runtime.accounts.set(id,{account:null});
+    expect(app.runtime.state.conversations.find(c=>c.id===room.id).messages).toHaveLength(1);
+    const savedRoom = openStore(directory); expect(savedRoom.state.conversations.find(c=>c.id===room.id).title).toBe('Weekend planning'); savedRoom.close();
     expect((await request('/api/browser/action','POST',{action:'navigate',url:'https://example.com'})).status).toBe(409);
     const job = await (await request('/api/jobs','POST',{prompt:'Read a website'})).json();
     expect(job.status).toBe('queued');
@@ -39,9 +88,80 @@ test('API protects files and browser control, persists uploads and validates sch
     expect(await download.text()).toBe('safe content');
     expect((await app.fetch(new Request(`https://assistant.test/api/files/${uploaded.id}`))).status).toBe(401);
     expect((await request('/api/files/../../.env')).status).toBe(404);
+    const profileBefore=JSON.stringify(app.runtime.state.customization);
+    expect((await request('/api/appearance','PUT',{palette:'harbor',motion:'reduced'})).status).toBe(200);
+    expect(app.runtime.state.appearance).toEqual({palette:'harbor',motion:'reduced'});
+    expect(JSON.stringify(app.runtime.state.customization)).toBe(profileBefore);
+    expect((await request('/api/appearance','PUT',{palette:'__proto__',motion:'system'})).status).toBe(400);
+    expect(app.runtime.state.appearance).toEqual({palette:'harbor',motion:'reduced'});
+    const appearanceStore=openStore(directory); expect(appearanceStore.state.appearance).toEqual({palette:'harbor',motion:'reduced'}); appearanceStore.close();
+    expect(app.runtime.state.currency).toBe('source');
+    expect((await request('/api/preferences','PUT',{text:'Based in Jakarta',currency:'IDR'})).status).toBe(200);
+    expect(app.runtime.state.currency).toBe('IDR');
+    const reopened=openStore(directory); expect(reopened.state.currency).toBe('IDR'); reopened.close();
+    expect((await request('/api/preferences','PUT',{text:'Invalid change',currency:'NOT_A_CURRENCY'})).status).toBe(400);
+    expect(app.runtime.state.preferences).toBe('Based in Jakarta'); expect(app.runtime.state.currency).toBe('IDR');
     await request('/api/preferences','PUT',{text:'Based in Jakarta'});
+    expect(app.runtime.state.currency).toBe('IDR');
     expect((await (await request('/api/state')).json()).preferences).toBe('Based in Jakarta');
     await request(`/api/jobs/${job.id}/cancel`,'POST',{});
     expect(app.runtime.state.jobs[0].status).toBe('cancelled');
+    expect((await request(`/api/conversations/${job.conversationId}`,'DELETE',null,{origin:'https://evil.test'})).status).toBe(403);
+    expect((await request(`/api/conversations/${job.conversationId}`,'DELETE')).status).toBe(200);
+    expect(app.runtime.state.jobs.some(j=>j.id===job.id)).toBe(false);
+    const live=await (await request('/api/jobs','POST',{prompt:'Keep live conversation'})).json();
+    expect((await request(`/api/conversations/${live.conversationId}`,'DELETE')).status).toBe(400);
+    expect((await request(`/api/conversations/${room.id}`,'DELETE')).status).toBe(200);
+    expect(app.runtime.state.conversations.some(c=>c.id===room.id)).toBe(false);
+    expect((await request(`/api/conversations/${room.id}`,'DELETE')).status).toBe(404);
+
   } finally { await app.close(); rmSync(directory,{recursive:true}); }
+});
+
+test('agent deletion preserves history, updates rooms, removes routines and protects live work', async () => {
+  const directory = mkdtempSync(join(tmpdir(),'odwyn-delete-agent-'));
+  const codex = new EventEmitter(); codex.request = async () => ({account:null}); codex.stop = () => {};
+  const app = createApp({directory,user:'owner',password:'test-password-long-enough',origin:'https://assistant.test',codex,browser:{close:async()=>{}}});
+  const headers = {authorization:'Basic '+Buffer.from('owner:test-password-long-enough').toString('base64'),origin:'https://assistant.test','content-type':'application/json'};
+  const request = (path,method='GET',body,origin=headers.origin)=>app.fetch(new Request(`https://assistant.test${path}`,{method,headers:{...headers,origin},...(body?{body:JSON.stringify(body)}:{})}));
+  try {
+    await app.runtime.refreshAccount();
+    const primary=app.runtime.state.agents[0].id;
+    await request('/api/customization','PUT',{...defaults,name:'Original'});
+    expect((await request(`/api/agents/${primary}`,'DELETE')).status).toBe(400);
+    const second=await (await request('/api/agents','POST',{...defaults,name:'Scout'})).json();
+    const third=await (await request('/api/agents','POST',{...defaults,name:'Pip'})).json();
+    const room=await (await request('/api/rooms','POST',{title:'Team',memberIds:[primary,second.id,third.id]})).json();
+    const pair=await (await request('/api/rooms','POST',{title:'Pair',memberIds:[second.id,primary]})).json();
+    const job=await (await request('/api/jobs','POST',{prompt:'Keep this chat',agentId:primary})).json();
+    const chat=app.runtime.state.conversations.find(c=>c.id===job.conversationId);
+    chat.messages.push({id:'old-reply',agentId:primary,role:'assistant',text:'Original answer',at:new Date().toISOString()});
+    chat.threadId='old-thread'; chat.providerKey='old-provider'; chat.sessions={[primary]:{threadId:'old-thread'}};
+    expect((await request(`/api/agents/${primary}`,'DELETE')).status).toBe(400);
+    for (const status of ['running','waiting','takeover','stopping']) { app.runtime.state.jobs.find(j=>j.id===job.id).status=status; expect((await request(`/api/agents/${primary}`,'DELETE')).status).toBe(400); }
+    app.runtime.state.jobs.find(j=>j.id===job.id).status='cancelled';
+    const roomJob=createJob(app.runtime.state,{prompt:'Room turn',agentId:second.id,conversationId:room.id});
+    // A different agent speaking in a shared room also blocks participant deletion.
+    expect((await request(`/api/agents/${primary}`,'DELETE')).status).toBe(400);
+    await request(`/api/jobs/${roomJob.id}/cancel`,'POST',{});
+    await request('/api/schedules','POST',{agentId:primary,prompt:'Remove this routine',at:new Date(Date.now()+60_000).toISOString()});
+    await request('/api/schedules','POST',{agentId:second.id,prompt:'Keep this routine',at:new Date(Date.now()+60_000).toISOString()});
+    const theme={...app.runtime.state.appearance};
+    expect((await request(`/api/agents/${primary}`,'DELETE',null,'https://evil.test')).status).toBe(403);
+    expect((await request(`/api/agents/${primary}`,'DELETE')).status).toBe(200);
+    expect(app.runtime.state.agents.map(a=>a.id)).toEqual([second.id,third.id]);
+    expect(app.runtime.state.customization.name).toBe('Scout');
+    expect(app.runtime.providers.has(primary)).toBe(false); expect(app.runtime.accounts.has(primary)).toBe(false);
+    expect(app.runtime.state.schedules.map(s=>s.agentId)).toEqual([second.id]);
+    expect(chat.messages.at(-1).agentProfile.name).toBe('Original'); expect(chat.messages.at(-1).text).toBe('Original answer');
+    expect(chat.agentId).toBe(second.id); expect(chat.sessions[primary]).toBeUndefined(); expect(chat.threadId).toBeUndefined();
+    const team=app.runtime.state.conversations.find(c=>c.id===room.id), formerPair=app.runtime.state.conversations.find(c=>c.id===pair.id);
+    expect(team.memberIds).toEqual([second.id,third.id]); expect(team.kind).toBe('room');
+    expect(formerPair.kind).toBeUndefined(); expect(formerPair.agentId).toBe(second.id);
+    expect(app.runtime.state.appearance).toEqual(theme);
+    expect((await request(`/api/jobs/${job.id}/retry`,'POST',{})).status).toBe(400);
+    expect((await request('/api/jobs','POST',{prompt:'Continue saved chat',agentId:second.id,conversationId:chat.id})).status).toBe(201);
+    expect((await request(`/api/agents/${primary}`,'DELETE')).status).toBe(400);
+    const reopened=openStore(directory); expect(reopened.state.agents).toHaveLength(2); expect(reopened.state.customization.name).toBe('Scout'); expect(reopened.state.conversations.find(c=>c.id===chat.id).messages.find(m=>m.id==='old-reply').agentProfile.name).toBe('Original'); reopened.close();
+  } finally {await app.close();rmSync(directory,{recursive:true});}
 });

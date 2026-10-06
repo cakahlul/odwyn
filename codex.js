@@ -4,15 +4,16 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export class Codex extends EventEmitter {
-  constructor({ home, workspace, command = 'codex' }) {
-    super(); this.home = home; this.workspace = workspace; this.command = command;
+  constructor({ home, workspace, command = 'codex', model = (process.env.ODWYN_MODEL ?? process.env.SIDEKICK_MODEL) || 'gpt-6.1-sol', effort = 'default' }) {
+    super(); this.home = home; this.workspace = workspace; this.command = command; this.model = model; this.effort = effort;
     this.child = null; this.ready = null; this.pending = new Map(); this.nextId = 1;
   }
 
   start() {
     if (this.ready) return this.ready;
     mkdirSync(this.home, { recursive: true, mode: 0o700 }); mkdirSync(this.workspace, { recursive: true, mode: 0o700 });
-    const args = ['app-server', '--listen', 'stdio://', '-c', `model=${JSON.stringify(process.env.SIDEKICK_MODEL || 'gpt-6.1-sol')}`, '-c', 'model_reasoning_effort="medium"', '-c', 'project_doc_max_bytes=0', '-c', 'web_search="disabled"'];
+    const args = ['app-server', '--listen', 'stdio://', '-c', `model=${JSON.stringify(this.model)}`, '-c', 'project_doc_max_bytes=0', '-c', 'web_search="disabled"'];
+    if (this.effort && this.effort !== 'default') args.push('-c',`model_reasoning_effort=${JSON.stringify(this.effort)}`);
     for (const feature of ['shell_tool','unified_exec','apps','plugins','multi_agent','code_mode','view_image','skill_search','skill_mcp_dependency_install','shell_snapshot','sleep_tool','send_message_to_user_async','default_mode_request_user_input']) args.push('-c', `features.${feature}=false`);
     // Also suppress MCP servers when an explicitly supplied home has existing integrations.
     try { for (const name of Object.keys(Bun.TOML.parse(readFileSync(join(this.home, 'config.toml'), 'utf8')).mcp_servers || {})) args.push('-c', `mcp_servers.${name}.enabled=false`); } catch {}
@@ -33,7 +34,7 @@ export class Codex extends EventEmitter {
     child.stderr.resume();
     child.on('error', () => this.fail(child, new Error('Codex could not start. Install Codex CLI and restart.')));
     child.on('exit', code => this.fail(child, new Error(`Codex disconnected (exit ${code}). Resume interrupted work after reconnecting.`)));
-    this.ready = this.call('initialize', { clientInfo: { name: 'sidekick', title: 'Sidekick', version: '0.1.0' }, capabilities: { experimentalApi: true } })
+    this.ready = this.call('initialize', { clientInfo: { name: 'odwyn', title: 'Odwyn', version: '0.1.0' }, capabilities: { experimentalApi: true } })
       .then(result => { this.write({ method: 'initialized', params: {} }); return result; })
       .catch(error => { child.kill(); throw error; });
     return this.ready;

@@ -38,6 +38,29 @@ export async function resolvePublic(raw) {
 export const actions = ['read','navigate','click','fill','type','press','scroll','select','tab','new_tab','close_tab','back','wait','screenshot','save_screenshot','upload','dialog'];
 export const interactions = new Set(['click','fill','type','press','select','upload','dialog']);
 
+export const interactionModes = ['confirm','safe','allow'];
+
+export function browserActionRisk(action, context = {}) {
+  if (!interactions.has(action.action)) return 'safe';
+  const el = context.element;
+  // ponytail: conservative DOM heuristics; unknown targets ask rather than guessing site-side effects.
+  const payment = /\b(pay(?:ment)?|checkout|billing|credit card|card number|cvv|cvc|buy|purchase|place order|donat(?:e|ion)|transfer|subscribe|subscription|book now|confirm booking|bayar|pembayaran|beli)\b/i;
+  if (context.hasPaymentFields || payment.test([context.url,el?.label,el?.context,el?.autocomplete,el?.href,action.reason].join(' ')) || /^cc-/.test(el?.autocomplete || '')) return 'payment';
+  if (action.action === 'dialog') return action.choice === 'dismiss' ? 'safe' : 'unknown';
+  if (action.action === 'press' && ['Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown','Home','End'].includes(action.text)) return 'safe';
+  if (!el || el.type === 'password' || /password|one-time-code/.test(el.autocomplete || '')) return 'unknown';
+  const safeField = /\b(search|filter|sort|check.?in|check.?out|destination|dates?|adults?|children|rooms?|guests?|city|location|departure|arrival|budget)\b/i;
+  if (['fill','select'].includes(action.action)) return el.type === 'search' || safeField.test(el.label) ? 'safe' : 'interaction';
+  if (action.action === 'click') {
+    if (el.tag === 'a' && /^https?:/.test(el.href || '') && !/delete|remove|unsubscribe|logout|action=/i.test(el.href)) return 'safe';
+    if (/^(search|find|filter|sort|next page|previous page|close|dismiss|accept (all )?cookies|reject (all )?cookies|cookie settings|show more|load more)\b/i.test(el.label)) return 'safe';
+    if (/^(save|send|delete|remove|archive|upload|publish|post)\b/i.test(el.label)) return 'interaction';
+    return 'unknown';
+  }
+  if (action.action === 'upload') return 'interaction';
+  return 'unknown';
+}
+
 export function validateAction(input) {
   if (!input || !actions.includes(input.action)) throw new Error('Unknown browser action.');
   const result = { ...input };

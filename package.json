@@ -1,5 +1,5 @@
 {
-  "name": "sidekick",
+  "name": "odwyn",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,9 @@
     "browser:install": "playwright install chromium"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.2.110",
     "marked": "18.0.14",
-    "playwright": "1.58.2"
+    "playwright": "1.58.2",
+    "zod": "^4.0.0"
   }
 }

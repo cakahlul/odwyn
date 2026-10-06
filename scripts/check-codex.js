@@ -7,15 +7,15 @@ import { Browser } from '../browser.js';
 import { Codex } from '../codex.js';
 import { Runtime } from '../runtime.js';
 
-const directory = mkdtempSync(join(tmpdir(), 'sidekick-codex-check-'));
+const directory = mkdtempSync(join(tmpdir(), 'odwyn-codex-check-'));
 const home = join(directory, 'codex');
-const source = join(process.env.SIDEKICK_SMOKE_CODEX_HOME || process.env.SIDEKICK_CODEX_HOME || process.env.CODEX_HOME || join(homedir(), '.codex'), 'auth.json');
-if (!existsSync(source)) { rmSync(directory, { recursive: true }); throw new Error('Sign in to Codex first. Set SIDEKICK_SMOKE_CODEX_HOME to your signed-in Codex home.'); }
+const source = join((process.env.ODWYN_SMOKE_CODEX_HOME ?? process.env.SIDEKICK_SMOKE_CODEX_HOME) || (process.env.ODWYN_CODEX_HOME ?? process.env.SIDEKICK_CODEX_HOME) || process.env.CODEX_HOME || join(homedir(), '.codex'), 'auth.json');
+if (!existsSync(source)) { rmSync(directory, { recursive: true }); throw new Error('Sign in to Codex first. Set ODWYN_SMOKE_CODEX_HOME to your signed-in Codex home.'); }
 cpSync(source, join(home, 'auth.json'), { recursive: true });
 const store = openStore(directory);
 const browser = new Browser({ directory });
 const codex = new Codex({ home, workspace: join(directory, 'workspace') });
-const runtime = new Runtime({ store, browser, codex, workspace: join(directory, 'workspace'), model: process.env.SIDEKICK_MODEL || 'gpt-6.1-sol' });
+const runtime = new Runtime({ store, browser, codex, workspace: join(directory, 'workspace'), model: (process.env.ODWYN_MODEL ?? process.env.SIDEKICK_MODEL) || 'gpt-6.1-sol' });
 const wait = async (job, status = 'completed') => {
   const until = Date.now() + 240_000;
   while (job.status !== status && ['queued','running','waiting','takeover'].includes(job.status) && Date.now() < until) await Bun.sleep(500);
@@ -29,7 +29,7 @@ try {
   await Bun.sleep(1000); assert.equal(clarification.status,'waiting'); assert.equal(clarification.toolCount,callsBeforeAnswer); assert.ok(!browser.context);
   runtime.answer(clarification.id,{requestId:clarification.pending.id,answer:'Rp1–2 million per night, two adults and one child.'});
   await wait(clarification);
-  const job = runtime.submit({ prompt: 'Use sidekick_browser to navigate to https://example.com, read its actual heading, then use screenshot to inspect the browser image. Tell me the page heading and URL. Do not click any links or use any other tools.' });
+  const job = runtime.submit({ prompt: 'Use odwyn_browser to navigate to https://example.com, read its actual heading, then use screenshot to inspect the browser image. Tell me the page heading and URL. Do not click any links or use any other tools.' });
   await wait(job);
   assert.ok(job.events.some(event => event.label === 'navigate'));
   assert.ok(job.events.some(event => event.label === 'screenshot'));

@@ -1,6 +1,6 @@
 module.exports = {
   apps: [{
-    name: 'sidekick',
+    name: 'odwyn',
     cwd: __dirname,
     script: 'server.js',
     interpreter: process.env.BUN_PATH || 'bun',

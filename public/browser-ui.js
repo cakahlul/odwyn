@@ -1,19 +1,35 @@
 import { $, esc, icon, api, handleError } from './ui.js';
 
 let frame = null; let frameBusy = false; let getState; let emptyMarkup;
+const minimizedPreviews = new Set();
+let previewJobId = null;
 export function setBrowserVisible(visible) {
   document.body.classList.toggle('browser-closed', !visible);
   $('#browser-toggle').setAttribute('aria-expanded', String(visible));
   if (visible) void refreshFrame();
 }
 
+function updateConversationFrame() {
+  const preview = $('#conversation-browser');
+  if (!preview) return;
+  const current = frame?.jobId === preview.dataset.job || frame?.jobId === undefined && getState()?.runtime.activeJobId === preview.dataset.job ? frame : null;
+  const image = $('#conversation-browser-image'), status = $('#conversation-browser-status');
+  image.hidden = !current?.image;
+  if (current?.image) image.src = `data:image/jpeg;base64,${current.image}`;
+  else image.removeAttribute('src');
+  status.hidden = !!current?.image;
+  status.textContent = current?.dialog ? `Website confirmation: ${current.dialog}. Open browser controls to respond.` : 'Waiting for the browser preview…';
+  $('#conversation-browser-url').textContent = current?.url === 'about:blank' ? 'Ready for a website' : current?.url || '';
+}
+
 export async function refreshFrame() {
-  if (frameBusy || document.hidden || document.body.classList.contains('browser-closed')) return;
+  if (frameBusy || document.hidden || (document.body.classList.contains('browser-closed') && !$('#conversation-browser')?.open)) return;
   frameBusy = true;
   try {
     const response = await fetch('/api/browser/frame');
-    if (!response.ok) return;
+    if (!response.ok) throw new Error('Browser preview unavailable');
     frame = await response.json();
+    updateConversationFrame();
     if (!frame) {
       if ($('#browser-image') || $('.browser-dialog')) $('#browser-viewport').innerHTML = emptyMarkup;
       $('#browser-url').textContent = 'No page open'; return;
@@ -34,13 +50,45 @@ export async function refreshFrame() {
       const options = tabs.map(tab => `<option value="${tab.index}" ${tab.active ? 'selected' : ''}>${esc(tab.url === 'about:blank' ? 'New tab' : tab.url)}</option>`).join('');
       if (select.innerHTML !== options) select.innerHTML = options;
     } else select?.remove();
-  } catch {} finally { frameBusy = false; }
+  } catch {
+    const status = $('#conversation-browser-status');
+    if (status) { status.hidden = false; status.textContent = 'Preview unavailable. Retrying…'; }
+  } finally { frameBusy = false; }
+}
+
+function positionPreviewButton() {
+  const restore = $('[data-restore-browser]');
+  if (!restore) return;
+  restore.style.top = `${$('#view').getBoundingClientRect().top + 12}px`;
+  restore.style.right = `${innerWidth - $('#main').getBoundingClientRect().right + 16}px`;
 }
 
 export function updateBrowser(state) {
+  const preview = $('#conversation-browser'), restore = $('[data-restore-browser]');
+  if (preview && previewJobId !== preview.dataset.job) {
+    previewJobId = preview.dataset.job; frame = null;
+    if (!state.runtime.takeover) setBrowserVisible(false);
+  }
+  if (preview && !preview.dataset.ready) {
+    preview.dataset.ready = 'true';
+    preview.open = !minimizedPreviews.has(preview.dataset.job);
+    preview.hidden = !preview.open; restore.hidden = preview.open;
+    preview.ontoggle = () => {
+      if (!preview.isConnected) return;
+      preview.hidden = !preview.open; restore.hidden = preview.open;
+      if (!preview.open) restore.focus({preventScroll:true});
+      if (preview.open) { minimizedPreviews.delete(preview.dataset.job); void refreshFrame(); }
+      else minimizedPreviews.add(preview.dataset.job);
+    };
+    restore.onclick = () => { preview.hidden = false; preview.open = true; restore.hidden = true; preview.querySelector('summary').focus({preventScroll:true}); preview.scrollIntoView({block:'nearest'}); };
+    preview.querySelector('[data-browser-controls]').onclick = () => { setBrowserVisible(true); $('#browser-tab').click(); $('#takeover-button').focus(); };
+  }
+  positionPreviewButton();
+  updateConversationFrame();
+  if (preview?.open && frame?.jobId !== preview.dataset.job) void refreshFrame();
   const controlled = state.runtime.takeover;
   $('#takeover-button').innerHTML = controlled ? `Hand back ${icon('play')}` : `Take control ${icon('cursor')}`;
-  $('#control-state').textContent = controlled ? 'You’re in control' : state.runtime.activeJobId ? `${state.customization?.name || 'Sidekick'} is working` : state.runtime.browserOpen ? 'Browser open' : 'Browser closed';
+  $('#control-state').textContent = controlled ? 'You’re in control' : state.runtime.activeJobId ? `${state.runtime.activeAgentName || state.customization?.name || 'Odwyn'} is working` : state.runtime.browserOpen ? 'Browser open' : 'Browser closed';
   $('#takeover-controls').hidden = !controlled; $('#browser-navigate').hidden = !controlled;
   $('#browser-viewport').classList.toggle('controlled', controlled);
   $('#panel-footer-text').textContent = controlled ? 'Finish your step, then hand the browser back.' : 'Browser actions appear in the Activity tab.';
@@ -91,6 +139,7 @@ export function setupBrowser(stateGetter) {
   };
   $('#browser-panel').onchange = event => { if (event.target.id === 'browser-tabs' && getState()?.runtime.takeover) void action({ action:'tab', index:Number(event.target.value) }); };
   setInterval(refreshFrame, 1600);
+  addEventListener('resize',positionPreviewButton);
   const narrow = matchMedia('(max-width: 1100px)');
   if (narrow.matches) setBrowserVisible(false);
   narrow.addEventListener('change', event => { if (event.matches) setBrowserVisible(false); });

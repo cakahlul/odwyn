@@ -54,11 +54,17 @@ export class Browser {
     const result = await page.evaluate(() => {
       const controls = [...document.querySelectorAll('a[href],button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"]')]
         .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden').slice(0, 240);
-      document.querySelectorAll('[data-sidekick-ref]').forEach(el => el.removeAttribute('data-sidekick-ref'));
+      document.querySelectorAll('[data-odwyn-ref]').forEach(el => el.removeAttribute('data-odwyn-ref'));
+      const images = [...document.images].filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden')
+        .map(el => ({ url:el.currentSrc || el.src, alt:(el.alt || el.title || '').slice(0,180) }));
+      for (const meta of document.querySelectorAll('meta[property="og:image"],meta[name="twitter:image"]')) {
+        try { images.push({url:new URL(meta.content,location.href).href,alt:document.title}); } catch { /* Invalid page metadata. */ }
+      }
       return {
         text: (document.body?.innerText || '').slice(0, 16_000),
+        images:images.filter((image,index) => /^https?:\/\//i.test(image.url) && images.findIndex(other=>other.url===image.url) === index).slice(0,24),
         elements: controls.map((el, i) => {
-          el.setAttribute('data-sidekick-ref', String(i));
+          el.setAttribute('data-odwyn-ref', String(i));
           const label = el.getAttribute('aria-label') || el.labels?.[0]?.innerText || el.getAttribute('placeholder') || el.innerText || el.getAttribute('title') || el.getAttribute('name') || el.tagName.toLowerCase();
           return { ref: String(i), tag: el.tagName.toLowerCase(), type: el.getAttribute('type') || null, label: label.trim().slice(0, 180), href: el.tagName === 'A' ? el.href : undefined, options: el.tagName === 'SELECT' ? [...el.options].map(o => ({ value: o.value, label: o.text })) : undefined };
         }),
@@ -70,6 +76,20 @@ export class Browser {
     this.last = result;
     if (includeImage) result.image = (await page.screenshot({ type: 'jpeg', quality: 70 })).toString('base64');
     return result;
+  }
+
+  inspectAction(action) {
+    return this.serial(async () => {
+      if (!this.page || this.page.isClosed()) return {};
+      return this.page.evaluate(ref => {
+        const el = ref === null ? null : document.querySelector(`[data-odwyn-ref="${ref}"]`);
+        return { url:location.href, hasPaymentFields:!!document.querySelector('[autocomplete^="cc-"]'), element:el ? {
+          tag:el.tagName.toLowerCase(), type:el.getAttribute('type'), href:el.tagName === 'A' ? el.href : undefined,
+          label:(el.getAttribute('aria-label') || el.labels?.[0]?.innerText || el.getAttribute('placeholder') || el.innerText || el.getAttribute('name') || '').trim().slice(0,180),
+          autocomplete:el.getAttribute('autocomplete') || '', context:(el.closest('form')?.innerText || '').slice(0,4000),
+        } : null };
+      }, action.ref === undefined ? null : String(action.ref));
+    });
   }
 
   async untilDialog(page, fn) {
@@ -87,7 +107,7 @@ export class Browser {
       if (!this.page || this.page.isClosed()) this.page = await this.context.newPage();
       if (this.dialog && command.action !== 'dialog') return this.snapshot();
       const page = this.page;
-      const element = command.ref !== undefined ? page.locator(`[data-sidekick-ref="${command.ref}"]`) : null;
+      const element = command.ref !== undefined ? page.locator(`[data-odwyn-ref="${command.ref}"]`) : null;
       if (['navigate','new_tab'].includes(command.action)) await resolvePublic(command.url);
       const execute = async () => { switch (command.action) {
         case 'navigate': await page.goto(command.url, { waitUntil: 'domcontentloaded' }); break;
@@ -120,8 +140,8 @@ export class Browser {
   frame() {
     return this.serial(async () => {
       if (!this.context || !this.page || this.page.isClosed()) return null;
-      if (this.dialog) return { url: this.page.url(), dialog: this.dialog.message(), tabs: [] };
-      return { url: this.page.url(), title: await this.page.title(), image: (await this.page.screenshot({ type: 'jpeg', quality: 65 })).toString('base64'), width: 1280, height: 800,
+      if (this.dialog) return { jobId: this.owner, url: this.page.url(), dialog: this.dialog.message(), tabs: [] };
+      return { jobId: this.owner, url: this.page.url(), title: await this.page.title(), image: (await this.page.screenshot({ type: 'jpeg', quality: 65 })).toString('base64'), width: 1280, height: 800,
         tabs: this.context.pages().map((page, index) => ({ index, url: page.url(), active: page === this.page })) };
     });
   }
