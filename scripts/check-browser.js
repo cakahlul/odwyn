@@ -336,7 +336,7 @@ const budget = 2000000;
   assert.equal(await page.locator('#browser-toggle').getAttribute('aria-expanded'),'false','Inline browser works with side panel closed');
   assert.equal(await previewImage.getAttribute('src'),await page.locator('#browser-image').getAttribute('src'),'Conversation uses the actual browser screenshot feed');
   assert.match(await page.locator('#conversation-browser-url').textContent(),/example.com/);
-  const pendingApproval=app.runtime.waitForOwner(previewJob,{type:'interaction',risk:'interaction',title:'Allow click?',detail:'Include one child in hotel occupancy',target:'Add Children'});
+  const pendingApproval=app.runtime.waitForOwner(previewJob,{type:'interaction',risk:'unknown',title:'Allow click?',detail:'Turn to the next catalogue page',target:'1245, 400'});
   await page.locator('.approval-card').waitFor();
   const permissionUpdate=page.waitForResponse(response=>response.url().endsWith(`/api/jobs/${previewJob.id}/permissions`));
   await page.locator('#interaction-mode').selectOption('allow');

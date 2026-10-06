@@ -200,7 +200,7 @@ test('multiple agents continue one chat with separate sessions and attributed re
 test('approval modes auto-approve only allowed risks and never bypass payment confirmation', async () => {
   const dir=mkdtempSync(join(tmpdir(),'odwyn-approvals-')), store=openStore(dir), codex=new FakeCodex();
   let label='Search', calls=0;
-  const browser={last:{url:'https://example.com',elements:[{ref:'0',label:'Search'}]},inspectAction:async action=>({url:'https://example.com',element:action.ref === undefined && !(action.x === 469 && action.y === 421) ? null : {tag:'button',label},dialog:action.action === 'dialog' ? {type:'confirm',message:label} : undefined}),action:async()=>{calls++;return {text:'Done'};}};
+  const browser={last:{url:'https://example.com',elements:[{ref:'0',label:'Search'}]},inspectAction:async action=>({url:'https://example.com',element:action.ref === undefined && !(action.x === 469 && action.y === 421) ? null : {tag:'button',label,type:label === 'Password' ? 'password' : undefined},dialog:action.action === 'dialog' ? {type:'confirm',message:label} : undefined}),action:async()=>{calls++;return {text:'Done'};}};
   const runtime=new Runtime({store,codex,browser,workspace:dir});
   try {
     await runtime.refreshAccount();
@@ -221,11 +221,19 @@ test('approval modes auto-approve only allowed risks and never bypass payment co
         expect(()=>runtime.answer(job.id,{requestId:job.pending.id,decision:'allow-run'})).toThrow('payment');
         runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'}); await payment; expect(calls).toBe(before);
       }
-      const unknown=invoke({action:'click',x:12,y:34}); await Bun.sleep(10);
-      expect(job.pending.risk).toBe('unknown'); expect(calls).toBe(before);
-      runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'}); await unknown;
+      label='Catalogue navigation';
+      for (const x of [12,1245]) {
+        const beforeUnknown=calls, unknown=invoke({action:'click',x,y:400}); await Bun.sleep(10);
+        if (mode === 'allow') { expect(job.pending).toBeFalsy(); await unknown; expect(calls).toBe(beforeUnknown+1); }
+        else { expect(job.pending.risk).toBe('unknown'); expect(calls).toBe(beforeUnknown); runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'}); await unknown; }
+      }
+      label='Password'; const beforeCredential=calls, credential=invoke({action:'press',ref:'0',text:'Enter'}); await Bun.sleep(10);
+      expect(job.pending.risk).toBe('credential'); expect(calls).toBe(beforeCredential);
+      expect(()=>runtime.answer(job.id,{requestId:job.pending.id,decision:'allow-run'})).toThrow('credential');
+      runtime.setInteractionMode(job.id,mode); expect(job.pending.risk).toBe('credential');
+      runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'}); await credential;
       if (mode === 'confirm') {
-        label='Add Children'; const pending=invoke({action:'click',ref:'0'}); await Bun.sleep(10);
+        label='Catalogue navigation'; const pending=invoke({action:'click',x:1245,y:400}); await Bun.sleep(10);
         runtime.setInteractionMode(job.id,'allow'); await pending;
         expect(job.pending).toBe(null); expect(job.interactionMode).toBe('allow'); expect(calls).toBe(before+1);
         label='Pay now'; const payment=invoke({action:'click',ref:'0'}); await Bun.sleep(10);

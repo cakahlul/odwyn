@@ -33,7 +33,7 @@ test('real browser references, form interactions, evidence, dialogs and network 
     expect((await browser.inspectAction({action:'press',ref:'999',text:'Enter'})).element).toBe(null);
     expect((await browser.inspectAction({action:'click',x:1279,y:799})).element).toBe(null);
     await browser.page.locator('input[type=password]').focus();
-    expect(browserActionRisk({action:'press',text:'Enter'},await browser.inspectAction({action:'press',text:'Enter'}))).toBe('unknown');
+    expect(browserActionRisk({action:'press',text:'Enter'},await browser.inspectAction({action:'press',text:'Enter'}))).toBe('credential');
     await browser.action({action:'type',ref:input.ref,text:'!'});
     expect(await browser.page.locator('#name').inputValue()).toBe('Odwyn works!');
     expect(await browser.page.locator('input[type=password]').inputValue()).toBe('do-not-leak');

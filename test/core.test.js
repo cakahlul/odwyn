@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore, createJob, createRoom, updateRoom, enqueueSchedules, recoverJobs } from '../store.js';
-import { authorize, allowedOrigin, validateAction, publicAddress, browserActionRisk } from '../security.js';
+import { authorize, allowedOrigin, validateAction, publicAddress, browserActionRisk, browserApprovalRequired } from '../security.js';
 import { Database } from 'bun:sqlite';
 import { defaults, validateProfile } from '../public/profile.js';
 
@@ -127,18 +127,22 @@ test('browser risk checks fail closed for checkout, credentials, dialogs and unk
   expect(browserActionRisk({action:'fill',ref:'0',text:'Name'},{element:{tag:'input',label:'Update profile'}})).toBe('interaction');
   for (const context of [{url:'https://shop.test/checkout',element:target},{hasPaymentFields:true,element:target},{element:{...target,context:'Credit card payment'}},{element:{...target,label:'Confirm booking'}}]) expect(['payment','unknown']).toContain(browserActionRisk(click,context));
   for (const label of ['Add Children','Next month','Continue']) expect(browserActionRisk(click,{element:{...target,label}})).toBe('interaction');
-  expect(browserActionRisk({action:'fill',ref:'0',text:'secret'},{element:{tag:'input',type:'password',label:'Password'}})).toBe('unknown');
+  expect(browserActionRisk({action:'fill',ref:'0',text:'secret'},{element:{tag:'input',type:'password',label:'Password'}})).toBe('credential');
   expect(browserActionRisk({action:'fill',ref:'0',text:'123'},{element:{tag:'input',autocomplete:'cc-number',label:'Number'}})).toBe('payment');
   expect(browserActionRisk({action:'dialog',choice:'accept'})).toBe('unknown');
   expect(browserActionRisk({action:'dialog',choice:'dismiss'})).toBe('safe');
   expect(browserActionRisk({action:'dialog',choice:'accept'},{dialog:{type:'confirm',message:'Continue?'}})).toBe('interaction');
   expect(browserActionRisk({action:'dialog',choice:'accept'},{dialog:{type:'confirm',message:'Pay now?'}})).toBe('payment');
-  expect(browserActionRisk({action:'dialog',choice:'accept'},{dialog:{type:'prompt',message:'Password?'}})).toBe('unknown');
+  expect(browserActionRisk({action:'dialog',choice:'accept'},{dialog:{type:'prompt',message:'Password?'}})).toBe('credential');
   expect(browserActionRisk({action:'press',text:'Enter'})).toBe('unknown');
+  for (const mode of ['confirm','safe','allow']) {
+    expect(browserApprovalRequired(mode,'unknown')).toBe(mode !== 'allow');
+    for (const risk of ['payment','credential',undefined]) expect(browserApprovalRequired(mode,risk)).toBe(true);
+  }
   for (const action of ['press','type']) {
     expect(browserActionRisk({action,text:'Enter'},{element:{tag:'input',label:'Enter a destination or property'}})).toBe('safe');
     expect(browserActionRisk({action,text:'Enter'},{element:{tag:'input',label:'Name'}})).toBe('interaction');
-    expect(browserActionRisk({action,text:'Enter'},{element:{tag:'input',type:'password',label:'Password'}})).toBe('unknown');
+    expect(browserActionRisk({action,text:'Enter'},{element:{tag:'input',type:'password',label:'Password'}})).toBe('credential');
     expect(browserActionRisk({action,text:'Enter'},{element:{tag:'input',autocomplete:'cc-number'}})).toBe('payment');
   }
   expect(browserActionRisk({action:'click',ref:'0'},{element:{tag:'a',href:'https://shop.test/?action=delete',label:'Link'}})).toBe('interaction');

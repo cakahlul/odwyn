@@ -40,17 +40,18 @@ export const interactions = new Set(['click','fill','type','press','select','upl
 
 export const interactionModes = ['confirm','safe','allow'];
 
-export const browserApprovalRequired = (mode, risk) => mode === 'confirm' || !['safe','interaction'].includes(risk) || mode === 'safe' && risk !== 'safe';
+export const browserApprovalRequired = (mode, risk) => mode === 'allow' ? !['safe','interaction','unknown'].includes(risk) : mode === 'safe' ? risk !== 'safe' : true;
 
 export function browserActionRisk(action, context = {}) {
   if (!interactions.has(action.action)) return 'safe';
   const el = context.element;
-  // ponytail: conservative DOM heuristics; unknown targets ask rather than guessing site-side effects.
+  // ponytail: payment detection uses DOM heuristics; it cannot prove arbitrary website effects.
   const payment = /\b(pay(?:ment)?|checkout|billing|credit card|card number|cvv|cvc|buy|purchase|place order|donat(?:e|ion)|transfer|subscribe|subscription|book now|confirm booking|bayar|pembayaran|beli)\b/i;
   if (context.hasPaymentFields || payment.test([context.url,el?.label,el?.context,el?.autocomplete,el?.href,context.dialog?.message,action.reason].join(' ')) || /^cc-/.test(el?.autocomplete || '')) return 'payment';
-  if (action.action === 'dialog') return action.choice === 'dismiss' ? 'safe' : ['alert','confirm'].includes(context.dialog?.type) ? 'interaction' : 'unknown';
+  if (action.action === 'dialog') return action.choice === 'dismiss' ? 'safe' : context.dialog?.type === 'prompt' ? 'credential' : ['alert','confirm'].includes(context.dialog?.type) ? 'interaction' : 'unknown';
   if (action.action === 'press' && ['Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown','Home','End'].includes(action.text)) return 'safe';
-  if (!el || el.type === 'password' || /password|one-time-code/.test(el.autocomplete || '')) return 'unknown';
+  if (!el) return 'unknown';
+  if (el.type === 'password' || /password|one-time-code/.test(el.autocomplete || '')) return 'credential';
   const safeField = /\b(search|filter|sort|check.?in|check.?out|destination|dates?|adults?|children|rooms?|guests?|city|location|departure|arrival|budget)\b/i;
   if (['fill','select','press','type'].includes(action.action)) return el.type === 'search' || safeField.test(el.label) ? 'safe' : 'interaction';
   if (action.action === 'click') {
