@@ -200,7 +200,7 @@ test('multiple agents continue one chat with separate sessions and attributed re
 test('approval modes auto-approve only allowed risks and never bypass payment confirmation', async () => {
   const dir=mkdtempSync(join(tmpdir(),'odwyn-approvals-')), store=openStore(dir), codex=new FakeCodex();
   let label='Search', calls=0;
-  const browser={last:{url:'https://example.com',elements:[{ref:'0',label:'Search'}]},inspectAction:async action=>({url:'https://example.com',element:action.ref === undefined ? null : {tag:'button',label}}),action:async()=>{calls++;return {text:'Done'};}};
+  const browser={last:{url:'https://example.com',elements:[{ref:'0',label:'Search'}]},inspectAction:async action=>({url:'https://example.com',element:action.ref === undefined && !(action.x === 469 && action.y === 421) ? null : {tag:'button',label},dialog:action.action === 'dialog' ? {type:'confirm',message:label} : undefined}),action:async()=>{calls++;return {text:'Done'};}};
   const runtime=new Runtime({store,codex,browser,workspace:dir});
   try {
     await runtime.refreshAccount();
@@ -208,16 +208,19 @@ test('approval modes auto-approve only allowed risks and never bypass payment co
     for (const mode of ['confirm','safe','allow']) {
       const job=runtime.submit({prompt:'Search and save',interactionMode:mode}); await runtime.drain();
       const invoke=action=>runtime.handleRequest({id:calls+100,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_browser',arguments:{reason:'Perform the requested action',...action}}});
-      for (const [target,auto] of [['Search',mode!=='confirm'],['Save profile',mode==='allow'],['Add Children',mode==='allow'],['Next month',mode==='allow'],['Continue',mode==='allow']]) {
-        label=target; const before=calls, pending=invoke({action:'click',ref:'0'}); await Bun.sleep(10);
+      for (const [target,auto,action={action:'click'}] of [['Search',mode!=='confirm'],['Save profile',mode==='allow'],['Add Children',mode==='allow'],['Next month',mode==='allow'],['Continue',mode==='allow'],['Enter a destination or property',mode!=='confirm',{action:'press',text:'Enter'}],['Name',mode==='allow',{action:'type',text:'Odwyn'}],['Continue',mode==='allow',{action:'press',text:'Enter'}],['Summarecon Mal Serpong',mode==='allow',{action:'click',x:469,y:421,ref:undefined}],['Destination',mode!=='confirm',{action:'fill',text:'Serpong'}],['Guests',mode!=='confirm',{action:'select',text:'2'}],['Upload file',mode==='allow',{action:'upload',fileId:'00000000-0000-0000-0000-000000000000'}],['Continue',mode==='allow',{action:'dialog',choice:'accept'}],['Cancel',mode!=='confirm',{action:'dialog',choice:'dismiss'}]]) {
+        label=target; const before=calls, pending=invoke({ref:'0',...action}); await Bun.sleep(10);
         if (auto) expect(job.pending).toBeFalsy();
         else { expect(job.pending.type).toBe('interaction'); expect(calls).toBe(before); runtime.answer(job.id,{requestId:job.pending.id,decision:'allow'}); }
         await pending; expect(calls).toBe(before+1);
       }
-      label='Pay Rp 100,000'; const before=calls, payment=invoke({action:'click',ref:'0'}); await Bun.sleep(10);
-      expect(job.pending.risk).toBe('payment'); expect(calls).toBe(before);
-      expect(()=>runtime.answer(job.id,{requestId:job.pending.id,decision:'allow-run'})).toThrow('payment');
-      runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'}); await payment; expect(calls).toBe(before);
+      label='Pay Rp 100,000'; const before=calls;
+      for (const action of [{action:'click'},{action:'fill',text:'100'},{action:'select',text:'100'},{action:'type',text:'100'},{action:'press',text:'Enter'},{action:'upload',fileId:'00000000-0000-0000-0000-000000000000'},{action:'dialog',choice:'accept'}]) {
+        const payment=invoke({ref:'0',...action}); await Bun.sleep(10);
+        expect(job.pending.risk).toBe('payment'); expect(calls).toBe(before);
+        expect(()=>runtime.answer(job.id,{requestId:job.pending.id,decision:'allow-run'})).toThrow('payment');
+        runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'}); await payment; expect(calls).toBe(before);
+      }
       const unknown=invoke({action:'click',x:12,y:34}); await Bun.sleep(10);
       expect(job.pending.risk).toBe('unknown'); expect(calls).toBe(before);
       runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'}); await unknown;

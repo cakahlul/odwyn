@@ -278,6 +278,8 @@ function render() {
   $('#connection-button').setAttribute('aria-label',$('#connection-label').textContent);
   $('#connection-button').title = state.runtime.connectionError || (state.runtime.account ? `${providerName} · ${state.runtime.model}` : 'Configure your AI provider in Settings');
   const conversation = state.conversations.find(c => c.id === conversationId);
+  const permissionJob = state.jobs.find(job=>job.conversationId === conversationId && job.id === state.runtime.activeJobId) || state.jobs.find(job=>job.conversationId === conversationId && job.status === 'queued');
+  if (permissionJob && !$('#interaction-mode').disabled) $('#interaction-mode').value = permissionJob.interactionMode;
   $('#prompt').placeholder = conversation?.kind === 'room' ? $('#reply-agent').value === 'all' ? 'Ask your agents to discuss a topic…' : 'Message the selected agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#agent-workspace').classList.toggle('chat-start', view === 'chat' && !conversation);
@@ -466,7 +468,7 @@ $('#interaction-mode').onchange = async () => {
   const jobs = state.jobs.filter(job => job.conversationId === conversationId && ['queued','running','waiting','takeover'].includes(job.status));
   selector.disabled = true;
   try { await perform(async () => { for (const job of jobs) await api(`/api/jobs/${job.id}/permissions`,{interactionMode:mode}); }); }
-  finally { selector.disabled = false; }
+  finally { selector.disabled = false; render(); }
 };
 $('#settings-open').onclick = () => openSettings(); $('#connection-button').onclick = () => openSettings();
 $('#schedule-open').onclick = openSchedule;

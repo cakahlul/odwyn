@@ -81,14 +81,16 @@ export class Browser {
   inspectAction(action) {
     return this.serial(async () => {
       if (!this.page || this.page.isClosed()) return {};
-      return this.page.evaluate(ref => {
-        const el = ref === null ? null : document.querySelector(`[data-odwyn-ref="${ref}"]`);
-        return { url:location.href, hasPaymentFields:!!document.querySelector('[autocomplete^="cc-"]'), element:el ? {
+      if (this.dialog) return {url:this.page.url(),dialog:{type:this.dialog.type(),message:this.dialog.message()}};
+      return this.page.evaluate(({ref,keyboard,x,y}) => {
+        const hit = Number.isFinite(x) && Number.isFinite(y) ? document.elementFromPoint(x,y) : null;
+        const el = ref !== null ? document.querySelector(`[data-odwyn-ref="${ref}"]`) : keyboard ? document.activeElement : hit?.closest('button,a,input,select,textarea,label,[role="button"],[role="option"],[role="link"],[onclick]') || hit;
+        return { url:location.href, hasPaymentFields:[...document.querySelectorAll('[autocomplete^="cc-"]')].some(field=>field.getClientRects().length && getComputedStyle(field).visibility !== 'hidden'), element:el && el !== document.body && el !== document.documentElement && el.tagName !== 'IFRAME' && !el.shadowRoot ? {
           tag:el.tagName.toLowerCase(), type:el.getAttribute('type'), href:el.tagName === 'A' ? el.href : undefined,
-          label:(el.getAttribute('aria-label') || el.labels?.[0]?.innerText || el.getAttribute('placeholder') || el.innerText || el.getAttribute('name') || '').trim().slice(0,180),
+          label:(el.getAttribute('aria-label') || el.labels?.[0]?.innerText || el.getAttribute('placeholder') || el.innerText || el.getAttribute('title') || el.getAttribute('name') || '').trim().slice(0,180),
           autocomplete:el.getAttribute('autocomplete') || '', context:(el.closest('form')?.innerText || '').slice(0,4000),
         } : null };
-      }, action.ref === undefined ? null : String(action.ref));
+      }, {ref:action.ref === undefined ? null : String(action.ref),keyboard:['press','type'].includes(action.action),...(action.action === 'click' ? {x:action.x,y:action.y} : {})});
     });
   }
 
@@ -117,7 +119,7 @@ export class Browser {
         case 'back': await page.goBack({ waitUntil: 'domcontentloaded' }); break;
         case 'click': if (element) await element.click(); else await page.mouse.click(command.x, command.y); break;
         case 'fill': await element.fill(command.text); break;
-        case 'type': await page.keyboard.insertText(command.text); break;
+        case 'type': if (element) await element.focus(); await page.keyboard.insertText(command.text); break;
         case 'select': await element.selectOption(command.text); break;
         case 'press': if (element) await element.press(command.text); else await page.keyboard.press(command.text); break;
         case 'scroll': await page.mouse.wheel(0, command.delta); break;

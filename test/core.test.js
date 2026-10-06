@@ -131,7 +131,16 @@ test('browser risk checks fail closed for checkout, credentials, dialogs and unk
   expect(browserActionRisk({action:'fill',ref:'0',text:'123'},{element:{tag:'input',autocomplete:'cc-number',label:'Number'}})).toBe('payment');
   expect(browserActionRisk({action:'dialog',choice:'accept'})).toBe('unknown');
   expect(browserActionRisk({action:'dialog',choice:'dismiss'})).toBe('safe');
+  expect(browserActionRisk({action:'dialog',choice:'accept'},{dialog:{type:'confirm',message:'Continue?'}})).toBe('interaction');
+  expect(browserActionRisk({action:'dialog',choice:'accept'},{dialog:{type:'confirm',message:'Pay now?'}})).toBe('payment');
+  expect(browserActionRisk({action:'dialog',choice:'accept'},{dialog:{type:'prompt',message:'Password?'}})).toBe('unknown');
   expect(browserActionRisk({action:'press',text:'Enter'})).toBe('unknown');
+  for (const action of ['press','type']) {
+    expect(browserActionRisk({action,text:'Enter'},{element:{tag:'input',label:'Enter a destination or property'}})).toBe('safe');
+    expect(browserActionRisk({action,text:'Enter'},{element:{tag:'input',label:'Name'}})).toBe('interaction');
+    expect(browserActionRisk({action,text:'Enter'},{element:{tag:'input',type:'password',label:'Password'}})).toBe('unknown');
+    expect(browserActionRisk({action,text:'Enter'},{element:{tag:'input',autocomplete:'cc-number'}})).toBe('payment');
+  }
   expect(browserActionRisk({action:'click',ref:'0'},{element:{tag:'a',href:'https://shop.test/?action=delete',label:'Link'}})).toBe('interaction');
 });
 

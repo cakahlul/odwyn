@@ -47,12 +47,12 @@ export function browserActionRisk(action, context = {}) {
   const el = context.element;
   // ponytail: conservative DOM heuristics; unknown targets ask rather than guessing site-side effects.
   const payment = /\b(pay(?:ment)?|checkout|billing|credit card|card number|cvv|cvc|buy|purchase|place order|donat(?:e|ion)|transfer|subscribe|subscription|book now|confirm booking|bayar|pembayaran|beli)\b/i;
-  if (context.hasPaymentFields || payment.test([context.url,el?.label,el?.context,el?.autocomplete,el?.href,action.reason].join(' ')) || /^cc-/.test(el?.autocomplete || '')) return 'payment';
-  if (action.action === 'dialog') return action.choice === 'dismiss' ? 'safe' : 'unknown';
+  if (context.hasPaymentFields || payment.test([context.url,el?.label,el?.context,el?.autocomplete,el?.href,context.dialog?.message,action.reason].join(' ')) || /^cc-/.test(el?.autocomplete || '')) return 'payment';
+  if (action.action === 'dialog') return action.choice === 'dismiss' ? 'safe' : ['alert','confirm'].includes(context.dialog?.type) ? 'interaction' : 'unknown';
   if (action.action === 'press' && ['Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown','Home','End'].includes(action.text)) return 'safe';
   if (!el || el.type === 'password' || /password|one-time-code/.test(el.autocomplete || '')) return 'unknown';
   const safeField = /\b(search|filter|sort|check.?in|check.?out|destination|dates?|adults?|children|rooms?|guests?|city|location|departure|arrival|budget)\b/i;
-  if (['fill','select'].includes(action.action)) return el.type === 'search' || safeField.test(el.label) ? 'safe' : 'interaction';
+  if (['fill','select','press','type'].includes(action.action)) return el.type === 'search' || safeField.test(el.label) ? 'safe' : 'interaction';
   if (action.action === 'click') {
     if (el.tag === 'a' && /^https?:/.test(el.href || '') && !/delete|remove|unsubscribe|logout|action=/i.test(el.href)) return 'safe';
     if (/^(search|find|filter|sort|next page|previous page|close|dismiss|accept (all )?cookies|reject (all )?cookies|cookie settings|show more|load more)\b/i.test(el.label)) return 'safe';
