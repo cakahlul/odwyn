@@ -118,9 +118,10 @@ export function createApp(options = {}) {
           await runtime.cancelRoom(roomAction[1]); return response({ok:true});
         }
         if (pathname === '/api/jobs' && req.method === 'POST') return response(runtime.submit(await json(req)), 201);
-        const jobAction = pathname.match(/^\/api\/jobs\/([a-f0-9-]{36})\/(answer|cancel|retry)$/);
+        const jobAction = pathname.match(/^\/api\/jobs\/([a-f0-9-]{36})\/(answer|cancel|retry|permissions)$/);
         if (jobAction && req.method === 'POST') {
           const [, id, action] = jobAction;
+          if (action === 'permissions') { runtime.setInteractionMode(id,(await json(req)).interactionMode); return response({ ok:true }); }
           if (action === 'answer') { runtime.answer(id, await json(req)); return response({ ok: true }); }
           if (action === 'cancel') { await runtime.cancel(id); return response({ ok: true }); }
           return response(runtime.retry(id), 201);

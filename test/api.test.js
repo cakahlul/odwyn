@@ -37,6 +37,10 @@ test('API protects files and browser control, persists uploads and validates sch
     expect(app.runtime.state.customization.name).toBe('Pip');
     const otherJob = await (await request('/api/jobs','POST',{prompt:'Separate chat',agentId:added.id})).json();
     expect(otherJob.agentId).toBe(added.id);
+    expect((await request(`/api/jobs/${otherJob.id}/permissions`,'POST',{interactionMode:'allow'},{origin:'https://evil.test'})).status).toBe(403);
+    expect((await request(`/api/jobs/${otherJob.id}/permissions`,'POST',{interactionMode:'invalid'})).status).toBe(400);
+    expect((await request(`/api/jobs/${otherJob.id}/permissions`,'POST',{interactionMode:'allow'})).status).toBe(200);
+    expect(app.runtime.state.jobs.find(job=>job.id===otherJob.id).interactionMode).toBe('allow');
     const shared = await request('/api/jobs','POST',{prompt:'Continue with Pip',agentId:primary.id,conversationId:otherJob.conversationId});
     expect(shared.status).toBe(201);
     const sharedJob = await shared.json(); expect(sharedJob.agentId).toBe(primary.id); expect(sharedJob.conversationId).toBe(otherJob.conversationId);

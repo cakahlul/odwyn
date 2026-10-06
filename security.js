@@ -40,6 +40,8 @@ export const interactions = new Set(['click','fill','type','press','select','upl
 
 export const interactionModes = ['confirm','safe','allow'];
 
+export const browserApprovalRequired = (mode, risk) => mode === 'confirm' || !['safe','interaction'].includes(risk) || mode === 'safe' && risk !== 'safe';
+
 export function browserActionRisk(action, context = {}) {
   if (!interactions.has(action.action)) return 'safe';
   const el = context.element;
@@ -54,8 +56,7 @@ export function browserActionRisk(action, context = {}) {
   if (action.action === 'click') {
     if (el.tag === 'a' && /^https?:/.test(el.href || '') && !/delete|remove|unsubscribe|logout|action=/i.test(el.href)) return 'safe';
     if (/^(search|find|filter|sort|next page|previous page|close|dismiss|accept (all )?cookies|reject (all )?cookies|cookie settings|show more|load more)\b/i.test(el.label)) return 'safe';
-    if (/^(save|send|delete|remove|archive|upload|publish|post)\b/i.test(el.label)) return 'interaction';
-    return 'unknown';
+    return 'interaction';
   }
   if (action.action === 'upload') return 'interaction';
   return 'unknown';

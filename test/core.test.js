@@ -125,13 +125,14 @@ test('browser risk checks fail closed for checkout, credentials, dialogs and unk
   const click={action:'click',ref:'0'};
   expect(browserActionRisk(click,{element:target})).toBe('safe');
   expect(browserActionRisk({action:'fill',ref:'0',text:'Name'},{element:{tag:'input',label:'Update profile'}})).toBe('interaction');
-  for (const context of [{url:'https://shop.test/checkout',element:target},{hasPaymentFields:true,element:target},{element:{...target,context:'Credit card payment'}},{element:{...target,label:'Confirm booking'}},{element:{...target,label:'Continue'}}]) expect(['payment','unknown']).toContain(browserActionRisk(click,context));
+  for (const context of [{url:'https://shop.test/checkout',element:target},{hasPaymentFields:true,element:target},{element:{...target,context:'Credit card payment'}},{element:{...target,label:'Confirm booking'}}]) expect(['payment','unknown']).toContain(browserActionRisk(click,context));
+  for (const label of ['Add Children','Next month','Continue']) expect(browserActionRisk(click,{element:{...target,label}})).toBe('interaction');
   expect(browserActionRisk({action:'fill',ref:'0',text:'secret'},{element:{tag:'input',type:'password',label:'Password'}})).toBe('unknown');
   expect(browserActionRisk({action:'fill',ref:'0',text:'123'},{element:{tag:'input',autocomplete:'cc-number',label:'Number'}})).toBe('payment');
   expect(browserActionRisk({action:'dialog',choice:'accept'})).toBe('unknown');
   expect(browserActionRisk({action:'dialog',choice:'dismiss'})).toBe('safe');
   expect(browserActionRisk({action:'press',text:'Enter'})).toBe('unknown');
-  expect(browserActionRisk({action:'click',ref:'0'},{element:{tag:'a',href:'https://shop.test/?action=delete',label:'Link'}})).toBe('unknown');
+  expect(browserActionRisk({action:'click',ref:'0'},{element:{tag:'a',href:'https://shop.test/?action=delete',label:'Link'}})).toBe('interaction');
 });
 
 test('conversation deletion removes messages, runs and indexed recall, preserving agents and files', () => {

@@ -461,6 +461,13 @@ $('#reply-agent').onchange = () => {
   if (room) { roomRecipients.set(room.id,$('#reply-agent').value); render(); }
   else void switchAgent($('#reply-agent').value,{sharedChat:conversationId,keepDraft:true});
 };
+$('#interaction-mode').onchange = async () => {
+  const selector = $('#interaction-mode'), mode = selector.value;
+  const jobs = state.jobs.filter(job => job.conversationId === conversationId && ['queued','running','waiting','takeover'].includes(job.status));
+  selector.disabled = true;
+  try { await perform(async () => { for (const job of jobs) await api(`/api/jobs/${job.id}/permissions`,{interactionMode:mode}); }); }
+  finally { selector.disabled = false; }
+};
 $('#settings-open').onclick = () => openSettings(); $('#connection-button').onclick = () => openSettings();
 $('#schedule-open').onclick = openSchedule;
 $('#menu-button').onclick = () => setNavigation(!document.body.classList.contains('nav-open'));

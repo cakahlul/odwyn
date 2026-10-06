@@ -208,7 +208,7 @@ test('approval modes auto-approve only allowed risks and never bypass payment co
     for (const mode of ['confirm','safe','allow']) {
       const job=runtime.submit({prompt:'Search and save',interactionMode:mode}); await runtime.drain();
       const invoke=action=>runtime.handleRequest({id:calls+100,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_browser',arguments:{reason:'Perform the requested action',...action}}});
-      for (const [target,auto] of [['Search',mode!=='confirm'],['Save profile',mode==='allow']]) {
+      for (const [target,auto] of [['Search',mode!=='confirm'],['Save profile',mode==='allow'],['Add Children',mode==='allow'],['Next month',mode==='allow'],['Continue',mode==='allow']]) {
         label=target; const before=calls, pending=invoke({action:'click',ref:'0'}); await Bun.sleep(10);
         if (auto) expect(job.pending).toBeFalsy();
         else { expect(job.pending.type).toBe('interaction'); expect(calls).toBe(before); runtime.answer(job.id,{requestId:job.pending.id,decision:'allow'}); }
@@ -221,6 +221,15 @@ test('approval modes auto-approve only allowed risks and never bypass payment co
       const unknown=invoke({action:'click',x:12,y:34}); await Bun.sleep(10);
       expect(job.pending.risk).toBe('unknown'); expect(calls).toBe(before);
       runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'}); await unknown;
+      if (mode === 'confirm') {
+        label='Add Children'; const pending=invoke({action:'click',ref:'0'}); await Bun.sleep(10);
+        runtime.setInteractionMode(job.id,'allow'); await pending;
+        expect(job.pending).toBe(null); expect(job.interactionMode).toBe('allow'); expect(calls).toBe(before+1);
+        label='Pay now'; const payment=invoke({action:'click',ref:'0'}); await Bun.sleep(10);
+        runtime.setInteractionMode(job.id,'allow'); expect(job.pending.risk).toBe('payment');
+        runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'}); await payment;
+        expect(()=>runtime.setInteractionMode(job.id,'invalid')).toThrow();
+      }
       await runtime.cancel(job.id);
     }
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true});}

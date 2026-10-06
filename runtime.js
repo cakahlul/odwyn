@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createJob, enqueueSchedules, recoverJobs, findAgent, findRoom } from './store.js';
-import { actions, interactions, validateAction, textInput, interactionModes, browserActionRisk } from './security.js';
+import { actions, interactions, validateAction, textInput, interactionModes, browserActionRisk, browserApprovalRequired } from './security.js';
 import { defaults, choices, toneInstructions, detailInstructions } from './public/profile.js';
 import { providerNames } from './providers.js';
 import { validateCommand, runCommand } from './terminal.js';
@@ -199,6 +199,16 @@ export class Runtime {
     return new Promise((resolve, reject) => this.requests.set(id, { job, resolve, reject }));
   }
 
+  setInteractionMode(jobId, mode) {
+    if (!interactionModes.includes(mode)) throw new Error('Choose an interaction mode.');
+    const job = this.state.jobs.find(j => j.id === jobId);
+    if (!job || !['queued','running','waiting','takeover'].includes(job.status)) throw new Error('Task is no longer active.');
+    job.interactionMode = mode;
+    if (job === this.active && !this.takeover && job.pending?.type === 'interaction' && !browserApprovalRequired(mode,job.pending.risk)) {
+      this.answer(job.id,{requestId:job.pending.id,decision:'allow'});
+    } else this.changed();
+  }
+
   answer(jobId, input) {
     const pending = this.requests.get(input.requestId);
     if (!pending || pending.job.id !== jobId || this.active !== pending.job) throw new Error('This request is no longer active.');
@@ -262,7 +272,7 @@ export class Runtime {
         const element = this.browser.last?.elements.find(el => el.ref === String(action.ref));
         const context = interactions.has(action.action) && this.browser.inspectAction ? await this.browser.inspectAction(action) : {url:this.browser.last?.url,element};
         const risk = browserActionRisk(action,context);
-        if (interactions.has(action.action) && (job.interactionMode === 'confirm' || ['payment','unknown'].includes(risk) || job.interactionMode === 'safe' && risk !== 'safe')) {
+        if (interactions.has(action.action) && browserApprovalRequired(job.interactionMode,risk)) {
           const url = context.url || this.browser.last?.url || '';
           const approval = await this.waitForOwner(job, { type: 'interaction', title: risk === 'payment' ? 'Approve payment action?' : `Allow ${action.action}?`, risk, detail: textInput(action.reason || 'Interact with this website.', 1000), target: context.element?.label || element?.label || (action.ref !== undefined ? `Element ${action.ref}` : `${action.x}, ${action.y}`), url, preview: element?.type === 'password' ? 'Password field (hidden)' : action.text?.slice(0, 500) });
           if (approval.decision === 'deny') throw new Error('Owner declined this interaction. Do not attempt the same action another way.');
