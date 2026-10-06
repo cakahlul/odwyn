@@ -83,6 +83,20 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     const jobs = app.runtime.state.jobs.filter(j=>j.conversationId===room.id).reverse();
     expect(room.messages.filter(m=>m.role==='user')).toHaveLength(1); expect(jobs).toHaveLength(2);
     expect(jobs.every(j=>j.interactionMode==='safe')).toBe(true);
+    const question = app.runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:jobs[0].threadId,turnId:jobs[0].turnId,tool:'odwyn_ask',arguments:{question:'Which destination?'}}});
+    await page.locator('#owner-answer').waitFor(); await page.locator('#owner-answer').fill('Kyoto, three days');
+    await page.locator('#owner-answer').evaluate(node=>{ node.setSelectionRange(5,5); window.typingAnswer=node; });
+    app.runtime.event(jobs[0],'Waiting for destination','Keep the same answer form');
+    await page.locator('.working-row small').filter({hasText:'Keep the same answer form'}).waitFor();
+    expect(await page.locator('#owner-answer').inputValue()).toBe('Kyoto, three days');
+    expect(await page.locator('#owner-answer').evaluate(node=>node===window.typingAnswer && node===document.activeElement && node.selectionStart===5)).toBe(true);
+    const requestId = jobs[0].pending.id;
+    complete(first,jobs[0],'Continue without owner input'); await app.runtime.drain();
+    expect(jobs[0].status).toBe('waiting'); expect(jobs[0].pending.id).toBe(requestId); expect(jobs[1].status).toBe('queued');
+    await page.locator('.answer-form button').click(); await question;
+    expect(JSON.parse(first.replies.at(-1).result.contentItems[0].text).answer).toBe('Kyoto, three days');
+    expect(jobs[0].status).toBe('running');
+
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=','base64');
     writeFileSync(join(app.runtime.workspace,'answer.png'),png);
     writeFileSync(join(app.runtime.workspace,'itinerary.csv'),'City,Days\nKyoto,2\n');

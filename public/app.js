@@ -315,7 +315,14 @@ function render() {
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
+    const pendingCard = $('#view .approval-card');
+    const pendingFocus = pendingCard?.contains(document.activeElement) ? document.activeElement : null;
     $('#view').innerHTML = view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state) : renderFiles(state);
+    const nextPendingCard = $('#view .approval-card');
+    if (pendingCard && nextPendingCard?.dataset.request === pendingCard.dataset.request) {
+      nextPendingCard.replaceWith(pendingCard);
+      pendingFocus?.focus({preventScroll:true});
+    }
     if (view === 'chat') insertMessages(state,conversationId);
     updateBrowser(state);
     $('#view').scrollTop = nearBottom ? $('#view').scrollHeight : previousScroll;
@@ -472,7 +479,7 @@ $('#room-discuss').onclick = () => {
   const room = currentRoom(); if (!room || busy || $('#room-discuss').disabled) return;
   $('#room-header').close();
   roomRecipients.set(room.id,'all'); $('#reply-agent').value = 'all';
-  if (!$('#prompt').value.trim()) $('#prompt').value = room.discussion?.goal || 'Continue the discussion. Respond to each other’s points, resolve disagreements, and suggest the next step.';
+  if (!$('#prompt').value.trim()) $('#prompt').value = room.discussion?.direction || room.discussion?.goal || 'Continue toward the shared goal from existing progress. Resolve only remaining issues and finish the requested result.';
   $('#composer').requestSubmit();
 };
 $('#add-agent').onclick = () => { setNavigation(false); openCustomization(false,true); };

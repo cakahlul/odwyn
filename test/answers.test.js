@@ -158,7 +158,7 @@ test('assistant cards cover shopping outcomes, preserve fallback content, and fi
       document.querySelector('#view').innerHTML = renderChat({customization:defaults,agents:[],jobs:[job],runtime:{activeJobId:job.id},conversations:[{id:'terminal-chat',createdAt:new Date().toISOString(),messages:[]}]},'terminal-chat');
       const code = document.querySelector('.approval-preview code');
       return [code.textContent, getComputedStyle(code).whiteSpace, document.querySelectorAll('.approval-card script').length, [...document.querySelectorAll('.approval-card [data-decision]')].map(button=>button.dataset.decision)];
-    }, command)).toEqual([command, 'pre-wrap', 0, ['allow','deny']]);
+    }, command)).toEqual([command, 'pre-wrap', 0, ['allow','deny','allow-run']]);
     expect(errors).toEqual([]);
   } finally {
     await browser.close(); server.stop(true); await app.close(); rmSync(directory, { recursive: true, force: true });

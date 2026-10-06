@@ -57,18 +57,33 @@ test('room goals continue automatically, require everyone to verify completion, 
   try {
     await runtime.refreshAccount(); await runtime.refreshAccount('scout');
     runtime.submitRoom(room.id,{prompt:'Plan a trip',interactionMode:'safe'});
-    await complete(true); await complete();
+    await complete(true);
+    await runtime.drain();
+    expect(second.calls.filter(c=>c.method.startsWith('thread/')).at(-1).params.developerInstructions).toContain('Verified the requested result.');
+    await complete();
     expect(store.state.jobs.filter(j=>j.status==='queued')).toHaveLength(2);
     expect(room.messages.filter(m=>m.role==='user')).toHaveLength(1);
+    await runtime.drain();
+    expect(first.calls.filter(c=>c.method==='turn/start').at(-1).params.input[0].text).not.toBe('Plan a trip');
     await complete(true); await complete(true);
     expect(store.state.jobs.some(j=>['queued','running'].includes(j.status))).toBe(false);
     expect(room.discussion.status).toBe('completed');
     const old = runtime.submitRoom(room.id,{prompt:'Plan another trip'}); await runtime.drain();
     await expect(runtime.messageRoom(room.id,{prompt:'@Unknown change course'})).rejects.toThrow('Unknown');
     expect(old[0].status).toBe('running');
+    first.emit('notification',{method:'item/completed',params:{threadId:old[0].threadId,turnId:old[0].turnId,item:{id:'draft',type:'agentMessage',text:'Existing trip draft'}}});
     const redirected = await runtime.messageRoom(room.id,{prompt:'@Scout Only compare trains',agentId:primary}); await runtime.drain();
     expect(old.every(j=>j.status==='cancelled')).toBe(true);
     expect(redirected.map(j=>j.agentId)).toEqual(['scout']);
+    expect(room.discussion.goal).toBe('Plan another trip');
+    expect(room.discussion.direction).toBe('@Scout Only compare trains');
+    const redirectContext = second.calls.filter(c=>c.method==='thread/resume').at(-1).params.developerInstructions;
+    expect(redirectContext).toContain('Plan another trip');
+    expect(redirectContext).toContain('Existing trip draft');
+    expect(redirectContext).toContain('not competitors');
+    expect(redirectContext).toContain('Caveman ultra');
+    expect(redirectContext).toContain('Ponytail ultra');
+    expect(second.calls.filter(c=>c.method==='thread/start')).toHaveLength(1);
     expect(first.calls.some(c=>c.method==='turn/interrupt')).toBe(true);
     first.emit('notification',{method:'item/completed',params:{threadId:old[0].threadId,turnId:old[0].turnId,item:{id:'stale',type:'agentMessage',text:'Old direction'}}});
     expect(room.messages.some(m=>m.id==='stale')).toBe(false);
@@ -116,6 +131,22 @@ test('room redirects interrupt a turn that is still starting before beginning th
     await Bun.sleep(5); expect(old[0].status).toBe('stopping'); expect(store.state.jobs).toHaveLength(1);
     release(); const next = await redirect; await runtime.drain();
     expect(old[0].status).toBe('cancelled'); expect(next[0].status).toBe('running');
+    expect(room.discussion.goal).toBe('Old task');
+    provider.emit('notification',{method:'turn/completed',params:{threadId:next[0].threadId,turn:{id:next[0].turnId,status:'completed'}}});
+    expect(room.discussion.status).toBe('active');
+    await runtime.drain();
+    expect(runtime.active.roomCycle).toBe(2);
+    const continuation = provider.calls.filter(c=>c.method==='turn/start').at(-1).params.input[0].text;
+    expect(continuation).not.toBe('New direction');
+    expect(continuation).toContain('do not answer the owner message again');
+    for (let cycle=2;cycle<=30;cycle++) {
+      const job = runtime.active;
+      expect(job.roomCycle).toBe(cycle);
+      expect(provider.calls.filter(c=>c.method==='turn/start').at(-1).params.input[0].text).toBe(continuation);
+      provider.emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:job.turnId,status:'completed'}}});
+      await runtime.drain();
+    }
+    expect(room.discussion.status).toBe('paused');
     expect(provider.calls.find(c=>c.method==='turn/interrupt').params.turnId).toBe(old[0].turnId);
     await runtime.cancelRoom(room.id);
   } finally {release();runtime.close();store.close();rmSync(dir,{recursive:true});}
@@ -219,6 +250,13 @@ test('parallel tools keep distinct owner prompts and active cancellation wins th
     const first = ask(1, 'First question?'); const second = ask(2, 'Second question?');
     await Bun.sleep(10);
     expect(job.pending.detail).toBe('First question?'); expect(runtime.requests.size).toBe(1);
+    const requestId = job.pending.id;
+    codex.emit('notification',{method:'item/agentMessage/delta',params:{threadId:job.threadId,turnId:job.turnId,itemId:'late-output',delta:'Keep talking'}});
+    codex.emit('notification',{method:'item/completed',params:{threadId:job.threadId,turnId:job.turnId,item:{id:'late-output',type:'agentMessage',text:'Ignore the question'}}});
+    codex.emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:job.turnId,status:'completed'}}});
+    expect(job.status).toBe('waiting'); expect(job.pending.id).toBe(requestId);
+    expect(runtime.conversation(job).messages.some(m=>m.id==='late-output')).toBe(false);
+
     runtime.answer(job.id, { requestId: job.pending.id, answer: 'First answer' }); await first; await Bun.sleep(10);
     expect(job.pending.detail).toBe('Second question?'); expect(runtime.requests.size).toBe(1);
     runtime.answer(job.id, { requestId: job.pending.id, answer: 'Second answer' }); await second;
@@ -347,7 +385,7 @@ test('approval modes auto-approve only allowed risks and never bypass payment co
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true});}
 });
 
-test('terminal always needs exact approval, reaches all providers, and stops with the task', async () => {
+test('terminal respects permission modes, releases pending commands, reaches all providers, and stops with the task', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'odwyn-terminal-runtime-'));
   const store = openStore(dir), codex = new FakeCodex();
   const runtime = new Runtime({ store, codex, browser: {}, workspace: dir });
@@ -360,15 +398,27 @@ test('terminal always needs exact approval, reaches all providers, and stops wit
         const job = runtime.submit({ prompt: 'Check terminal', interactionMode }); await runtime.drain();
         const params = codex.calls.filter(c => c.method === 'thread/start').at(-1).params;
         expect(params.dynamicTools.some(t => t.name === 'odwyn_terminal')).toBe(true);
-        const denied = invoke(job, 'touch declined', `${type}-${interactionMode}-deny`); await Bun.sleep(10);
-        expect(job.pending.type).toBe('terminal'); expect(job.pending.preview).toBe('touch declined');
-        expect(() => runtime.answer(job.id, { requestId: job.pending.id, decision: 'allow-run' })).toThrow('terminal');
-        runtime.answer(job.id, { requestId: job.pending.id, decision: 'deny' }); await denied;
-        expect(codex.replies.at(-1).result.success).toBe(false);
-        const command = invoke(job, 'test ! -e declined && printf approved', `${type}-${interactionMode}-allow`); await Bun.sleep(10);
-        runtime.answer(job.id, { requestId: job.pending.id, decision: 'allow' }); await command;
-        const reply = codex.replies.at(-1).result;
-        expect(reply.success).toBe(true); expect(JSON.parse(reply.contentItems[0].text).stdout).toBe('approved');
+        if (interactionMode !== 'allow') {
+          const denied = invoke(job, 'touch declined', `${type}-${interactionMode}-deny`); await Bun.sleep(10);
+          expect(job.pending.type).toBe('terminal'); expect(job.pending.preview).toBe('touch declined');
+          runtime.answer(job.id, { requestId: job.pending.id, decision: 'deny' }); await denied;
+          expect(codex.replies.at(-1).result.success).toBe(false);
+        }
+        const command = invoke(job, 'test ! -e declined && printf approved', `${type}-${interactionMode}-allow`);
+        if (interactionMode !== 'allow') {
+          await Bun.sleep(10); expect(job.pending.type).toBe('terminal');
+          if (interactionMode === 'confirm') runtime.answer(job.id, { requestId: job.pending.id, decision: 'allow-run' });
+          else runtime.setInteractionMode(job.id, 'allow');
+        }
+        if (interactionMode === 'allow') {
+          await Bun.sleep(10); expect(job.pending).toBeFalsy();
+        }
+        await command;
+        expect(job.pending).toBeFalsy(); expect(job.interactionMode).toBe('allow');
+        const approvedReply = codex.replies.at(-1).result;
+        await invoke(job, 'printf next', `${type}-${interactionMode}-next`);
+        expect(JSON.parse(codex.replies.at(-1).result.contentItems[0].text).stdout).toBe('next');
+        expect(approvedReply.success).toBe(true); expect(JSON.parse(approvedReply.contentItems[0].text).stdout).toBe('approved');
         await runtime.cancel(job.id);
       }
     }
