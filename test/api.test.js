@@ -99,6 +99,12 @@ test('API protects files and browser control, persists uploads and validates sch
     expect((await request('/api/appearance','PUT',{palette:'__proto__',motion:'system'})).status).toBe(400);
     expect(app.runtime.state.appearance).toEqual({palette:'harbor',motion:'reduced'});
     const appearanceStore=openStore(directory); expect(appearanceStore.state.appearance).toEqual({palette:'harbor',motion:'reduced'}); appearanceStore.close();
+    const override={...app.runtime.state.customization,overrideWorkspace:true,palette:'rose',motion:'system'};
+    expect((await request('/api/customization','PUT',override)).status).toBe(200);
+    const overrideStore=openStore(directory); expect(overrideStore.state.customization).toEqual(override); expect(overrideStore.state.appearance.palette).toBe('harbor'); overrideStore.close();
+    expect((await request('/api/customization','PUT',{...override,overrideWorkspace:'yes'})).status).toBe(400);
+    expect((await request('/api/customization','PUT',{...override,overrideWorkspace:false})).status).toBe(200);
+
     expect(app.runtime.state.currency).toBe('source');
     expect((await request('/api/preferences','PUT',{text:'Based in Jakarta',currency:'IDR'})).status).toBe(200);
     expect(app.runtime.state.currency).toBe('IDR');

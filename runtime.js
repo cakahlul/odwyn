@@ -88,7 +88,7 @@ export class Runtime {
     if (this.state.jobs.some(j => j.conversationId === id && ['queued','running','waiting','takeover','stopping'].includes(j.status))) throw new Error('Finish or stop this room discussion before sending another message.');
     for (const agentId of ids) {
       if (!room.memberIds.includes(agentId)) throw new Error('This agent is not in the room.');
-      if (!this.accounts.get(agentId)?.account) throw new Error(`Connect ${findAgent(this.state,agentId).customization?.name || defaults.name} in Settings before starting a discussion.`);
+      if (!this.accounts.get(agentId)?.account) throw new Error(`Connect ${findAgent(this.state,agentId).customization?.name || defaults.name} in Customize agent before starting a discussion.`);
     }
     const roundId = randomUUID();
     const jobs = ids.map((agentId,index) => {

@@ -13,7 +13,7 @@ for (const [storage, keys] of [[localStorage, ['agent','closed-agents','bubble-p
   }
 }
 
-let state = null, conversationId = null, view = 'chat', filter = 'all', signature = '', busy = false, attachments = [], providerSetup = false;
+let state = null, conversationId = null, view = 'chat', filter = 'all', signature = '', busy = false, attachments = [], providerSetup = false, providerAgentId = null;
 let workspace = null, agentId = localStorage.getItem('odwyn-agent'), switching = false, dockSignature = '';
 const drafts = new Map(JSON.parse(sessionStorage.getItem('odwyn-drafts') || '[]'));
 const closedAgents = new Set(JSON.parse(localStorage.getItem('odwyn-closed-agents') || '[]'));
@@ -27,7 +27,7 @@ const providers = { codex: ['Codex','gpt-6.1-sol'], claude: ['Claude Code','sonn
 const currencyNames = new Intl.DisplayNames(['en'],{type:'currency'});
 $('#preferred-currency').innerHTML = currencies.map(code=>`<option value="${code}">${code === 'source' ? 'Original currency' : `${code} · ${esc(currencyNames.of(code))}`}</option>`).join('');
 hydrateIcons(); setupBrowser(() => state);
-setupCustomization(() => state, async (result, adding, onboarding) => { signature = ''; await refresh(); if (adding) await switchAgent(result.id); if (adding || onboarding && !state.provider.configured) openSettings(true); });
+setupCustomization(() => state, async (result, adding, onboarding) => { signature = ''; await refresh(); if (adding) await switchAgent(result.id); if (adding || onboarding && !state.provider.configured) openAgentProvider(true); });
 
 function selectState() {
   if (!workspace) return;
@@ -47,7 +47,7 @@ function renderDock() {
     $('#sidebar-agent-list').innerHTML = data.map(agent => {
       const p = {...defaults,...agent.customization}, selected = agent.id === agentId;
       const label = selected ? 'Active' : closedAgents.has(agent.id) ? 'Closed' : 'Minimized';
-      return `<div class="sidebar-agent-row"><button class="sidebar-agent" data-select-agent="${esc(agent.id)}" aria-pressed="${selected}" title="Open ${esc(p.name)}">${avatarSvg(p)}<span><strong>${esc(p.name)}</strong><small>${esc(providers[agent.provider.type][0])} · ${agent.status === 'waiting' ? 'Needs you' : label}</small></span></button><details class="agent-menu" data-manage-agent="${esc(agent.id)}" ${openMenu === agent.id ? 'open' : ''}><summary aria-label="Manage ${esc(p.name)}" title="Manage ${esc(p.name)}">⋯</summary><div class="agent-menu-actions"><button data-agent-action="customize" data-agent-id="${esc(agent.id)}">Customize agent</button><button data-agent-action="settings" data-agent-id="${esc(agent.id)}">Agent settings</button><button class="delete-agent" data-agent-action="delete" data-agent-id="${esc(agent.id)}" ${data.length === 1 ? 'disabled title="Add a replacement before deleting your last agent"' : ''}>Delete agent</button></div></details></div>`;
+      return `<div class="sidebar-agent-row"><button class="sidebar-agent" data-select-agent="${esc(agent.id)}" aria-pressed="${selected}" title="Open ${esc(p.name)}">${avatarSvg(p)}<span><strong>${esc(p.name)}</strong><small>${esc(providers[agent.provider.type][0])} · ${agent.status === 'waiting' ? 'Needs you' : label}</small></span></button><details class="agent-menu" data-manage-agent="${esc(agent.id)}" ${openMenu === agent.id ? 'open' : ''}><summary aria-label="Manage ${esc(p.name)}" title="Manage ${esc(p.name)}">⋯</summary><div class="agent-menu-actions"><button data-agent-action="customize" data-agent-id="${esc(agent.id)}">Customize agent</button><button data-agent-action="settings" data-agent-id="${esc(agent.id)}">AI provider</button><button class="delete-agent" data-agent-action="delete" data-agent-id="${esc(agent.id)}" ${data.length === 1 ? 'disabled title="Add a replacement before deleting your last agent"' : ''}>Delete agent</button></div></details></div>`;
     }).join('');
     $('#reply-agent').innerHTML = (room ? '<option value="all">All agents</option>' : '') + data.filter(a => !room || room.memberIds.includes(a.id)).map(a => `<option value="${esc(a.id)}">${esc(a.customization?.name || defaults.name)}</option>`).join('');
     const recipient = roomRecipients.get(room?.id) || 'all';
@@ -259,10 +259,10 @@ function navigate(next = 'chat', id = null) {
 function render() {
   if (!state) return;
   renderDock();
-  applyProfile(state.customization,state.appearance);
+  applyProfile(agentId ? state.customization : null,state.appearance);
   $('#composer-area').setAttribute('aria-label','Message your assistant');
   renderRooms();
-  $('#new-chat').disabled = $('#settings-open').disabled = $('#connection-button').disabled = !agentId;
+  $('#new-chat').disabled = $('#connection-button').disabled = !agentId;
   document.querySelectorAll('[data-view]').forEach(button => button.disabled = !agentId);
   if (!agentId) {
     $('#agent-workspace').classList.remove('chat-start'); $('#main').classList.remove('chat-start'); $('#composer-area').hidden = true;
@@ -276,7 +276,7 @@ function render() {
   const providerName = providers[state.provider.type][0];
   $('#connection-label').textContent = state.runtime.account ? `${providerName} ready` : `Connect ${providerName}`;
   $('#connection-button').setAttribute('aria-label',$('#connection-label').textContent);
-  $('#connection-button').title = state.runtime.connectionError || (state.runtime.account ? `${providerName} · ${state.runtime.model}` : 'Configure your AI provider in Settings');
+  $('#connection-button').title = state.runtime.connectionError || (state.runtime.account ? `${providerName} · ${state.runtime.model}` : 'Configure your AI provider in Customize agent');
   const conversation = state.conversations.find(c => c.id === conversationId);
   const permissionJob = state.jobs.find(job=>job.conversationId === conversationId && job.id === state.runtime.activeJobId) || state.jobs.find(job=>job.conversationId === conversationId && job.status === 'queued');
   if (permissionJob && !$('#interaction-mode').disabled) $('#interaction-mode').value = permissionJob.interactionMode;
@@ -311,7 +311,7 @@ function render() {
   renderActivity(state,conversationId);
   const disabled = !!state.jobs.find(job => job.conversationId === conversationId && activeStatuses.includes(job.status));
   $('#send-button').disabled = disabled || busy; $('#send-button').title = disabled ? 'Finish or stop the active run before a follow-up.' : 'Send message';
-  if ($('#settings-dialog').open) updateAccount();
+  if ($('#customize-dialog').open && providerAgentId === state.agentId) updateAccount();
 }
 
 async function refresh() {
@@ -361,29 +361,36 @@ function providerFields() {
   $('#provider-base-url').required = isAPI;
   $('#provider-hint').textContent = type === 'claude' ? 'Uses Claude Code on this server. Sign in with claude auth login, then refresh below.' : isAPI ? 'Use a base URL such as https://api.openai.com/v1. Model must support tool calling; screenshots need vision.' : 'Uses Codex App Server with your ChatGPT subscription. Connect below after saving.';
 }
-function openSettings(onboarding = false) {
-  providerSetup = onboarding === true;
-  $('#settings-title').textContent = providerSetup ? 'Choose your AI provider' : `${state.customization?.name || 'Odwyn'} settings`;
-  $('#preferences-form').hidden = $('.personalization-summary').hidden = $('#appearance-open').hidden = providerSetup;
+function openSettings() {
+  $('#preferred-currency').value = workspace.currency || 'source';
+  $('#preferences').value = workspace.preferences || ''; $('#settings-status').textContent = '';
+  $('#settings-dialog').showModal();
+}
+function openAgentProvider(onboarding = false) {
+  providerSetup = onboarding;
+  openCustomization(false,false,false,true);
+}
+$('#customize-dialog').addEventListener('customization-open', () => {
+  providerAgentId = state.agentId;
   $('#provider-save').textContent = providerSetup ? 'Save & continue' : 'Save provider';
-  $('#preferred-currency').value = state.currency || 'source';
-  $('#preferences').value = state?.preferences || ''; $('#settings-status').textContent = ''; $('#provider-status').textContent = '';
+  $('#provider-status').textContent = '';
   $('#provider-type').value = state.provider.type; $('#provider-model').value = state.provider.model;
   $('#provider-base-url').value = state.provider.baseUrl; $('#provider-api-key').value = '';
   $('#provider-api-key').placeholder = state.provider.hasApiKey ? 'Saved key — leave blank to keep' : 'Optional for local models';
-  providerFields(); $('#provider-effort').value=state.provider.effort || 'default'; updateAccount(); $('#settings-dialog').showModal();
-}
+  providerFields(); $('#provider-effort').value=state.provider.effort || 'default'; updateAccount();
+});
+$('#customize-dialog').addEventListener('close', () => { if (!$('#customize-dialog').open) { providerSetup = false; providerAgentId = null; } });
 $('#provider-type').onchange = () => {
   const type = $('#provider-type').value;
   $('#provider-model').value = type === state.provider.type ? state.provider.model : providers[type][1];
   providerFields(); $('#provider-effort').value=type === state.provider.type ? state.provider.effort || 'default' : 'default';
 };
-$('#provider-form').onsubmit = async event => {
-  event.preventDefault(); $('#provider-save').disabled = true; $('#provider-status').textContent = 'Saving…';
+$('#provider-save').onclick = async () => {
+  const invalid = $('#provider-form').querySelector(':invalid'); if (invalid) return invalid.reportValidity(); $('#provider-save').disabled = true; $('#provider-status').textContent = 'Saving…';
   try {
-    await api(`/api/provider?agentId=${agentId}`,{ type:$('#provider-type').value, model:$('#provider-model').value, effort:$('#provider-effort').value, baseUrl:$('#provider-base-url').value, apiKey:$('#provider-api-key').value },'PUT');
+    await api(`/api/provider?agentId=${providerAgentId}`,{ type:$('#provider-type').value, model:$('#provider-model').value, effort:$('#provider-effort').value, baseUrl:$('#provider-base-url').value, apiKey:$('#provider-api-key').value },'PUT');
     $('#provider-api-key').value = ''; await refresh(); $('#provider-status').textContent = 'Saved. Applies to your next task.';
-    if (providerSetup) { $('#settings-dialog').close(); if (!state.customization) openCustomization(true,false,true); }
+    if (providerSetup) $('#customize-dialog').close();
   } catch (error) { $('#provider-status').textContent = error.message; }
   finally { $('#provider-save').disabled = false; }
 };
@@ -470,7 +477,7 @@ $('#interaction-mode').onchange = async () => {
   try { await perform(async () => { for (const job of jobs) await api(`/api/jobs/${job.id}/permissions`,{interactionMode:mode}); }); }
   finally { selector.disabled = false; render(); }
 };
-$('#settings-open').onclick = () => openSettings(); $('#connection-button').onclick = () => openSettings();
+$('#settings-open').onclick = () => openSettings(); $('#connection-button').onclick = () => openAgentProvider();
 $('#schedule-open').onclick = openSchedule;
 $('#menu-button').onclick = () => setNavigation(!document.body.classList.contains('nav-open'));
 $('#nav-scrim').onclick = () => { setNavigation(false); $('#menu-button').focus(); };
@@ -520,10 +527,10 @@ document.addEventListener('click', event => {
         await refresh(); localStorage.setItem('odwyn-agent',agentId || 'minimized');
         toast('Agent deleted. Chat history and files kept.');
       });
-    } else void switchAgent(id).then(() => { setNavigation(false); if (action === 'customize') openCustomization(); else openSettings(); });
+    } else void switchAgent(id).then(() => { setNavigation(false); if (action === 'customize') openCustomization(); else openAgentProvider(); });
     return;
   }
-  if (target.dataset.roomAgent) { $('#room-header').close(); const room = currentRoom(); void switchAgent(target.dataset.roomAgent,{sharedChat:room.id,keepDraft:true}).then(()=>openSettings()); return; }
+  if (target.dataset.roomAgent) { $('#room-header').close(); const room = currentRoom(); void switchAgent(target.dataset.roomAgent,{sharedChat:room.id,keepDraft:true}).then(()=>openAgentProvider()); return; }
   if (target.dataset.selectAgent) { void switchAgent(target.dataset.selectAgent); return; }
   if (target.dataset.closeAgent) { closeAgent(target.dataset.closeAgent); return; }
   if (target.dataset.agent) { void switchAgent(target.dataset.agent); return; }
@@ -570,5 +577,5 @@ if (state && agentId) { restoreDraft(); signature = ''; render(); }
 const initial = location.hash.slice(1).split('/');
 if (agentId && ['chat','runs','routines','files'].includes(initial[0])) { view = initial[0]; conversationId = initial[1] || null; signature = ''; render(); }
 if (state && agentId && !state.customization) openCustomization(true,false,true);
-else if (state && agentId && !state.provider.configured) openSettings(true);
+else if (state && agentId && !state.provider.configured) openAgentProvider(true);
 setInterval(() => { if (!document.hidden) void refresh(); }, 1000);

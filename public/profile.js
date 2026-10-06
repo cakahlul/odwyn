@@ -17,6 +17,10 @@ export const specializations = {general:'',research:'Research and compare option
 export function validateProfile(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Choose your customization.');
   const result = {};
+  if (input.overrideWorkspace !== undefined) {
+    if (typeof input.overrideWorkspace !== 'boolean') throw new Error('Choose whether to override workspace settings.');
+    result.overrideWorkspace = input.overrideWorkspace;
+  }
   for (const key of Object.keys(defaults)) {
     const value = input[key] === undefined && ['motion','language','detail','userContext'].includes(key) ? defaults[key] : input[key];
     if (typeof value !== 'string') throw new Error(`Choose ${key}.`);

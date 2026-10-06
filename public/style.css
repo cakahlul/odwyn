@@ -672,3 +672,6 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:6px; bac
 
 .conversation-edit-actions { display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px; }
 .danger-button { color:#a53c32; border-color:#a53c3255; }
+
+.workspace-override { display:flex; align-items:center; gap:10px; }
+.workspace-override input { width:auto; margin:0; accent-color:var(--orange-deep); }

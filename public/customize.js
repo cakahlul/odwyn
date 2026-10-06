@@ -4,22 +4,20 @@ import { defaults, palettes, choices, paletteDetails, specializations, avatarSvg
 let getState, saved, step = 0, firstRun = false, adding = false, editingId = null, lastApplied = '', appearanceOnly = false;
 const toneDetails = {warm:'Friendly, thoughtful, plainspoken.',crisp:'The answer first. Keep it short.',playful:'A little wit, plenty of useful work.',formal:'Courteous, precise, professional.',patient:'Calm explanations, one step at a time.',coach:'Practical next steps and encouragement.'};
 const shapeDetails = {squircle:'Your everyday companion',bean:'Soft and easygoing',orb:'Curious and bright',cat:'A little independent',robot:'Ready to get things done',fox:'Quick and resourceful'};
-const readDraft = () => Object.fromEntries(new FormData($('#customize-form')));
+const readDraft = () => ({...Object.fromEntries(new FormData($('#customize-form'))),overrideWorkspace:$('#workspace-override').checked});
 const setPalette = (node, palette) => Object.entries(palettes[palette].vars).forEach(([key,value])=>node.style.setProperty(`--${key}`,value));
 
 export function applyProfile(profile, appearance = {}) {
-  const p = {...defaults,...profile,...appearance}, signature = JSON.stringify(p);
+  const p = {...defaults,...profile,...(profile?.overrideWorkspace ? {} : appearance)}, signature = JSON.stringify([p,appearance]);
   if (signature === lastApplied) return;
   lastApplied = signature; setPalette(document.documentElement,p.palette);
   document.documentElement.dataset.motion = p.motion;
   $('#agent-name').textContent = p.name;
   $('#reply-agent').title = p.name;
   document.querySelectorAll('[data-agent-avatar]').forEach(node=>node.innerHTML=avatarSvg(p));
-  $('#owner-name').textContent = p.ownerName || 'Your space';
-  $('.owner-avatar').textContent = Array.from(p.ownerName || 'You')[0].toUpperCase();
-  $('#settings-title').textContent = 'Settings';
-  $('#settings-agent-name').textContent = p.name;
-  $('#settings-profile-summary').textContent = `${choices.shape[p.shape]} · ${choices.tone[p.tone]}`;
+  $('#owner-name').textContent = 'Odwyn settings';
+  $('.owner-avatar').textContent = 'O';
+  $('#settings-appearance-summary').textContent = `${palettes[appearance.palette || defaults.palette].name} · ${choices.motion[appearance.motion || defaults.motion]}`;
   $('label[for="prompt"]').textContent = `What would you like ${p.name} to do?`;
   document.title = p.name === 'Odwyn' ? 'Odwyn' : `Odwyn · ${p.name}`;
   $('link[rel="icon"]').href = `data:image/svg+xml,${encodeURIComponent(avatarSvg(p))}`;
@@ -27,7 +25,8 @@ export function applyProfile(profile, appearance = {}) {
 }
 
 function preview() {
-  const draft = readDraft(), p = {...draft,name:draft.name.trim() || defaults.name};
+  const draft = readDraft(), p = {...draft,...(!appearanceOnly && !draft.overrideWorkspace ? getState().appearance : {}),name:draft.name.trim() || defaults.name};
+  $('#workspace-override-fields').hidden = !appearanceOnly && !draft.overrideWorkspace;
   setPalette($('#profile-preview'),p.palette);
   $('#profile-preview').dataset.motion = p.motion;
   $('#preview-preferences').textContent = `${choices.language[p.language]} · ${choices.detail[p.detail]}`;
@@ -45,27 +44,31 @@ function showStep(next) {
   step = next;
   document.querySelectorAll('[data-profile-step]').forEach((node,i)=>node.hidden = i !== step);
   document.querySelectorAll('[data-custom-step]').forEach((button,i)=>{ if (i === step) button.setAttribute('aria-current','step'); else button.removeAttribute('aria-current'); });
-  $('#customize-back').hidden = appearanceOnly || step === 1;
-  $('#customize-next').hidden = appearanceOnly || step === 2; $('#customize-save').hidden = !appearanceOnly && step !== 2;
+  $('#customize-back').hidden = appearanceOnly || step === 1 || step === 0 || step === 3;
+  $('#customize-next').hidden = appearanceOnly || step !== 1; $('#customize-save').hidden = !appearanceOnly && ![0,2].includes(step);
   $('.profile-layout').scrollTop = 0;
   $('#customize-preview').textContent = 'Preview';
 }
 
-export function openCustomization(onboarding = false, newAgent = false, workspaceAppearance = false) {
+export function openCustomization(onboarding = false, newAgent = false, workspaceAppearance = false, providerOnly = false) {
   appearanceOnly = workspaceAppearance; firstRun = onboarding; adding = newAgent; editingId = getState()?.agentId;
   const count = getState().agents.length, palette = Object.keys(palettes)[count % Object.keys(palettes).length];
   const appearance = getState().appearance || {palette:getState()?.customization?.palette || defaults.palette,motion:getState()?.customization?.motion || defaults.motion};
-  const draft = adding ? {...defaults,...appearance,bodyColor:palettes[palette].colors[2],shape:Object.keys(choices.shape)[count % Object.keys(choices.shape).length],ownerName:getState()?.customization?.ownerName || '',name:`Agent ${count+1}`} : {...defaults,...getState()?.customization,...appearance};
+  const draft = adding ? {...defaults,...appearance,bodyColor:palettes[palette].colors[2],shape:Object.keys(choices.shape)[count % Object.keys(choices.shape).length],ownerName:getState()?.customization?.ownerName || '',name:`Agent ${count+1}`} : {...defaults,...appearance,...getState()?.customization,...(appearanceOnly ? appearance : {})};
   $('#settings-dialog').close(); $('#customize-form').reset();
-  for (const [key,value] of Object.entries(draft)) $('#customize-form').elements.namedItem(key).value = value;
+  for (const [key,value] of Object.entries(draft)) { const field = $('#customize-form').elements.namedItem(key); if (field) field.value = value; }
+  $('#workspace-override').checked = !adding && !!getState()?.customization?.overrideWorkspace;
+  $('#workspace-override-label').hidden = $('#workspace-inherit-hint').hidden = appearanceOnly;
   $('#customize-title').textContent = appearanceOnly ? firstRun ? 'Customize your workspace' : 'Workspace appearance' : adding ? 'Add an agent' : firstRun ? 'Create your first agent' : 'Customize your agent';
-  document.querySelectorAll('[data-custom-step]').forEach(button=>button.hidden = appearanceOnly ? true : button.dataset.customStep === '0');
+  document.querySelectorAll('[data-custom-step]').forEach(button=>button.hidden = appearanceOnly || adding && button.dataset.customStep === '3');
   $('.profile-steps').hidden = appearanceOnly;
   $('#customize-eyebrow').textContent = firstRun ? 'FIRST-TIME SETUP' : appearanceOnly ? 'WORKSPACE · ALL AGENTS' : adding ? 'NEW AGENT · MAXIMUM 5' : 'AGENT & PERSONALITY';
   $('#customize-save').childNodes[0].textContent = appearanceOnly ? firstRun ? 'Continue to create agent' : 'Save appearance' : adding ? 'Add agent' : firstRun ? 'Create agent & continue' : 'Save changes';
   $('#customize-defaults').textContent = appearanceOnly ? 'Use defaults & continue' : 'Keep defaults';
   $('#customize-defaults').hidden = !firstRun || adding; $('#customize-status').textContent = '';
-  showStep(appearanceOnly ? 0 : 1); preview(); $('#customize-dialog').showModal();
+  showStep(appearanceOnly ? 0 : providerOnly ? 3 : 1); preview();
+  $('#customize-dialog').dispatchEvent(new Event('customization-open'));
+  $('#customize-dialog').showModal();
 }
 
 async function save(profile) {
@@ -95,7 +98,6 @@ export function setupCustomization(state, onSaved) {
   });
   $('#tone-choices').innerHTML = Object.entries(choices.tone).map(([value,name])=>`<label class="tone-option"><input type="radio" name="tone" value="${value}"><span><strong>${name}</strong><small>${toneDetails[value]}</small></span></label>`).join('');
   $('#customize-form').oninput = preview;
-  $('#customize-open').onclick = () => openCustomization();
   $('#appearance-open').onclick = () => openCustomization(false,false,true);
   $('#customize-close').onclick = () => $('#customize-dialog').close();
   $('#customize-preview').onclick = () => {
@@ -110,8 +112,9 @@ export function setupCustomization(state, onSaved) {
   $('#preview-source').onclick = event => event.preventDefault();
   $('#customize-form').onsubmit = event => {
     event.preventDefault();
-    if (!appearanceOnly && step < 2) { $('#customize-next').click(); return; }
-    const invalid = !appearanceOnly && $('#customize-form').querySelector('input:invalid,textarea:invalid');
+    if (step === 3) { $('#provider-save').click(); return; }
+    if (!appearanceOnly && step === 1) { $('#customize-next').click(); return; }
+    const invalid = !appearanceOnly && $('#customize-form').querySelector('[data-profile-step="1"] :invalid,[data-profile-step="2"] :invalid');
     if (invalid) { showStep(Number(invalid.closest('[data-profile-step]').dataset.profileStep)); invalid.reportValidity(); return; }
     void save(readDraft());
   };

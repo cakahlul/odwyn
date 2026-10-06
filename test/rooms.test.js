@@ -36,6 +36,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
   const scout = await request('/api/agents',{...defaults,name:'Scout',shape:'fox'});
   const offline = await request('/api/agents',{...defaults,name:'Writer',shape:'robot'});
   app.runtime.providers.get(scout.id).stop(); app.runtime.addProvider(scout.id,second);
+  app.runtime.state.agents.find(agent=>agent.id===scout.id).provider.configured = true;
   await app.runtime.refreshAccount(); await app.runtime.refreshAccount(scout.id); app.runtime.changed();
   const browser = await chromium.launch(), context = await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:960}});
   const page = await context.newPage(), errors = []; page.setDefaultTimeout(5000); page.on('pageerror',error=>errors.push(error.message));
@@ -167,12 +168,12 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     expect(app.runtime.state.conversations.some(c=>c.id===room.id)).toBe(true);
     page.once('dialog',dialog=>dialog.accept()); await page.locator('#delete-room').click();
     await page.locator('#room-header').waitFor({state:'hidden'});
-    await page.getByRole('heading',{name:/^Message /}).waitFor();
+    await page.getByRole('heading',{name:/^Message /,level:1}).waitFor();
     expect(app.runtime.state.conversations.some(c=>c.id===room.id)).toBe(false);
     expect(app.runtime.state.jobs.some(j=>j.conversationId===room.id)).toBe(false);
     expect(await page.locator('#room-list [data-conversation]').count()).toBe(0);
     expect(app.runtime.state.agents).toHaveLength(3);
-    await page.reload(); await page.getByRole('heading',{name:/^Message /}).waitFor();
+    await page.reload(); await page.getByRole('heading',{name:/^Message /,level:1}).waitFor();
     expect(await page.locator('#history [data-conversation],#room-list [data-conversation]').count()).toBe(0);
     expect(errors).toEqual([]);
   } finally {await browser.close(); await server.stop(); await app.close(); rmSync(directory,{recursive:true,force:true});}
