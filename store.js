@@ -59,7 +59,7 @@ export function openStore(directory) {
       save();
     } catch(error) { state.conversations = conversations; state.jobs = jobs; throw error; }
   });
-  return { state, save, search, deleteConversation, close: () => db.close() };
+  return { directory, state, save, search, deleteConversation, close: () => db.close() };
 }
 
 export function findAgent(state, id = state.agents[0].id) {
@@ -142,6 +142,12 @@ export function createJob(state, input, recordMessage = true) {
 }
 
 export function recoverJobs(state) {
+  for (const room of state.conversations) if (room.kind === 'room' && room.discussion?.status === 'active') {
+    room.discussion.status = 'paused';
+    for (const job of state.jobs) if (job.roomRoundId === room.discussion.id && job.status === 'queued') {
+      job.status = 'interrupted'; job.error = 'The service restarted. Review progress before continuing the discussion.'; job.endedAt = new Date().toISOString();
+    }
+  }
   for (const job of state.jobs) if (['running','waiting','takeover','stopping'].includes(job.status)) {
     job.status = 'interrupted'; job.error = 'The service restarted. Review progress, then resume; completed website actions are not undone.'; job.endedAt = new Date().toISOString(); job.pending = null; delete job.stopResult;
   }

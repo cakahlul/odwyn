@@ -81,6 +81,10 @@ function renderRooms() {
   }
   $('#new-room').disabled = workspace.agents.length < 2 || busy || switching;
   const inRoom = !!room && !!agentId;
+  $('#room-composer-hint').hidden = !inRoom;
+  if (inRoom) $('#prompt').setAttribute('aria-describedby','room-composer-hint');
+  else $('#prompt').removeAttribute('aria-describedby');
+  renderMentions();
   document.body.classList.toggle('room-chat',inRoom);
   $('#room-details-open').hidden = !inRoom; $('#page-title').hidden = inRoom;
   $('#delete-conversation').disabled = busy || state.jobs.some(j=>j.conversationId===renamingConversationId && activeStatuses.includes(j.status));
@@ -107,6 +111,15 @@ function renderRooms() {
   }
   $('#composer-area').setAttribute('aria-label','Message the conversation room');
   $('label[for="prompt"]').textContent = `Message ${room.title}`;
+}
+
+function renderMentions() {
+  const room = currentRoom(), prompt = $('#prompt');
+  const match = prompt.value.slice(0,prompt.selectionStart).match(/(?:^|\s)@([^@\n"]*)$/);
+  const members = room && match ? workspace.agents.filter(a=>room.memberIds.includes(a.id) && (a.customization?.name || defaults.name).toLowerCase().startsWith(match[1].toLowerCase())) : [];
+  const html = members.map(a=>`<button type="button" class="text-button" data-mention-agent="${esc(a.id)}">@${esc(a.customization?.name || defaults.name)}</button>`).join('');
+  if ($('#room-mentions').innerHTML !== html) $('#room-mentions').innerHTML = html;
+  $('#room-mentions').hidden = !members.length;
 }
 
 function openRoomEditor(room = null) {
@@ -280,7 +293,7 @@ function render() {
   const conversation = state.conversations.find(c => c.id === conversationId);
   const permissionJob = state.jobs.find(job=>job.conversationId === conversationId && job.id === state.runtime.activeJobId) || state.jobs.find(job=>job.conversationId === conversationId && job.status === 'queued');
   if (permissionJob && !$('#interaction-mode').disabled) $('#interaction-mode').value = permissionJob.interactionMode;
-  $('#prompt').placeholder = conversation?.kind === 'room' ? $('#reply-agent').value === 'all' ? 'Ask your agents to discuss a topic…' : 'Message the selected agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
+  $('#prompt').placeholder = conversation?.kind === 'room' ? 'Set a goal, redirect discussion, or @mention an agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#agent-workspace').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { runs:'Task runs', routines:'Routines', files:'Files & results' }[view];
@@ -310,7 +323,7 @@ function render() {
   } else updateBrowser(state);
   renderActivity(state,conversationId);
   const disabled = !!state.jobs.find(job => job.conversationId === conversationId && activeStatuses.includes(job.status));
-  $('#send-button').disabled = disabled || busy; $('#send-button').title = disabled ? 'Finish or stop the active run before a follow-up.' : 'Send message';
+  $('#send-button').disabled = busy || disabled && conversation?.kind !== 'room'; $('#send-button').title = disabled ? conversation?.kind === 'room' ? 'Stop current discussion and send this direction' : 'Finish or stop the active run before a follow-up.' : 'Send message';
   if ($('#customize-dialog').open && providerAgentId === state.agentId) updateAccount();
 }
 
@@ -459,7 +472,7 @@ $('#room-discuss').onclick = () => {
   const room = currentRoom(); if (!room || busy || $('#room-discuss').disabled) return;
   $('#room-header').close();
   roomRecipients.set(room.id,'all'); $('#reply-agent').value = 'all';
-  if (!$('#prompt').value.trim()) $('#prompt').value = 'Continue the discussion. Respond to each other’s points, resolve disagreements, and suggest the next step.';
+  if (!$('#prompt').value.trim()) $('#prompt').value = room.discussion?.goal || 'Continue the discussion. Respond to each other’s points, resolve disagreements, and suggest the next step.';
   $('#composer').requestSubmit();
 };
 $('#add-agent').onclick = () => { setNavigation(false); openCustomization(false,true); };
@@ -500,11 +513,25 @@ $('#composer').onsubmit = async event => {
     const room = currentRoom();
     const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt: prompt + (attachments.length ? `\n\nAttached files: ${attachments.map(f => `${f.name} (fileId: ${f.id})`).join(', ')}` : ''), agentId:room ? $('#reply-agent').value : agentId, conversationId, interactionMode:$('#interaction-mode').value });
     $('#prompt').value = ''; $('#prompt').style.height = ''; attachments = []; $('#attachments').replaceChildren(); navigate('chat',room?.id || result.conversationId);
+    if (room) { roomRecipients.delete(room.id); $('#reply-agent').value = 'all'; }
   });
   busy = false; render();
 };
-$('#prompt').onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#composer').requestSubmit(); } };
-$('#prompt').oninput = () => { $('#prompt').style.height = 'auto'; $('#prompt').style.height = Math.min($('#prompt').scrollHeight,260) + 'px'; };
+$('#prompt').onkeydown = event => {
+  if (event.key === 'ArrowDown' && !$('#room-mentions').hidden) { event.preventDefault(); $('#room-mentions button')?.focus(); }
+  else if (event.key === 'Escape') $('#room-mentions').hidden = true;
+  else if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#composer').requestSubmit(); }
+};
+$('#prompt').oninput = () => { $('#prompt').style.height = 'auto'; $('#prompt').style.height = Math.min($('#prompt').scrollHeight,260) + 'px'; renderMentions(); };
+$('#prompt').onclick = renderMentions;
+$('#room-mentions').onclick = event => {
+  const button = event.target.closest('[data-mention-agent]'); if (!button) return;
+  const prompt = $('#prompt'), end = prompt.selectionStart;
+  const start = prompt.value.slice(0,end).lastIndexOf('@');
+  const name = workspace.agents.find(a=>a.id===button.dataset.mentionAgent)?.customization?.name || defaults.name;
+  prompt.setRangeText(`@${/^[\p{L}\p{N}_-]+$/u.test(name) ? name : JSON.stringify(name)} `,start,end,'end');
+  prompt.focus(); prompt.dispatchEvent(new Event('input'));
+};
 $('#preferences-form').onsubmit = event => { event.preventDefault(); void perform(async () => { await api('/api/preferences',{ text:$('#preferences').value, currency:$('#preferred-currency').value },'PUT'); $('#settings-status').textContent = 'Preferences saved. Applies to your next task.'; }); };
 $('#connect-account').onclick = () => perform(async () => { $('#connect-account').disabled = true; try { await api(`${state?.runtime.account || state?.provider.type !== 'codex' ? '/api/account/refresh' : '/api/account/login'}?agentId=${agentId}`,{}); } finally { $('#connect-account').disabled = false; } });
 $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(async () => {

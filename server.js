@@ -8,6 +8,7 @@ import { Browser } from './browser.js';
 import { Runtime } from './runtime.js';
 import { validateProfile, currencies, palettes, choices } from './public/profile.js';
 import { fetchImage } from './proxy.js';
+import { imageMime } from './files.js';
 
 const root = import.meta.dir;
 const headers = {
@@ -114,10 +115,14 @@ export function createApp(options = {}) {
           const room = updateRoom(store.state,roomAction[1],await json(req)); runtime.changed(); return response(room);
         }
         if (roomAction && req.method === 'POST' && roomAction[2]) {
-          if (roomAction[2] === 'messages') return response({jobs:runtime.submitRoom(roomAction[1],await json(req))},201);
+          if (roomAction[2] === 'messages') return response({jobs:await runtime.messageRoom(roomAction[1],await json(req))},201);
           await runtime.cancelRoom(roomAction[1]); return response({ok:true});
         }
-        if (pathname === '/api/jobs' && req.method === 'POST') return response(runtime.submit(await json(req)), 201);
+        if (pathname === '/api/jobs' && req.method === 'POST') {
+          const input = await json(req);
+          const room = store.state.conversations.find(c=>c.id===input.conversationId && c.kind==='room');
+          return response(room ? (await runtime.messageRoom(room.id,input))[0] : runtime.submit(input),201);
+        }
         const jobAction = pathname.match(/^\/api\/jobs\/([a-f0-9-]{36})\/(answer|cancel|retry|permissions)$/);
         if (jobAction && req.method === 'POST') {
           const [, id, action] = jobAction;
@@ -213,12 +218,17 @@ export function createApp(options = {}) {
           writeFileSync(join(directory, 'files', id), Buffer.from(await file.arrayBuffer()), { mode: 0o600 });
           const saved = { id, name, kind: 'upload', createdAt: new Date().toISOString() }; store.state.files.push(saved); runtime.changed(); return response(saved, 201);
         }
-        const fileMatch = pathname.match(/^\/api\/files\/([a-f0-9-]{36})$/);
+        const fileMatch = pathname.match(/^\/api\/files\/([a-f0-9-]{36})(\/preview)?$/);
         if (fileMatch && req.method === 'GET') {
           const file = store.state.files.find(file => file.id === fileMatch[1]);
           if (!file) return response({ error: 'File not found.' }, 404);
           const local = Bun.file(join(directory, 'files', file.id));
           if (!await local.exists()) return response({ error: 'File no longer exists.' }, 404);
+          if (fileMatch[2]) {
+            const mimeType = imageMime(Buffer.from(await local.slice(0,512).arrayBuffer()));
+            if (!mimeType) return response({error:'Image preview unavailable.'},415);
+            return new Response(local,{headers:{...headers,'content-type':mimeType,'content-disposition':'inline','content-security-policy':"sandbox; default-src 'none'; style-src 'unsafe-inline'"}});
+          }
           return new Response(local, { headers: { ...headers, 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` } });
         }
         if (pathname.startsWith('/api/')) return response({ error: 'Endpoint not found.' }, 404);

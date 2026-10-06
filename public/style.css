@@ -675,3 +675,12 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:6px; bac
 
 .workspace-override { display:flex; align-items:center; gap:10px; }
 .workspace-override input { width:auto; margin:0; accent-color:var(--orange-deep); }
+
+.room-mentions { display:flex; flex-wrap:wrap; gap:8px; padding:8px 0; }
+.room-mentions[hidden] { display:none; }
+.room-mentions button { min-height:32px; overflow-wrap:anywhere; max-width:100%; }
+
+.answer-file { max-width:min(100%,420px); min-width:0; }
+.answer-file img { display:block; max-width:100%; max-height:320px; object-fit:contain; border-radius:8px; margin-bottom:8px; }
+.answer-file .file-chip { max-width:100%; }
+.answer-file .file-chip span { overflow-wrap:anywhere; min-width:0; }

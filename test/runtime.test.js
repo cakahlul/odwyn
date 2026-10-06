@@ -1,9 +1,9 @@
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openStore, createRoom, deleteAgent } from '../store.js';
+import { openStore, createRoom, deleteAgent, recoverJobs } from '../store.js';
 import { Runtime } from '../runtime.js';
 import { defaults } from '../public/profile.js';
 
@@ -19,6 +19,107 @@ class FakeCodex extends EventEmitter {
   respond(id, result) { this.replies.push({ id, result }); }
   reject() {}
 }
+
+test('AI file attachments persist in ordinary chats and rooms with the producing agent', async () => {
+  const dir = mkdtempSync(join(tmpdir(),'odwyn-file-runtime-')), store = openStore(dir), codex = new FakeCodex();
+  const primary = store.state.agents[0].id; store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
+  const room = createRoom(store.state,{title:'Files room',memberIds:[primary,'scout']});
+  const runtime = new Runtime({store,codex,browser:{},workspace:dir});
+  try {
+    await runtime.refreshAccount(); writeFileSync(join(dir,'report.csv'),'Name,Result\nTask,Done\n');
+    for (const conversationId of [null,room.id]) {
+      const job = runtime.submit({prompt:'Send report',conversationId,agentId:primary}); await runtime.drain();
+      await runtime.handleRequest({id:job.id,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_send_file',arguments:{path:'report.csv'}}});
+      expect(codex.replies.at(-1).result.success).toBe(true);
+      const file = store.state.files.find(f=>f.id===job.files[0]); expect(file.jobId).toBe(job.id);
+      expect(readFileSync(join(dir,'files',file.id),'utf8')).toContain('Task,Done');
+      await runtime.cancel(job.id);
+    }
+    const saved = openStore(dir); expect(saved.state.files.filter(f=>f.kind==='generated')).toHaveLength(2); saved.close();
+  } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('room goals continue automatically, require everyone to verify completion, and accept redirects', async () => {
+  const dir = mkdtempSync(join(tmpdir(),'odwyn-room-goals-'));
+  const store = openStore(dir), first = new FakeCodex(), second = new FakeCodex();
+  store.state.customization = {...defaults,name:'Pip'};
+  const primary = store.state.agents[0].id;
+  store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
+  const room = createRoom(store.state,{title:'Goal room',memberIds:[primary,'scout']});
+  const runtime = new Runtime({store,codex:first,browser:{},workspace:dir}); runtime.addProvider('scout',second);
+  const complete = async (done = false) => {
+    await runtime.drain(); const job = runtime.active, provider = runtime.providers.get(job.agentId);
+    if (done) await runtime.handleRequest({id:job.id,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_room_done',arguments:{summary:'Verified the requested result.'}}});
+    provider.emit('notification',{method:'item/completed',params:{threadId:job.threadId,turnId:job.turnId,item:{id:job.id,type:'agentMessage',text:`Progress from ${job.agentId}`}}});
+    provider.emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:job.turnId,status:'completed'}}});
+    return job;
+  };
+  try {
+    await runtime.refreshAccount(); await runtime.refreshAccount('scout');
+    runtime.submitRoom(room.id,{prompt:'Plan a trip',interactionMode:'safe'});
+    await complete(true); await complete();
+    expect(store.state.jobs.filter(j=>j.status==='queued')).toHaveLength(2);
+    expect(room.messages.filter(m=>m.role==='user')).toHaveLength(1);
+    await complete(true); await complete(true);
+    expect(store.state.jobs.some(j=>['queued','running'].includes(j.status))).toBe(false);
+    expect(room.discussion.status).toBe('completed');
+    const old = runtime.submitRoom(room.id,{prompt:'Plan another trip'}); await runtime.drain();
+    await expect(runtime.messageRoom(room.id,{prompt:'@Unknown change course'})).rejects.toThrow('Unknown');
+    expect(old[0].status).toBe('running');
+    const redirected = await runtime.messageRoom(room.id,{prompt:'@Scout Only compare trains',agentId:primary}); await runtime.drain();
+    expect(old.every(j=>j.status==='cancelled')).toBe(true);
+    expect(redirected.map(j=>j.agentId)).toEqual(['scout']);
+    expect(first.calls.some(c=>c.method==='turn/interrupt')).toBe(true);
+    first.emit('notification',{method:'item/completed',params:{threadId:old[0].threadId,turnId:old[0].turnId,item:{id:'stale',type:'agentMessage',text:'Old direction'}}});
+    expect(room.messages.some(m=>m.id==='stale')).toBe(false);
+    await complete(true);
+    expect(room.discussion.status).toBe('completed');
+    store.state.agents.find(a=>a.id==='scout').customization.name='Travel Scout';
+    expect(runtime.submitRoom(room.id,{prompt:'@"Travel Scout" Check times'}).map(j=>j.agentId)).toEqual(['scout']);
+    await runtime.cancelRoom(room.id);
+    expect(room.discussion.status).toBe('stopped');
+    expect(runtime.submitRoom(room.id,{prompt:'@Pip @"Travel Scout" Compare trains'})).toHaveLength(2);
+    const recovered = structuredClone(store.state); recoverJobs(recovered);
+    expect(recovered.conversations.find(c=>c.id===room.id).discussion.status).toBe('paused');
+    expect(recovered.jobs.some(j=>['running','queued'].includes(j.status))).toBe(false);
+    await runtime.cancelRoom(room.id);
+    runtime.submitRoom(room.id,{prompt:'Keep researching'});
+    for (let turn=0;turn<30;turn++) await complete();
+    expect(room.discussion.status).toBe('paused');
+    expect(store.state.jobs.filter(j=>j.roomRoundId===room.discussion.id)).toHaveLength(30);
+    expect(store.state.jobs.some(j=>['running','queued'].includes(j.status))).toBe(false);
+    const paused = store.state.jobs[0]; expect(paused.status).toBe('interrupted');
+    const resumed = runtime.retry(paused.id); await runtime.drain();
+    expect(resumed.recovering).toBe(true); expect(resumed.prompt).toBe('Keep researching');
+    expect(room.discussion.status).toBe('active'); expect(room.discussion.round).toBe(1);
+    await runtime.cancelRoom(room.id);
+  } finally {runtime.close();store.close();rmSync(dir,{recursive:true});}
+});
+
+test('room redirects interrupt a turn that is still starting before beginning the new direction', async () => {
+  const dir = mkdtempSync(join(tmpdir(),'odwyn-room-start-')), store = openStore(dir), provider = new FakeCodex();
+  const primary = store.state.agents[0].id;
+  store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
+  const room = createRoom(store.state,{title:'Starting room',memberIds:[primary,'scout']});
+  const runtime = new Runtime({store,codex:provider,browser:{},workspace:dir});
+  const original = provider.request.bind(provider); let release, started;
+  const starting = new Promise(resolve=>started=resolve), gate = new Promise(resolve=>release=resolve);
+  provider.request = async (method,params) => {
+    const result = await original(method,params);
+    if (method==='turn/start' && provider.calls.filter(c=>c.method==='turn/start').length===1) { started(); await gate; }
+    return result;
+  };
+  try {
+    await runtime.refreshAccount();
+    const old = runtime.submitRoom(room.id,{prompt:'Old task',agentId:primary}); await starting;
+    const redirect = runtime.messageRoom(room.id,{prompt:'New direction',agentId:primary});
+    await Bun.sleep(5); expect(old[0].status).toBe('stopping'); expect(store.state.jobs).toHaveLength(1);
+    release(); const next = await redirect; await runtime.drain();
+    expect(old[0].status).toBe('cancelled'); expect(next[0].status).toBe('running');
+    expect(provider.calls.find(c=>c.method==='turn/interrupt').params.turnId).toBe(old[0].turnId);
+    await runtime.cancelRoom(room.id);
+  } finally {release();runtime.close();store.close();rmSync(dir,{recursive:true});}
+});
 
 test('room discussions share one owner message, take turns with context, and stop the whole round', async () => {
   const dir = mkdtempSync(join(tmpdir(),'odwyn-room-runtime-'));

@@ -71,13 +71,17 @@ test('API protects files and browser control, persists uploads and validates sch
     // Keep this API fixture queued; runtime turn routing is covered separately.
     app.runtime.takeover = true;
     const discussion = await request(`/api/rooms/${room.id}/messages`,'POST',{prompt:'Discuss options'});
-    expect(discussion.status).toBe(201); expect((await discussion.json()).jobs).toHaveLength(2);
-    expect((await request(`/api/rooms/${room.id}/messages`,'POST',{prompt:'Overlapping round'})).status).toBe(400);
+    expect(discussion.status).toBe(201); const oldTurns = (await discussion.json()).jobs; expect(oldTurns).toHaveLength(2);
+    expect((await request(`/api/rooms/${room.id}/messages`,'POST',{prompt:'@Missing invalid redirect'})).status).toBe(400);
+    expect(oldTurns.every(j=>app.runtime.state.jobs.find(saved=>saved.id===j.id).status==='queued')).toBe(true);
+    expect((await request(`/api/rooms/${room.id}/messages`,'POST',{prompt:'New direction'})).status).toBe(201);
+    expect(oldTurns.every(j=>app.runtime.state.jobs.find(saved=>saved.id===j.id).status==='cancelled')).toBe(true);
+    expect((await request('/api/jobs','POST',{conversationId:room.id,prompt:'Redirect through jobs API'})).status).toBe(201);
     expect((await request(`/api/rooms/${room.id}`,'PATCH',{title:'Busy edit',memberIds:members})).status).toBe(400);
     expect((await request(`/api/rooms/${room.id}/cancel`,'POST',{})).status).toBe(200);
     app.runtime.takeover = false;
     for (const id of members) app.runtime.accounts.set(id,{account:null});
-    expect(app.runtime.state.conversations.find(c=>c.id===room.id).messages).toHaveLength(1);
+    expect(app.runtime.state.conversations.find(c=>c.id===room.id).messages).toHaveLength(3);
     const savedRoom = openStore(directory); expect(savedRoom.state.conversations.find(c=>c.id===room.id).title).toBe('Weekend planning'); savedRoom.close();
     expect((await request('/api/browser/action','POST',{action:'navigate',url:'https://example.com'})).status).toBe(409);
     const job = await (await request('/api/jobs','POST',{prompt:'Read a website'})).json();
@@ -90,6 +94,14 @@ test('API protects files and browser control, persists uploads and validates sch
     const download = await request(`/api/files/${uploaded.id}`);
     expect(download.headers.get('content-type')).toBe('application/octet-stream');
     expect(await download.text()).toBe('safe content');
+    expect((await request(`/api/files/${uploaded.id}/preview`)).status).toBe(415);
+    const imageForm = new FormData(); imageForm.append('file',new File([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=','base64')],'answer.png'));
+    const image = await (await app.fetch(new Request('https://assistant.test/api/files',{method:'POST',headers:{authorization:headers.authorization,origin:headers.origin},body:imageForm}))).json();
+    const preview = await request(`/api/files/${image.id}/preview`);
+    expect(preview.status).toBe(200); expect(preview.headers.get('content-type')).toBe('image/png');
+    expect(preview.headers.get('content-disposition')).toBe('inline');
+    expect((await request(`/api/files/${image.id}`)).headers.get('content-disposition')).toContain('attachment;');
+    expect((await app.fetch(new Request(`https://assistant.test/api/files/${image.id}/preview`))).status).toBe(401);
     expect((await app.fetch(new Request(`https://assistant.test/api/files/${uploaded.id}`))).status).toBe(401);
     expect((await request('/api/files/../../.env')).status).toBe(404);
     const profileBefore=JSON.stringify(app.runtime.state.customization);
