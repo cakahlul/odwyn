@@ -2,8 +2,9 @@ module.exports = {
   apps: [{
     name: 'odwyn',
     cwd: __dirname,
-    script: 'server.js',
-    interpreter: process.env.BUN_PATH || 'bun',
+    script: process.env.BUN_PATH || 'bun',
+    args: 'server.js',
+    interpreter: 'none',
     instances: 1,
     exec_mode: 'fork',
     autorestart: true,
