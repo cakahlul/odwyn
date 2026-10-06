@@ -1,11 +1,12 @@
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore, createRoom, deleteAgent, recoverJobs } from '../store.js';
 import { Runtime } from '../runtime.js';
-import { defaults } from '../public/profile.js';
+import { defaults, agentModeInstructions } from '../public/profile.js';
 
 class FakeCodex extends EventEmitter {
   child = {}; calls = []; replies = [];
@@ -49,7 +50,7 @@ test('room goals continue automatically, require everyone to verify completion, 
   const runtime = new Runtime({store,codex:first,browser:{},workspace:dir}); runtime.addProvider('scout',second);
   const complete = async (done = false) => {
     await runtime.drain(); const job = runtime.active, provider = runtime.providers.get(job.agentId);
-    if (done) await runtime.handleRequest({id:job.id,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_room_done',arguments:{summary:'Verified the requested result.'}}});
+    if (done) await runtime.handleRequest({id:job.id,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_room_done',arguments:{summary:'Verified the requested result.',...(room.discussion.outcome ? {proposalId:room.discussion.outcome.id} : {result:'Shared trip result.',nextPlan:'Review dates before booking.'})}}});
     provider.emit('notification',{method:'item/completed',params:{threadId:job.threadId,turnId:job.turnId,item:{id:job.id,type:'agentMessage',text:`Progress from ${job.agentId}`}}});
     provider.emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:job.turnId,status:'completed'}}});
     return job;
@@ -58,6 +59,7 @@ test('room goals continue automatically, require everyone to verify completion, 
     await runtime.refreshAccount(); await runtime.refreshAccount('scout');
     runtime.submitRoom(room.id,{prompt:'Plan a trip',interactionMode:'safe'});
     await complete(true);
+    expect(room.discussion.outcome.result).toBe('Shared trip result.');
     await runtime.drain();
     expect(second.calls.filter(c=>c.method.startsWith('thread/')).at(-1).params.developerInstructions).toContain('Verified the requested result.');
     await complete();
@@ -68,6 +70,10 @@ test('room goals continue automatically, require everyone to verify completion, 
     await complete(true); await complete(true);
     expect(store.state.jobs.some(j=>['queued','running'].includes(j.status))).toBe(false);
     expect(room.discussion.status).toBe('completed');
+    const report = room.messages.filter(m=>m.roomReport);
+    expect(report).toHaveLength(1); expect(report[0].agentId).toBe(primary);
+    expect(report[0].text).toContain('Shared trip result.');
+    expect(report[0].text).toContain('Review dates before booking.');
     const old = runtime.submitRoom(room.id,{prompt:'Plan another trip'}); await runtime.drain();
     await expect(runtime.messageRoom(room.id,{prompt:'@Unknown change course'})).rejects.toThrow('Unknown');
     expect(old[0].status).toBe('running');
@@ -109,6 +115,54 @@ test('room goals continue automatically, require everyone to verify completion, 
     expect(room.discussion.status).toBe('active'); expect(room.discussion.round).toBe(1);
     await runtime.cancelRoom(room.id);
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true});}
+});
+
+test('room agents agree on one revised project recommendation and publish one coordinator report', async () => {
+  const dir = mkdtempSync(join(tmpdir(),'odwyn-room-agreement-')), store = openStore(dir);
+  const first = new FakeCodex(), second = new FakeCodex(), primary = store.state.agents[0].id;
+  store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
+  const room = createRoom(store.state,{title:'Tere Report',memberIds:[primary,'scout']});
+  const runtime = new Runtime({store,codex:first,browser:{},workspace:dir}); runtime.addProvider('scout',second);
+  const verify = async args => {
+    const job = runtime.active, provider = runtime.providers.get(job.agentId);
+    await runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_room_done',arguments:{summary:'Checked against project requirements.',...args}}});
+    return provider.replies.at(-1).result.success;
+  };
+  const finish = async () => {
+    const job = runtime.active;
+    runtime.providers.get(job.agentId).emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:job.turnId,status:'completed'}}});
+    await runtime.drain();
+  };
+  try {
+    await runtime.refreshAccount(); await runtime.refreshAccount('scout');
+    runtime.submitRoom(room.id,{prompt:'What can we improve in Tere Report?'}); await runtime.drain();
+    expect(await verify({result:'Add a chat feature.',nextPlan:'Build chat.'})).toBe(true);
+    const original = room.discussion.outcome.id;
+    await finish();
+    expect(await verify({})).toBe(false); // Independent completion is not agreement.
+    expect(room.discussion.outcome.confirmations.scout).toBeUndefined();
+    expect(await verify({proposalId:original,result:'Prioritize report accuracy before adding features.',nextPlan:'Measure report errors, fix the top cause, then recheck a sample.'})).toBe(true);
+    const revised = room.discussion.outcome.id;
+    expect(revised).not.toBe(original); expect(room.discussion.outcome.confirmations[primary]).toBeUndefined();
+    await finish();
+    expect(room.discussion.status).toBe('active'); expect(runtime.active.agentId).toBe(primary);
+    const sharedContext = first.calls.filter(c=>c.method==='thread/resume').at(-1).params.developerInstructions;
+    expect(sharedContext).toContain('Prioritize report accuracy');
+    expect(sharedContext.endsWith(agentModeInstructions)).toBe(true);
+    expect(await verify({proposalId:original})).toBe(false);
+    expect(room.discussion.outcome.confirmations[primary]).toBeUndefined();
+    expect(await verify({proposalId:revised})).toBe(true); await finish();
+    expect(room.discussion.status).toBe('completed'); expect(runtime.active).toBe(null);
+    expect(store.state.jobs.some(j=>['queued','running'].includes(j.status))).toBe(false);
+    const reports = room.messages.filter(m=>m.roomReport);
+    expect(reports).toHaveLength(1); expect(reports[0].agentId).toBe(primary);
+    expect(reports[0].text).toContain('Prioritize report accuracy before adding features.');
+    expect(reports[0].text).toContain('Measure report errors, fix the top cause, then recheck a sample.');
+    expect(reports[0].text).not.toContain('Build chat.');
+    await runtime.messageRoom(room.id,{prompt:'What did we agree?',agentId:primary}); await runtime.drain();
+    expect(first.calls.filter(c=>c.method==='thread/resume').at(-1).params.developerInstructions).toContain(JSON.stringify(reports[0].text));
+    await runtime.cancelRoom(room.id);
+  } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
 });
 
 test('room redirects interrupt a turn that is still starting before beginning the new direction', async () => {
@@ -213,9 +267,10 @@ test('real tool protocol pauses interactions until exact approval and resumes th
   expect(codex.calls.find(c => c.method === 'thread/start').params.dynamicTools.every(t => t.name.startsWith('odwyn_'))).toBe(true);
   const identity = codex.calls.find(c => c.method === 'thread/start').params.developerInstructions;
   expect(identity).toContain('Existing chat context');
-  expect(identity).toContain('"Pip"'); expect(identity).toContain('"Alex"'); expect(identity).toContain('Travel planning'); expect(identity).toContain('Concise and direct');
+  expect(identity).toContain('"Pip"'); expect(identity).toContain('"Alex"'); expect(identity).toContain('Travel planning'); expect(identity).toContain('Communication: Caveman ultra');
+  expect(identity.endsWith(agentModeInstructions)).toBe(true);
   expect(identity).toContain('Owner preferred currency: IDR'); expect(identity).toContain('exchange rate verified using the browser'); expect(identity).toContain('Receipts and confirmed charges keep their exact original amounts');
-  expect(identity).toContain('Bahasa Indonesia'); expect(identity).toContain('useful examples'); expect(identity).toContain('Beginner traveler');
+  expect(identity).toContain('Bahasa Indonesia'); expect(identity).toContain('Reply depth: shortest complete answer'); expect(identity).toContain('Beginner traveler');
   const handle = runtime.handleRequest({ id: 77, method: 'item/tool/call', params: { threadId: 'thread-test', turnId: 'turn-test', tool: 'odwyn_browser', arguments: { action: 'click', ref: '0', reason: 'Submit the requested form' } } });
   await Bun.sleep(10);
   expect(job.status).toBe('waiting'); expect(browserCalls).toHaveLength(0);
@@ -398,6 +453,7 @@ test('terminal respects permission modes, releases pending commands, reaches all
         const job = runtime.submit({ prompt: 'Check terminal', interactionMode }); await runtime.drain();
         const params = codex.calls.filter(c => c.method === 'thread/start').at(-1).params;
         expect(params.dynamicTools.some(t => t.name === 'odwyn_terminal')).toBe(true);
+        expect(params.developerInstructions.endsWith(agentModeInstructions)).toBe(true);
         if (interactionMode !== 'allow') {
           const denied = invoke(job, 'touch declined', `${type}-${interactionMode}-deny`); await Bun.sleep(10);
           expect(job.pending.type).toBe('terminal'); expect(job.pending.preview).toBe('touch declined');

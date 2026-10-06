@@ -159,6 +159,15 @@ test('assistant cards cover shopping outcomes, preserve fallback content, and fi
       const code = document.querySelector('.approval-preview code');
       return [code.textContent, getComputedStyle(code).whiteSpace, document.querySelectorAll('.approval-card script').length, [...document.querySelectorAll('.approval-card [data-decision]')].map(button=>button.dataset.decision)];
     }, command)).toEqual([command, 'pre-wrap', 0, ['allow','deny','allow-run']]);
+    expect(await page.evaluate(async () => {
+      const { insertMessages } = await import('/views.js');
+      const { defaults } = await import('/profile.js');
+      const at = new Date().toISOString();
+      document.querySelector('#view').innerHTML = '<div id="messages"></div>';
+      insertMessages({customization:defaults,agents:[{id:'lead',customization:{...defaults,name:'Coordinator'}},{id:'reviewer',customization:{...defaults,name:'Reviewer'}}],files:[{id:'report-file',name:'review.csv',mimeType:'text/csv'}],jobs:[{id:'review-job',files:['report-file']}],conversations:[{id:'agreed-room',messages:[{id:'review',role:'assistant',agentId:'reviewer',jobId:'review-job',at,text:'Checked results.'},{id:'agreed',role:'assistant',agentId:'lead',jobId:'review-job',roomReport:true,at,text:'Agreed result: fix totals.'}]}]},'agreed-room');
+      const replies = [...document.querySelectorAll('.message-assistant')];
+      return replies.map(node=>[node.querySelector('.message-meta strong').textContent,node.querySelectorAll('.answer-file').length]);
+    })).toEqual([['Reviewer',1],['Coordinator',0]]);
     expect(errors).toEqual([]);
   } finally {
     await browser.close(); server.stop(true); await app.close(); rmSync(directory, { recursive: true, force: true });
