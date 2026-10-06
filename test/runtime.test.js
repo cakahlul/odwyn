@@ -21,6 +21,61 @@ class FakeCodex extends EventEmitter {
   reject() {}
 }
 
+test('rooms choose a relevant opener and follow replies instead of fixed participant order', async () => {
+  const dir = mkdtempSync(join(tmpdir(),'odwyn-room-dialogue-')), store = openStore(dir);
+  const primary = store.state.agents[0].id, first = new FakeCodex(), scout = new FakeCodex(), writer = new FakeCodex();
+  store.state.customization = {...defaults,name:'Pip',specialization:'Coding and debugging'};
+  store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout',specialization:'Travel flights and itineraries'}},{id:'writer',customization:{...defaults,name:'Writer',specialization:'Writing and editing'}});
+  const room = createRoom(store.state,{title:'Group',memberIds:[primary,'writer','scout']});
+  const runtime = new Runtime({store,codex:first,browser:{},workspace:dir});
+  runtime.addProvider('scout',scout); runtime.addProvider('writer',writer);
+  const handoff = async agentId => {
+    const job = runtime.active, provider = runtime.providers.get(job.agentId);
+    await runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_room_next',arguments:{agentId,reason:'Please check the latest constraint.'}}});
+    return provider.replies.at(-1).result.success;
+  };
+  const finish = async text => {
+    const job = runtime.active, provider = runtime.providers.get(job.agentId);
+    provider.emit('notification',{method:'item/completed',params:{threadId:job.threadId,turnId:job.turnId,item:{id:randomUUID(),type:'agentMessage',text}}});
+    provider.emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:job.turnId,status:'completed'}}});
+    await runtime.drain();
+  };
+  try {
+    for (const id of room.memberIds) await runtime.refreshAccount(id);
+    runtime.submitRoom(room.id,{prompt:'Compare travel flights'}); await runtime.drain();
+    expect(runtime.active.agentId).toBe('scout');
+    const instructions = scout.calls.find(c=>c.method==='thread/start').params.developerInstructions;
+    expect(instructions).not.toContain('You coordinate:');
+    expect(instructions).toContain('group chat');
+    expect(await handoff('outsider')).toBe(false); expect(await handoff('scout')).toBe(false);
+    expect(await handoff(primary)).toBe(true); await finish('@Pip, can the flight tracker handle these dates?');
+    expect(runtime.active.agentId).toBe(primary);
+    expect(first.calls.find(c=>c.method==='thread/start').params.developerInstructions).toContain('can the flight tracker');
+    expect(first.calls.find(c=>c.method==='turn/start').params.input[0].text).toContain('Please check the latest constraint.');
+    expect(first.calls.find(c=>c.method==='turn/start').params.input[0].text).toContain('do not answer the owner message again');
+    expect(await handoff('scout')).toBe(true); await finish('@Scout, tracker works; which flight meets the budget?');
+    expect(runtime.active.agentId).toBe('scout');
+    expect(scout.calls.find(c=>c.method==='thread/resume').params.developerInstructions).toContain('which flight meets the budget');
+    await finish('@Writer, clarify the cancellation terms.');
+    expect(runtime.active.agentId).toBe('writer');
+    expect(writer.calls.find(c=>c.method==='thread/start').params.developerInstructions).toContain('tracker works');
+    expect(room.messages.filter(m=>m.role==='user')).toHaveLength(1);
+    await runtime.cancelRoom(room.id);
+    runtime.submitRoom(room.id,{prompt:'Unmatched topic'}); await runtime.drain();
+    const opener = runtime.active.agentId; await runtime.cancelRoom(room.id);
+    runtime.submitRoom(room.id,{prompt:'Unmatched topic'}); await runtime.drain();
+    expect(runtime.active.agentId).not.toBe(opener);
+    for (let turn=0;turn<30;turn++) {
+      expect(runtime.active).not.toBeNull();
+      expect(await handoff(runtime.active.agentId === primary ? 'scout' : primary)).toBe(true);
+      await finish('Check the remaining constraint.');
+    }
+    expect(room.discussion.status).toBe('paused');
+    expect(store.state.jobs.filter(j=>j.roomRoundId===room.discussion.id)).toHaveLength(30);
+    expect(store.state.jobs.some(j=>['queued','running'].includes(j.status))).toBe(false);
+  } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('AI file attachments persist in ordinary chats and rooms with the producing agent', async () => {
   const dir = mkdtempSync(join(tmpdir(),'odwyn-file-runtime-')), store = openStore(dir), codex = new FakeCodex();
   const primary = store.state.agents[0].id; store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
@@ -43,6 +98,10 @@ test('AI file attachments persist in ordinary chats and rooms with the producing
 test('room goals continue automatically, require everyone to verify completion, and accept redirects', async () => {
   const dir = mkdtempSync(join(tmpdir(),'odwyn-room-goals-'));
   const store = openStore(dir), first = new FakeCodex(), second = new FakeCodex();
+  for (const provider of [first,second]) {
+    const request = provider.request.bind(provider);
+    provider.request = async (method,params) => { const result = await request(method,params); return method === 'turn/start' ? {turn:{id:randomUUID(),status:'inProgress'}} : result; };
+  }
   store.state.customization = {...defaults,name:'Pip'};
   const primary = store.state.agents[0].id;
   store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
@@ -77,7 +136,7 @@ test('room goals continue automatically, require everyone to verify completion, 
     const old = runtime.submitRoom(room.id,{prompt:'Plan another trip'}); await runtime.drain();
     await expect(runtime.messageRoom(room.id,{prompt:'@Unknown change course'})).rejects.toThrow('Unknown');
     expect(old[0].status).toBe('running');
-    first.emit('notification',{method:'item/completed',params:{threadId:old[0].threadId,turnId:old[0].turnId,item:{id:'draft',type:'agentMessage',text:'Existing trip draft'}}});
+    runtime.providers.get(old[0].agentId).emit('notification',{method:'item/completed',params:{threadId:old[0].threadId,turnId:old[0].turnId,item:{id:'draft',type:'agentMessage',text:'Existing trip draft'}}});
     const redirected = await runtime.messageRoom(room.id,{prompt:'@Scout Only compare trains',agentId:primary}); await runtime.drain();
     expect(old.every(j=>j.status==='cancelled')).toBe(true);
     expect(redirected.map(j=>j.agentId)).toEqual(['scout']);
@@ -85,13 +144,13 @@ test('room goals continue automatically, require everyone to verify completion, 
     expect(room.discussion.direction).toBe('@Scout Only compare trains');
     const redirectContext = second.calls.filter(c=>c.method==='thread/resume').at(-1).params.developerInstructions;
     expect(redirectContext).toContain('Plan another trip');
-    expect(redirectContext).toContain('Existing trip draft');
+    expect(room.messages.some(m=>m.text==='Existing trip draft')).toBe(true);
     expect(redirectContext).toContain('not competitors');
     expect(redirectContext).toContain('Caveman ultra');
     expect(redirectContext).toContain('Ponytail ultra');
     expect(second.calls.filter(c=>c.method==='thread/start')).toHaveLength(1);
-    expect(first.calls.some(c=>c.method==='turn/interrupt')).toBe(true);
-    first.emit('notification',{method:'item/completed',params:{threadId:old[0].threadId,turnId:old[0].turnId,item:{id:'stale',type:'agentMessage',text:'Old direction'}}});
+    expect(runtime.providers.get(old[0].agentId).calls.some(c=>c.method==='turn/interrupt')).toBe(true);
+    runtime.providers.get(old[0].agentId).emit('notification',{method:'item/completed',params:{threadId:old[0].threadId,turnId:old[0].turnId,item:{id:'stale',type:'agentMessage',text:'Old direction'}}});
     expect(room.messages.some(m=>m.id==='stale')).toBe(false);
     await complete(true);
     expect(room.discussion.status).toBe('completed');
