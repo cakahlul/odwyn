@@ -27,7 +27,7 @@ const providers = { codex: ['Codex','gpt-6.1-sol'], claude: ['Claude Code','sonn
 const currencyNames = new Intl.DisplayNames(['en'],{type:'currency'});
 $('#preferred-currency').innerHTML = currencies.map(code=>`<option value="${code}">${code === 'source' ? 'Original currency' : `${code} · ${esc(currencyNames.of(code))}`}</option>`).join('');
 hydrateIcons(); setupBrowser(() => state);
-setupCustomization(() => state, async (result, adding) => { signature = ''; await refresh(); if (adding) { await switchAgent(result.id); openSettings(true); } });
+setupCustomization(() => state, async (result, adding, onboarding) => { signature = ''; await refresh(); if (adding) await switchAgent(result.id); if (adding || onboarding && !state.provider.configured) openSettings(true); });
 
 function selectState() {
   if (!workspace) return;
@@ -381,7 +381,7 @@ $('#provider-form').onsubmit = async event => {
   try {
     await api(`/api/provider?agentId=${agentId}`,{ type:$('#provider-type').value, model:$('#provider-model').value, effort:$('#provider-effort').value, baseUrl:$('#provider-base-url').value, apiKey:$('#provider-api-key').value },'PUT');
     $('#provider-api-key').value = ''; await refresh(); $('#provider-status').textContent = 'Saved. Applies to your next task.';
-    if (providerSetup) { $('#settings-dialog').close(); if (!state.customization) openCustomization(true); }
+    if (providerSetup) { $('#settings-dialog').close(); if (!state.customization) openCustomization(true,false,true); }
   } catch (error) { $('#provider-status').textContent = error.message; }
   finally { $('#provider-save').disabled = false; }
 };
@@ -560,6 +560,6 @@ await refresh();
 if (state && agentId) { restoreDraft(); signature = ''; render(); }
 const initial = location.hash.slice(1).split('/');
 if (agentId && ['chat','runs','routines','files'].includes(initial[0])) { view = initial[0]; conversationId = initial[1] || null; signature = ''; render(); }
-if (state && agentId && !state.provider.configured) openSettings(true);
-else if (state && agentId && !state.customization) openCustomization(true);
+if (state && agentId && !state.customization) openCustomization(true,false,true);
+else if (state && agentId && !state.provider.configured) openSettings(true);
 setInterval(() => { if (!document.hidden) void refresh(); }, 1000);

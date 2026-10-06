@@ -299,6 +299,7 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:6px; bac
 .approval-target { display:flex; gap:7px; align-items:center; margin-top:13px; font-size:10px; color:var(--orange-deep); overflow-wrap:anywhere; }
 .approval-target .icon { width:13px; height:13px; }
 .approval-preview { margin-top:12px; font-size:11px !important; color:#715d4d; }
+.approval-preview code { display:block; white-space:pre-wrap; }
 .approval-actions { display:flex; flex-wrap:wrap; gap:9px; align-items:center; margin-top:18px; }
 .approval-actions .text-button { font-size:9px; width:100%; justify-content:flex-start; }
 .answer-form { margin-top:15px; }

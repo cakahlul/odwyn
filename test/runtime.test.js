@@ -73,7 +73,7 @@ test('real tool protocol pauses interactions until exact approval and resumes th
   const browser = { last: { url: 'https://example.com', elements: [{ ref: '0', label: 'Submit' }] }, action: async args => { browserCalls.push(args); return { text: 'Done', elements: [] }; } };
   const runtime = new Runtime({ store, codex, browser, workspace: dir, model: 'gpt-6.1-sol' });
   await runtime.refreshAccount();
-  store.state.conversations.push({id:'old-chat',agentId:store.state.agents[0].id,messages:[{id:'old-message',role:'user',text:'Existing chat context'}],sessions:{[store.state.agents[0].id]:{threadId:'old-thread',providerKey:'codex'}}});
+  store.state.conversations.push({id:'old-chat',agentId:store.state.agents[0].id,messages:[{id:'old-message',role:'user',text:'Existing chat context'}],sessions:{[store.state.agents[0].id]:{threadId:'old-thread',providerKey:'codex',toolBrand:'odwyn'}}});
   const job = runtime.submit({ prompt: 'Fill this form', conversationId:'old-chat' });
   await runtime.drain();
   expect(codex.calls.find(c => c.method === 'thread/start').params.model).toBe('gpt-6.1-sol');
@@ -224,4 +224,39 @@ test('approval modes auto-approve only allowed risks and never bypass payment co
       await runtime.cancel(job.id);
     }
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true});}
+});
+
+test('terminal always needs exact approval, reaches all providers, and stops with the task', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'odwyn-terminal-runtime-'));
+  const store = openStore(dir), codex = new FakeCodex();
+  const runtime = new Runtime({ store, codex, browser: {}, workspace: dir });
+  const invoke = (job, command, id) => runtime.handleRequest({ id, method: 'item/tool/call', params: { threadId: job.threadId, turnId: job.turnId, tool: 'odwyn_terminal', arguments: { command, reason: 'Run the requested check' } } });
+  try {
+    await runtime.refreshAccount();
+    for (const type of ['codex', 'claude', 'openai']) {
+      codex.config = { type };
+      for (const interactionMode of ['confirm', 'safe', 'allow']) {
+        const job = runtime.submit({ prompt: 'Check terminal', interactionMode }); await runtime.drain();
+        const params = codex.calls.filter(c => c.method === 'thread/start').at(-1).params;
+        expect(params.dynamicTools.some(t => t.name === 'odwyn_terminal')).toBe(true);
+        const denied = invoke(job, 'touch declined', `${type}-${interactionMode}-deny`); await Bun.sleep(10);
+        expect(job.pending.type).toBe('terminal'); expect(job.pending.preview).toBe('touch declined');
+        expect(() => runtime.answer(job.id, { requestId: job.pending.id, decision: 'allow-run' })).toThrow('terminal');
+        runtime.answer(job.id, { requestId: job.pending.id, decision: 'deny' }); await denied;
+        expect(codex.replies.at(-1).result.success).toBe(false);
+        const command = invoke(job, 'test ! -e declined && printf approved', `${type}-${interactionMode}-allow`); await Bun.sleep(10);
+        runtime.answer(job.id, { requestId: job.pending.id, decision: 'allow' }); await command;
+        const reply = codex.replies.at(-1).result;
+        expect(reply.success).toBe(true); expect(JSON.parse(reply.contentItems[0].text).stdout).toBe('approved');
+        await runtime.cancel(job.id);
+      }
+    }
+    const job = runtime.submit({ prompt: 'Long command' }); await runtime.drain();
+    const running = invoke(job, 'sleep 10', 'cancel-command'); await Bun.sleep(10);
+    runtime.answer(job.id, { requestId: job.pending.id, decision: 'allow' }); await Bun.sleep(10);
+    expect(runtime.terminalRun?.job).toBe(job);
+    await runtime.cancel(job.id); await running;
+    expect(job.status).toBe('cancelled'); expect(runtime.terminalRun).toBe(null);
+    expect(JSON.parse(codex.replies.at(-1).result.contentItems[0].text).cancelled).toBe(true);
+  } finally { runtime.close(); store.close(); rmSync(dir, { recursive: true, force: true }); }
 });

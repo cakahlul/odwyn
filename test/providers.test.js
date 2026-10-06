@@ -81,6 +81,7 @@ test('OpenAI-compatible requests execute owner questions, screenshots, and chat 
     if (requests.length === 1) return completion(null, call('odwyn_ask', { question: 'Budget?' }));
     if (requests.length === 2) return completion(null, call('odwyn_browser', { action: 'screenshot', reason: 'Inspect the page' }));
     if (requests.length === 3) return completion(null, call('odwyn_search', { query: 'Serpong' }));
+    if (requests.length === 4) return completion(null, call('odwyn_terminal', { command: 'printf api-terminal', reason: 'Check terminal access' }));
     return completion('Result saved.');
   } });
   const old = createJob(store.state, { prompt: 'Serpong hotel budget: Rp2 million.' }); old.status = 'completed';
@@ -89,6 +90,8 @@ test('OpenAI-compatible requests execute owner questions, screenshots, and chat 
     await runtime.refreshAccount(); const job = runtime.submit({ prompt: 'Research hotels' });
     await wait(() => job.status === 'waiting'); expect(requests).toHaveLength(1);
     runtime.answer(job.id, { requestId: job.pending.id, answer: 'Rp2 million' });
+    await wait(() => job.pending?.type === 'terminal');
+    runtime.answer(job.id, { requestId: job.pending.id, decision: 'allow' });
     await wait(() => job.status === 'completed');
     expect(requests[0].url).toBe('http://localhost:1234/v1/chat/completions');
     expect(requests[0].options.headers.authorization).toBe('Bearer private-key');
@@ -97,10 +100,11 @@ test('OpenAI-compatible requests execute owner questions, screenshots, and chat 
     expect(requests[1].body.messages.some(m => m.role === 'tool' && m.content.includes('Rp2 million'))).toBe(true);
     expect(requests[2].body.messages.at(-1).content[1].image_url.url).toBe('data:image/jpeg;base64,test-base64');
     expect(requests[3].body.messages.at(-1).content).toContain('Serpong hotel budget');
+    expect(requests[4].body.messages.at(-1).content).toContain('api-terminal');
     const follow = runtime.submit({ conversationId: job.conversationId, prompt: 'Recall the result' });
     await wait(() => follow.status === 'completed');
     expect(requests.at(-1).body.messages.some(m => m.role === 'assistant' && m.content === 'Result saved.')).toBe(true);
-    hanging = true; const stop = runtime.submit({ prompt: 'Long task' }); await wait(() => requests.length === 6);
+    hanging = true; const stop = runtime.submit({ prompt: 'Long task' }); await wait(() => requests.length === 7);
     await runtime.cancel(stop.id); expect(stop.status).toBe('cancelled'); expect(aborted).toBe(true);
     await Bun.sleep(20); expect(stop.status).toBe('cancelled');
   } finally { runtime.close(); provider.stop(); store.close(); rmSync(directory, { recursive: true }); }
@@ -123,8 +127,11 @@ test('Claude SDK uses restricted tools, streams output, waits for owner input, a
     await options.mcpServers.odwyn.instance.connect(serverTransport); await client.connect(clientTransport);
     try {
       const listed = await client.listTools(); expect(listed.tools.some(t => t.name === 'odwyn_search')).toBe(true);
+      expect(listed.tools.some(t => t.name === 'odwyn_terminal')).toBe(true);
       const answer = await client.callTool({ name: 'odwyn_ask', arguments: { question: 'Your preference?' } }, undefined, { timeout: 5000 });
       expect(answer.content[0].text).toContain('Morning');
+      const terminal = await client.callTool({ name: 'odwyn_terminal', arguments: { command: 'printf claude-terminal', reason: 'Check terminal access' } }, undefined, { timeout: 5000 });
+      expect(terminal.content[0].text).toContain('claude-terminal');
       yield { type: 'stream_event', event: { type: 'message_start' } };
       yield { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Understood.' } } };
       yield { type: 'assistant', message: { content: [{ type: 'text', text: 'Understood.' }] } };
@@ -135,10 +142,12 @@ test('Claude SDK uses restricted tools, streams output, waits for owner input, a
   try {
     await runtime.refreshAccount(); const job = runtime.submit({ conversationId: conversation.id, prompt: 'Ask my preference' });
     await wait(() => job.status === 'waiting'); runtime.answer(job.id, { requestId: job.pending.id, answer: 'Morning' });
+    await wait(() => job.pending?.type === 'terminal'); runtime.answer(job.id, { requestId: job.pending.id, decision: 'allow' });
     await wait(() => job.status === 'completed');
     expect(runtime.conversation(job).messages.filter(m => m.role === 'assistant').map(m => m.text)).toEqual(['Understood.']);
     const follow = runtime.submit({ conversationId: job.conversationId, prompt: 'Ask again' });
     await wait(() => follow.status === 'waiting'); runtime.answer(follow.id, { requestId: follow.pending.id, answer: 'Morning' });
+    await wait(() => follow.pending?.type === 'terminal'); runtime.answer(follow.id, { requestId: follow.pending.id, decision: 'allow' });
     await wait(() => follow.status === 'completed');
     expect(optionsSeen[1].resume).toBe(optionsSeen[0].sessionId);
   } finally { runtime.close(); provider.stop(); store.close(); rmSync(directory, { recursive: true }); }

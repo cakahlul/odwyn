@@ -150,6 +150,15 @@ test('assistant cards cover shopping outcomes, preserve fallback content, and fi
       insertMessages({ customization: defaults, agents: [], jobs: [], conversations: [{ id: 'test', messages: [{ id: 'user', role: 'user', text, at: new Date().toISOString() }, { id: 'assistant', role: 'assistant', text, at: new Date().toISOString() }] }] }, 'test');
       return [document.querySelectorAll('.message-user .product-card').length, document.querySelectorAll('.message-assistant .product-card').length];
     }, block(products))).toEqual([0, 3]);
+    const command = "printf '<script>unsafe</script>'\n# preserve line breaks";
+    expect(await page.evaluate(async command => {
+      const { renderChat } = await import('/views.js');
+      const { defaults } = await import('/profile.js');
+      const job = { id:'terminal', conversationId:'terminal-chat', status:'waiting', events:[], files:[], pending:{id:'approval',type:'terminal',title:'Run terminal command?',detail:'Check terminal',target:'/workspace',preview:command} };
+      document.querySelector('#view').innerHTML = renderChat({customization:defaults,agents:[],jobs:[job],runtime:{activeJobId:job.id},conversations:[{id:'terminal-chat',createdAt:new Date().toISOString(),messages:[]}]},'terminal-chat');
+      const code = document.querySelector('.approval-preview code');
+      return [code.textContent, getComputedStyle(code).whiteSpace, document.querySelectorAll('.approval-card script').length, [...document.querySelectorAll('.approval-card [data-decision]')].map(button=>button.dataset.decision)];
+    }, command)).toEqual([command, 'pre-wrap', 0, ['allow','deny']]);
     expect(errors).toEqual([]);
   } finally {
     await browser.close(); server.stop(true); await app.close(); rmSync(directory, { recursive: true, force: true });

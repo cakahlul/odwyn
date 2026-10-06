@@ -58,21 +58,24 @@ export function openCustomization(onboarding = false, newAgent = false, workspac
   const draft = adding ? {...defaults,...appearance,bodyColor:palettes[palette].colors[2],shape:Object.keys(choices.shape)[count % Object.keys(choices.shape).length],ownerName:getState()?.customization?.ownerName || '',name:`Agent ${count+1}`} : {...defaults,...getState()?.customization,...appearance};
   $('#settings-dialog').close(); $('#customize-form').reset();
   for (const [key,value] of Object.entries(draft)) $('#customize-form').elements.namedItem(key).value = value;
-  $('#customize-title').textContent = appearanceOnly ? 'Workspace appearance' : adding ? 'Add an agent' : 'Customize your agent';
+  $('#customize-title').textContent = appearanceOnly ? firstRun ? 'Customize your workspace' : 'Workspace appearance' : adding ? 'Add an agent' : firstRun ? 'Create your first agent' : 'Customize your agent';
   document.querySelectorAll('[data-custom-step]').forEach(button=>button.hidden = appearanceOnly ? true : button.dataset.customStep === '0');
   $('.profile-steps').hidden = appearanceOnly;
-  $('#customize-eyebrow').textContent = appearanceOnly ? 'WORKSPACE · ALL AGENTS' : adding ? 'NEW AGENT · MAXIMUM 5' : firstRun ? 'FIRST-TIME SETUP' : 'AGENT & PERSONALITY';
-  $('#customize-save').childNodes[0].textContent = appearanceOnly ? 'Save appearance' : adding ? 'Add agent' : firstRun ? 'Save & start' : 'Save changes';
+  $('#customize-eyebrow').textContent = firstRun ? 'FIRST-TIME SETUP' : appearanceOnly ? 'WORKSPACE · ALL AGENTS' : adding ? 'NEW AGENT · MAXIMUM 5' : 'AGENT & PERSONALITY';
+  $('#customize-save').childNodes[0].textContent = appearanceOnly ? firstRun ? 'Continue to create agent' : 'Save appearance' : adding ? 'Add agent' : firstRun ? 'Create agent & continue' : 'Save changes';
+  $('#customize-defaults').textContent = appearanceOnly ? 'Use defaults & continue' : 'Keep defaults';
   $('#customize-defaults').hidden = !firstRun || adding; $('#customize-status').textContent = '';
   showStep(appearanceOnly ? 0 : 1); preview(); $('#customize-dialog').showModal();
 }
 
 async function save(profile) {
+  const continueSetup = firstRun && appearanceOnly, agentSetup = firstRun && !appearanceOnly;
   const buttons = $('#customize-form').querySelectorAll('button'); buttons.forEach(button=>button.disabled=true);
   $('#customize-status').textContent = 'Saving…';
   try {
     const result = appearanceOnly ? await api('/api/appearance',{palette:profile.palette,motion:profile.motion},'PUT') : await api(adding ? '/api/agents' : `/api/customization?agentId=${editingId}`,validateProfile(profile),adding ? 'POST' : 'PUT');
-    $('#customize-dialog').close(); await saved(result,adding); toast(appearanceOnly ? 'Workspace appearance saved.' : adding ? 'Agent added. Choose its AI provider.' : firstRun ? 'Your space is ready.' : 'Saved. Your agent gets the changes on its next task.');
+    $('#customize-dialog').close(); await saved(result,adding,agentSetup); toast(appearanceOnly ? 'Workspace appearance saved.' : adding ? 'Agent added. Choose its AI provider.' : firstRun ? 'Your space is ready.' : 'Saved. Your agent gets the changes on its next task.');
+    if (continueSetup) openCustomization(true);
   } catch (error) { $('#customize-status').textContent = error.message; }
   finally { buttons.forEach(button=>button.disabled=false); }
 }
