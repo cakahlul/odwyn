@@ -6,6 +6,10 @@ These rules override personality tone, saved reply-depth preferences and verbose
 export const currencies = ['source', ...Intl.supportedValuesOf('currency')];
 export const effortLevels = {codex:['default','none','minimal','low','medium','high','xhigh','max'],claude:['default','low','medium','high','max'],openai:['default','none','minimal','low','medium','high','xhigh','max']};
 export const defaults = { palette:'paper', motion:'system', shape:'squircle', bodyColor:'#f26945', eyeColor:'#292b28', mouthColor:'#292b28', eyes:'bars', mouth:'smile', accessory:'none', name:'Odwyn', specialization:'', ownerName:'', tone:'warm', language:'auto', detail:'adaptive', userContext:'' };
+export const ownerPreferenceKeys = ['ownerName','language','detail','userContext'];
+export function resolveProfile(profile, appearance = {}, owner = {}) {
+  return {...defaults,...profile,...(profile?.overrideWorkspace ? {} : {...appearance,...Object.fromEntries(ownerPreferenceKeys.filter(key=>owner[key] !== undefined).map(key=>[key,owner[key]]))})};
+}
 export const palettes = {
   paper: { name:'Paper & ember', colors:['#faf9f5','#f0efe9','#f26945'], vars:{ paper:'#faf9f5', sidebar:'#f0efe9', surface:'#fffefa', ink:'#292b28', muted:'#596052', line:'#dedfd5', orange:'#f26945', 'orange-deep':'#b93d20', 'orange-light':'#fff0e8', wash:'#e8ebdf', selected:'#e1e3d8' } },
   fern: { name:'Fern', colors:['#f6f8f1','#e7eddf','#81ae76'], vars:{ paper:'#f6f8f1', sidebar:'#e7eddf', surface:'#fffffa', ink:'#28372b', muted:'#536450', line:'#d5dfcc', orange:'#81ae76', 'orange-deep':'#326341', 'orange-light':'#e9f2e3', wash:'#e2ebd9', selected:'#d4e2cb' } },

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { openStore, createJob, createRoom, updateRoom, enqueueSchedules, recoverJobs } from '../store.js';
 import { authorize, allowedOrigin, validateAction, publicAddress, browserActionRisk, browserApprovalRequired } from '../security.js';
 import { Database } from 'bun:sqlite';
-import { defaults, validateProfile } from '../public/profile.js';
+import { defaults, resolveProfile, ownerPreferenceKeys, validateProfile } from '../public/profile.js';
 
 test('new customization preferences preserve legacy profiles and reject invalid values', () => {
   const legacy = {...defaults,name:'Pip'};
@@ -86,13 +86,14 @@ test('existing single-agent data migrates without losing identity, chats or rout
   const dir = mkdtempSync(join(tmpdir(),'odwyn-legacy-'));
   const legacy = openStore(dir); legacy.close();
   const database = new Database(join(dir,'odwyn.db'));
-  const profile = {...defaults,name:'Pip'};
+  const profile = {...defaults,name:'Pip',ownerName:'Alex',language:'id'};
   database.query('INSERT INTO state VALUES (1, ?)').run(JSON.stringify({customization:profile,preferences:'Jakarta time',conversations:[{id:'chat',messages:[{id:'message',role:'user',text:'Legacy trip',at:'2026-10-05T00:00:00Z'}]}],jobs:[{id:'job',conversationId:'chat',status:'completed'}],schedules:[{id:'routine',prompt:'Check again',enabled:true,nextAt:'2026-10-05T00:00:00Z'}]}));
   database.close();
   const store = openStore(dir);
   try {
     expect(store.state.agents).toHaveLength(1); expect(store.state.agents[0].customization).toEqual(profile);
     expect(store.state.appearance).toEqual({palette:profile.palette,motion:profile.motion});
+    expect(store.state.owner).toEqual(Object.fromEntries(ownerPreferenceKeys.map(key=>[key,profile[key]])));
     for (const item of [...store.state.conversations,...store.state.jobs,...store.state.schedules]) expect(item.agentId).toBe(store.state.agents[0].id);
     expect(store.state.preferences).toBe('Jakarta time');
     expect(enqueueSchedules(store.state,new Date('2026-10-06T00:00:00Z'))).toBe(1);
@@ -172,4 +173,12 @@ test('conversation deletion removes messages, runs and indexed recall, preservin
     expect(store.state.conversations).toHaveLength(1); expect(store.state.jobs).toHaveLength(1); expect(store.search('Uniquedeletedphrase')).toEqual([]);
     expect(()=>store.deleteConversation(chat.id)).toThrow('not found');
   } finally {store.close();rmSync(dir,{recursive:true});}
+});
+
+test('global owner preferences inherit while agent overrides preserve their own identity', () => {
+  const local = {...defaults,name:'Pip',ownerName:'Boss',language:'ja',detail:'brief',userContext:'Local',tone:'patient',palette:'rose'};
+  const owner = {ownerName:'Alex',language:'id',detail:'detailed',userContext:'Global'};
+  expect(resolveProfile(local,{palette:'fern'},owner)).toEqual({...local,...owner,palette:'fern'});
+  expect(resolveProfile({...local,overrideWorkspace:true},{palette:'fern'},owner)).toEqual({...local,overrideWorkspace:true});
+  expect(resolveProfile({...local,overrideWorkspace:false},{palette:'fern'},{...owner,ownerName:'Renamed'}).ownerName).toBe('Renamed');
 });

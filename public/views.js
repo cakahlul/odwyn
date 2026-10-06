@@ -1,5 +1,5 @@
 import { $, esc, icon, mascot, badge, date, richText, activeStatuses } from './ui.js';
-import { defaults, avatarSvg } from './profile.js';
+import { defaults, resolveProfile, avatarSvg } from './profile.js';
 
 const suggestions = [
   ['globe','Research a topic','Find information and include sources.','Research the best places to visit in Yogyakarta for a relaxed weekend. Use the browser and include your sources.'],
@@ -17,7 +17,7 @@ export function recentConversations(state) {
 }
 
 export function renderChat(state, conversationId) {
-  const profile = {...defaults,...state.customization};
+  const profile = resolveProfile(state.customization,state.appearance,state.owner);
   const conversation = state.conversations.find(c => c.id === conversationId);
   const jobs = state.jobs.filter(j => j.conversationId === conversationId);
   const roundJobs = conversation?.kind === 'room' && jobs[0]?.roomRoundId ? jobs.filter(j=>j.roomRoundId===jobs[0].roomRoundId) : jobs;
@@ -53,8 +53,9 @@ export function insertMessages(state, conversationId) {
   for (const message of conversation?.messages || []) {
     const author = message.agentId || state.jobs.find(j => j.id === message.jobId)?.agentId || conversation.agentId || state.agentId;
     const profile = {...defaults,...(state.agents.find(a => a.id === author)?.customization || message.agentProfile || state.customization)};
+    const ownerName = state.owner?.ownerName ?? profile.ownerName;
     const article = document.createElement('article'); article.className = `message message-${message.role === 'user' ? 'user' : 'assistant'}`;
-    article.innerHTML = `<div class="message-meta">${message.role === 'assistant' ? avatarSvg(profile,'message-avatar') : `<span class="message-owner">${esc(Array.from(profile.ownerName || 'You')[0].toUpperCase())}</span>`}<strong>${esc(message.role === 'assistant' ? profile.name : profile.ownerName || 'You')}</strong><time>${esc(new Intl.DateTimeFormat(undefined, { hour:'numeric', minute:'2-digit' }).format(new Date(message.at)))}</time><button class="icon-button copy-message" data-copy="${esc(message.id)}" aria-label="Copy message">${icon('copy')}</button></div>`;
+    article.innerHTML = `<div class="message-meta">${message.role === 'assistant' ? avatarSvg(profile,'message-avatar') : `<span class="message-owner">${esc(Array.from(ownerName || 'You')[0].toUpperCase())}</span>`}<strong>${esc(message.role === 'assistant' ? profile.name : ownerName || 'You')}</strong><time>${esc(new Intl.DateTimeFormat(undefined, { hour:'numeric', minute:'2-digit' }).format(new Date(message.at)))}</time><button class="icon-button copy-message" data-copy="${esc(message.id)}" aria-label="Copy message">${icon('copy')}</button></div>`;
     article.append(richText(message.text, { cards:message.role === 'assistant' }));
     if (message.role === 'assistant' && !message.roomReport && conversation.messages.findLast(m=>m.role==='assistant' && !m.roomReport && m.jobId===message.jobId) === message) {
       const files = state.jobs.find(j=>j.id===message.jobId)?.files || [];

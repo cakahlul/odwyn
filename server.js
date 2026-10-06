@@ -6,7 +6,7 @@ import { openStore, findAgent, deleteAgent, createRoom, updateRoom } from './sto
 import { AIProvider, validateProvider, publicProvider, providerModels } from './providers.js';
 import { Browser } from './browser.js';
 import { Runtime } from './runtime.js';
-import { validateProfile, currencies, palettes, choices } from './public/profile.js';
+import { validateProfile, defaults, ownerPreferenceKeys, currencies, palettes, choices } from './public/profile.js';
 import { fetchImage } from './proxy.js';
 import { imageMime } from './files.js';
 
@@ -170,6 +170,8 @@ export function createApp(options = {}) {
         if (pathname === '/api/preferences' && req.method === 'PUT') {
           const input = await json(req); if (typeof input.text !== 'string' || input.text.length > 8000) throw new Error('Memory must be at most 8,000 characters.');
           if (input.currency !== undefined && !currencies.includes(input.currency)) throw new Error('Choose a supported currency.');
+          const owner = validateProfile({...defaults,...store.state.owner,...Object.fromEntries(ownerPreferenceKeys.filter(key=>Object.hasOwn(input,key)).map(key=>[key,input[key]]))});
+          store.state.owner = Object.fromEntries(ownerPreferenceKeys.map(key=>[key,owner[key]]));
           store.state.preferences = input.text.trim();
           if (input.currency !== undefined) store.state.currency = input.currency;
           runtime.changed(); return response({ ok: true });

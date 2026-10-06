@@ -1,3 +1,4 @@
+import { defaults, ownerPreferenceKeys } from './public/profile.js';
 import { Database } from 'bun:sqlite';
 import { mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,6 +15,7 @@ export function openStore(directory) {
   const row = db.query('SELECT value FROM state WHERE id=1').get();
   const state = { conversations: [], jobs: [], schedules: [], files: [], preferences: '', currency:'source', customization: null, ...JSON.parse(row?.value || '{}') };
   state.agents ||= [{ id: randomUUID(), customization: state.customization }];
+  state.owner ||= Object.fromEntries(ownerPreferenceKeys.map(key=>[key,state.customization?.[key] ?? state.agents[0].customization?.[key] ?? defaults[key]]));
   state.appearance ||= {palette:state.customization?.palette || 'paper',motion:state.customization?.motion || 'system'};
   for (const profile of [state.customization, ...state.agents.map(agent => agent.customization)]) {
     if (profile?.name === 'Sidekick') profile.name = 'Odwyn';

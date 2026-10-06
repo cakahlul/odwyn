@@ -2,7 +2,7 @@ import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, da
 import { renderChat, insertMessages, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
 import { setupBrowser, updateBrowser } from './browser-ui.js';
 import { setupCustomization, applyProfile, openCustomization } from './customize.js';
-import { defaults, avatarSvg, currencies, effortLevels } from './profile.js';
+import { defaults, choices, ownerPreferenceKeys, avatarSvg, currencies, effortLevels } from './profile.js';
 
 // Carry browser preferences forward from the previous product name.
 for (const [storage, keys] of [[localStorage, ['agent','closed-agents','bubble-positions']], [sessionStorage, ['drafts']]]) {
@@ -12,6 +12,8 @@ for (const [storage, keys] of [[localStorage, ['agent','closed-agents','bubble-p
     storage.removeItem(`sidekick-${key}`);
   }
 }
+
+for (const key of ['language','detail']) $(`#global-${key}`).innerHTML = Object.entries(choices[key]).map(([value,label])=>`<option value="${value}">${label}</option>`).join('');
 
 let state = null, conversationId = null, view = 'chat', filter = 'all', signature = '', busy = false, attachments = [], providerSetup = false, providerAgentId = null;
 let workspace = null, agentId = localStorage.getItem('odwyn-agent'), switching = false, dockSignature = '';
@@ -272,7 +274,7 @@ function navigate(next = 'chat', id = null) {
 function render() {
   if (!state) return;
   renderDock();
-  applyProfile(agentId ? state.customization : null,state.appearance);
+  applyProfile(agentId ? state.customization : null,state.appearance,state.owner);
   $('#composer-area').setAttribute('aria-label','Message your assistant');
   renderRooms();
   $('#new-chat').disabled = $('#connection-button').disabled = !agentId;
@@ -311,7 +313,7 @@ function render() {
   $('#routine-note').textContent = nextRoutine?.prompt || '';
   $('#routine-note-detail').textContent = nextRoutine ? `Next: ${date(nextRoutine.nextAt)}` : '';
   $('#composer-area').hidden = view !== 'chat';
-  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, data: view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : state.files });
+  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, data: view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : state.files });
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
@@ -382,6 +384,7 @@ function providerFields() {
   $('#provider-hint').textContent = type === 'claude' ? 'Uses Claude Code on this server. Sign in with claude auth login, then refresh below.' : isAPI ? 'Use a base URL such as https://api.openai.com/v1. Model must support tool calling; screenshots need vision.' : 'Uses Codex App Server with your ChatGPT subscription. Connect below after saving.';
 }
 function openSettings() {
+  for (const key of ownerPreferenceKeys) $(`#global-${key}`).value = workspace.owner?.[key] ?? defaults[key];
   $('#preferred-currency').value = workspace.currency || 'source';
   $('#preferences').value = workspace.preferences || ''; $('#settings-status').textContent = '';
   $('#settings-dialog').showModal();
@@ -539,7 +542,7 @@ $('#room-mentions').onclick = event => {
   prompt.setRangeText(`@${/^[\p{L}\p{N}_-]+$/u.test(name) ? name : JSON.stringify(name)} `,start,end,'end');
   prompt.focus(); prompt.dispatchEvent(new Event('input'));
 };
-$('#preferences-form').onsubmit = event => { event.preventDefault(); void perform(async () => { await api('/api/preferences',{ text:$('#preferences').value, currency:$('#preferred-currency').value },'PUT'); $('#settings-status').textContent = 'Preferences saved. Applies to your next task.'; }); };
+$('#preferences-form').onsubmit = event => { event.preventDefault(); void perform(async () => { await api('/api/preferences',{ ...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$(`#global-${key}`).value])), text:$('#preferences').value, currency:$('#preferred-currency').value },'PUT'); $('#settings-status').textContent = 'Preferences saved. Applies to your next task.'; }); };
 $('#connect-account').onclick = () => perform(async () => { $('#connect-account').disabled = true; try { await api(`${state?.runtime.account || state?.provider.type !== 'codex' ? '/api/account/refresh' : '/api/account/login'}?agentId=${agentId}`,{}); } finally { $('#connect-account').disabled = false; } });
 $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(async () => {
   await api('/api/schedules',{ agentId:$('#schedule-agent').value || agentId, prompt:$('#schedule-prompt').value, at:new Date($('#schedule-at').value).toISOString(), intervalMinutes:Number($('#schedule-interval').value), interactionMode:'confirm' });

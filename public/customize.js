@@ -1,22 +1,23 @@
 import { $, api, toast } from './ui.js';
-import { defaults, palettes, choices, paletteDetails, specializations, avatarSvg, sampleReply, validateProfile } from './profile.js';
+import { defaults, resolveProfile, ownerPreferenceKeys, palettes, choices, paletteDetails, specializations, avatarSvg, sampleReply, validateProfile } from './profile.js';
 
 let getState, saved, step = 0, firstRun = false, adding = false, editingId = null, lastApplied = '', appearanceOnly = false;
 const toneDetails = {warm:'Friendly, thoughtful, plainspoken.',crisp:'The answer first. Keep it short.',playful:'A little wit, plenty of useful work.',formal:'Courteous, precise, professional.',patient:'Calm explanations, one step at a time.',coach:'Practical next steps and encouragement.'};
 const shapeDetails = {squircle:'Your everyday companion',bean:'Soft and easygoing',orb:'Curious and bright',cat:'A little independent',robot:'Ready to get things done',fox:'Quick and resourceful'};
-const readDraft = () => ({...Object.fromEntries(new FormData($('#customize-form'))),overrideWorkspace:$('#workspace-override').checked});
+let ownerDraft = {};
+const readDraft = () => ({...Object.fromEntries(new FormData($('#customize-form'))),...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$('#customize-form').elements.namedItem(key).disabled ? ownerDraft[key] : $('#customize-form').elements.namedItem(key).value])),overrideWorkspace:$('#workspace-override').checked});
 const setPalette = (node, palette) => Object.entries(palettes[palette].vars).forEach(([key,value])=>node.style.setProperty(`--${key}`,value));
 
-export function applyProfile(profile, appearance = {}) {
-  const p = {...defaults,...profile,...(profile?.overrideWorkspace ? {} : appearance)}, signature = JSON.stringify([p,appearance]);
+export function applyProfile(profile, appearance = {}, owner = {}) {
+  const p = resolveProfile(profile,appearance,owner), signature = JSON.stringify([p,appearance,owner]);
   if (signature === lastApplied) return;
   lastApplied = signature; setPalette(document.documentElement,p.palette);
   document.documentElement.dataset.motion = p.motion;
   $('#agent-name').textContent = p.name;
   $('#reply-agent').title = p.name;
   document.querySelectorAll('[data-agent-avatar]').forEach(node=>node.innerHTML=avatarSvg(p));
-  $('#owner-name').textContent = 'Odwyn settings';
-  $('.owner-avatar').textContent = 'O';
+  $('#owner-name').textContent = owner.ownerName || 'Your space';
+  $('.owner-avatar').textContent = Array.from(owner.ownerName || 'You')[0].toUpperCase();
   $('#settings-appearance-summary').textContent = `${palettes[appearance.palette || defaults.palette].name} · ${choices.motion[appearance.motion || defaults.motion]}`;
   $('label[for="prompt"]').textContent = `What would you like ${p.name} to do?`;
   document.title = p.name === 'Odwyn' ? 'Odwyn' : `Odwyn · ${p.name}`;
@@ -25,7 +26,9 @@ export function applyProfile(profile, appearance = {}) {
 }
 
 function preview() {
-  const draft = readDraft(), p = {...draft,...(!appearanceOnly && !draft.overrideWorkspace ? getState().appearance : {}),name:draft.name.trim() || defaults.name};
+  const draft = readDraft(), p = {...resolveProfile(draft,appearanceOnly ? {} : getState().appearance,getState().owner),name:draft.name.trim() || defaults.name};
+  ownerDraft = Object.fromEntries(ownerPreferenceKeys.map(key=>[key,draft[key]]));
+  for (const key of ownerPreferenceKeys) { const field = $('#customize-form').elements.namedItem(key); field.disabled = !draft.overrideWorkspace; field.value = draft.overrideWorkspace ? ownerDraft[key] : p[key]; }
   $('#workspace-override-fields').hidden = !appearanceOnly && !draft.overrideWorkspace;
   setPalette($('#profile-preview'),p.palette);
   $('#profile-preview').dataset.motion = p.motion;
@@ -54,8 +57,10 @@ export function openCustomization(onboarding = false, newAgent = false, workspac
   appearanceOnly = workspaceAppearance; firstRun = onboarding; adding = newAgent; editingId = getState()?.agentId;
   const count = getState().agents.length, palette = Object.keys(palettes)[count % Object.keys(palettes).length];
   const appearance = getState().appearance || {palette:getState()?.customization?.palette || defaults.palette,motion:getState()?.customization?.motion || defaults.motion};
-  const draft = adding ? {...defaults,...appearance,bodyColor:palettes[palette].colors[2],shape:Object.keys(choices.shape)[count % Object.keys(choices.shape).length],ownerName:getState()?.customization?.ownerName || '',name:`Agent ${count+1}`} : {...defaults,...appearance,...getState()?.customization,...(appearanceOnly ? appearance : {})};
+  const draft = adding ? {...defaults,...appearance,bodyColor:palettes[palette].colors[2],shape:Object.keys(choices.shape)[count % Object.keys(choices.shape).length],...getState().owner,name:`Agent ${count+1}`} : {...defaults,...appearance,...getState()?.customization,...(appearanceOnly ? appearance : {})};
+  ownerDraft = Object.fromEntries(ownerPreferenceKeys.map(key=>[key,draft[key]]));
   $('#settings-dialog').close(); $('#customize-form').reset();
+  for (const key of ownerPreferenceKeys) $('#customize-form').elements.namedItem(key).disabled = false;
   for (const [key,value] of Object.entries(draft)) { const field = $('#customize-form').elements.namedItem(key); if (field) field.value = value; }
   $('#workspace-override').checked = !adding && !!getState()?.customization?.overrideWorkspace;
   $('#workspace-override-label').hidden = $('#workspace-inherit-hint').hidden = appearanceOnly;
