@@ -47,6 +47,10 @@ test('rooms choose a relevant opener and follow replies instead of fixed partici
     const instructions = scout.calls.find(c=>c.method==='thread/start').params.developerInstructions;
     expect(instructions).not.toContain('You coordinate:');
     expect(instructions).toContain('group chat');
+    expect(instructions).toContain('use names only when the addressee would be unclear');
+    expect(instructions).toContain('Keep proposal IDs and routine verification in tool calls, not chat');
+    expect(instructions).toContain('brief natural chat sentences or fragments');
+    expect(instructions).not.toContain('directly to the other participants by name');
     expect(await handoff('outsider')).toBe(false); expect(await handoff('scout')).toBe(false);
     expect(await handoff(primary)).toBe(true); await finish('@Pip, can the flight tracker handle these dates?');
     expect(runtime.active.agentId).toBe(primary);
@@ -73,6 +77,34 @@ test('rooms choose a relevant opener and follow replies instead of fixed partici
     expect(room.discussion.status).toBe('paused');
     expect(store.state.jobs.filter(j=>j.roomRoundId===room.discussion.id)).toHaveLength(30);
     expect(store.state.jobs.some(j=>['queued','running'].includes(j.status))).toBe(false);
+  } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('empty assistant output never persists while streamed text and turn fallback survive', async () => {
+  const dir = mkdtempSync(join(tmpdir(),'odwyn-empty-messages-')), store = openStore(dir), codex = new FakeCodex();
+  const primary = store.state.agents[0].id;
+  store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
+  const room = createRoom(store.state,{title:'Empty output',memberIds:[primary,'scout']});
+  const runtime = new Runtime({store,codex,browser:{},workspace:dir});
+  try {
+    await runtime.refreshAccount();
+    for (const conversationId of [null,room.id]) {
+      const job = runtime.submit({prompt:'Check result',conversationId,agentId:primary}); await runtime.drain();
+      const conversation = store.state.conversations.find(c=>c.id===job.conversationId);
+      const notify = (method,params) => codex.emit('notification',{method,params:{threadId:job.threadId,turnId:job.turnId,...params}});
+      notify('item/agentMessage/delta',{itemId:'empty-delta',delta:''});
+      expect(conversation.messages.some(m=>m.id==='empty-delta')).toBe(false);
+      for (const text of ['', ' \n\t', undefined]) notify('item/completed',{item:{id:randomUUID(),type:'agentMessage',text}});
+      expect(conversation.messages.filter(m=>m.role==='assistant')).toHaveLength(0);
+      notify('item/agentMessage/delta',{itemId:'cleared',delta:'Draft'});
+      notify('item/completed',{item:{id:'cleared',type:'agentMessage',text:''}});
+      expect(conversation.messages.some(m=>m.id==='cleared')).toBe(false);
+      for (const delta of ['Verified',' ','result.']) notify('item/agentMessage/delta',{itemId:'stream',delta});
+      notify('item/completed',{item:{id:'stream',type:'agentMessage',text:'Verified result.'}});
+      notify('item/agentMessage/delta',{itemId:'unfinished-blank',delta:' \n'});
+      notify('turn/completed',{turn:{id:job.turnId,status:'completed',items:[{id:'blank-fallback',type:'agentMessage',text:' '},{id:'missing-fallback',type:'agentMessage'},{id:'fallback',type:'agentMessage',text:'Useful finding.'}]}});
+      expect(conversation.messages.filter(m=>m.role==='assistant').map(m=>m.text)).toEqual(['Verified result.','Useful finding.']);
+    }
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
 });
 

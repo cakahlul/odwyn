@@ -6,7 +6,7 @@ import { openStore, findAgent, deleteAgent, createRoom, updateRoom } from './sto
 import { AIProvider, validateProvider, publicProvider, providerModels } from './providers.js';
 import { Browser } from './browser.js';
 import { Runtime } from './runtime.js';
-import { validateProfile, defaults, ownerPreferenceKeys, currencies, palettes, choices } from './public/profile.js';
+import { validateProfile, defaults, ownerPreferenceKeys, currencies, validateAppearance } from './public/profile.js';
 import { fetchImage } from './proxy.js';
 import { imageMime } from './files.js';
 
@@ -29,7 +29,13 @@ export function createApp(options = {}) {
   const type = (process.env.ODWYN_PROVIDER ?? process.env.SIDEKICK_PROVIDER) || 'codex';
   store.state.provider ||= { ...validateProvider({ type, model: (process.env.ODWYN_MODEL ?? process.env.SIDEKICK_MODEL) || providerModels[type], baseUrl: (process.env.ODWYN_API_BASE_URL ?? process.env.SIDEKICK_API_BASE_URL), apiKey: (process.env.ODWYN_API_KEY ?? process.env.SIDEKICK_API_KEY) }), configured: !!(process.env.ODWYN_PROVIDER ?? process.env.SIDEKICK_PROVIDER) };
   for (const agent of store.state.agents) agent.provider ||= { ...store.state.provider };
-  store.state.agents[0].provider = store.state.provider;
+  store.state.globalProvider ||= { ...store.state.provider };
+  for (const agent of store.state.agents) {
+    // Preserve existing connections; matching agents follow the workspace default.
+    agent.providerOverride ??= ['type','model','effort','baseUrl','apiKey'].some(key => (agent.provider[key] || '') !== (store.state.globalProvider[key] || ''));
+    if (!agent.providerOverride) agent.provider = { ...store.state.globalProvider };
+  }
+  store.state.provider = store.state.agents[0].provider;
   const home = resolve((process.env.ODWYN_CODEX_HOME ?? process.env.SIDEKICK_CODEX_HOME) || join(directory, 'codex'));
   const codex = new AIProvider({ config: store.state.provider, home, workspace, codex: options.codex, ...options.providerOptions });
   let runtime;
@@ -50,6 +56,37 @@ export function createApp(options = {}) {
     runtime.addProvider(agent.id, provider); watchLogin(agent, provider); if (agent.provider.configured) void runtime.refreshAccount(agent.id);
   }
   for (const agent of store.state.agents.slice(1)) addProvider(agent);
+  function globalConnection(create = false) {
+    const inherited = store.state.agents.find(agent => !agent.providerOverride);
+    if (inherited) return inherited;
+    const agent = { id:'global', provider:store.state.globalProvider };
+    if (create && !runtime.providers.has(agent.id)) addProvider(agent);
+    return agent;
+  }
+  async function changeProviders(config, agents) {
+    agents = agents.filter(agent => JSON.stringify(runtime.providers.get(agent.id).config) !== JSON.stringify(config));
+    const checkActive = () => { if (agents.some(agent => runtime.active?.agentId === agent.id)) throw new Error('Stop the active task before changing AI provider.'); };
+    checkActive();
+    for (const agent of agents) {
+      const login = logins.get(agent.id);
+      if (login?.loginId) await runtime.providers.get(agent.id).request('account/login/cancel', {loginId:login.loginId}).catch(() => {});
+    }
+    checkActive();
+    for (const agent of agents) {
+      logins.delete(agent.id); runtime.providers.get(agent.id).configure(config); agent.provider = { ...config };
+      runtime.accounts.set(agent.id, {account:null,connectionError:null});
+    }
+    store.state.provider = store.state.agents[0].provider;
+    if (agents.includes(store.state.agents[0])) { runtime.account = null; runtime.connectionError = null; runtime.rateLimits = null; }
+    return agents;
+  }
+  async function changeGlobalProvider(config) {
+    const agents = store.state.agents.filter(agent => !agent.providerOverride);
+    if (runtime.providers.has('global')) agents.push({id:'global'});
+    const changed = await changeProviders(config,agents);
+    store.state.globalProvider = config;
+    return changed;
+  }
   const limits = new Map();
   const response = (body, status = 200, extra = {}) => Response.json(body, { status, headers: { ...headers, ...extra } });
 
@@ -92,7 +129,7 @@ export function createApp(options = {}) {
         if (pathname === '/api/state' && req.method === 'GET') {
           if (url.searchParams.get('revision') === String(runtime.revision)) return new Response(null, { status: 204, headers });
           // ponytail: a JSON state row suits one owner; use indexed tables when history gets large.
-          return response({ revision: runtime.revision, ...store.state, agents:store.state.agents.map(agent => ({ ...agent, provider:publicProvider(agent.provider), runtime:{ ...runtime.accounts.get(agent.id), login:logins.get(agent.id) || null } })), provider: publicProvider(store.state.provider), runtime: { account: runtime.account, connectionError: runtime.connectionError, model: store.state.provider.model, activeJobId: runtime.active?.id || null, takeover: runtime.takeover, browserOpen: !!browser.context, rateLimits: runtime.rateLimits || null, login:logins.get(store.state.agents[0].id) || null } });
+          return response({ revision: runtime.revision, ...store.state, agents:store.state.agents.map(agent => ({ ...agent, provider:publicProvider(agent.provider), runtime:{ ...runtime.accounts.get(agent.id), login:logins.get(agent.id) || null } })), globalProvider:publicProvider(store.state.globalProvider), globalRuntime:{...runtime.accounts.get(globalConnection().id),login:logins.get(globalConnection().id) || null}, provider: publicProvider(store.state.provider), runtime: { account: runtime.account, connectionError: runtime.connectionError, model: store.state.provider.model, activeJobId: runtime.active?.id || null, takeover: runtime.takeover, browserOpen: !!browser.context, rateLimits: runtime.rateLimits || null, login:logins.get(store.state.agents[0].id) || null } });
         }
         if (pathname === '/api/rooms' && req.method === 'POST') {
           const room = createRoom(store.state,await json(req)); runtime.changed(); return response(room,201);
@@ -141,9 +178,11 @@ export function createApp(options = {}) {
           runtime.changed(); return response({ ok: true });
         }
         if (pathname === '/api/agents' && req.method === 'POST') {
-          const customization = validateProfile(await json(req));
+          const input = await json(req), customization = validateProfile(input);
+          const config = input.provider === undefined || input.provider.inherit === true ? { ...store.state.globalProvider } : validateProvider(input.provider,store.state.globalProvider);
+          if (input.provider?.inherit !== undefined && typeof input.provider.inherit !== 'boolean') throw new Error('Choose a provider source.');
           if (store.state.agents.length >= 5) throw new Error('You can have at most 5 agents.');
-          const agent = { id: randomUUID(), customization, provider:{ ...store.state.provider, configured:false } };
+          const agent = { id: randomUUID(), customization, provider:config, providerOverride:input.provider !== undefined && input.provider.inherit !== true };
           store.state.agents.push(agent); addProvider(agent); runtime.changed(); return response({ ...agent, provider:publicProvider(agent.provider) }, 201);
         }
         const agentMatch = pathname.match(/^\/api\/agents\/([a-f0-9-]{36})$/);
@@ -158,40 +197,47 @@ export function createApp(options = {}) {
         }
         if (pathname === '/api/customization' && req.method === 'PUT') {
           const agent = findAgent(store.state, url.searchParams.get('agentId') ?? undefined);
-          agent.customization = validateProfile(await json(req));
+          const input = await json(req), customization = validateProfile(input);
+          let changedAgents = [];
+          if (input.provider !== undefined) {
+            if (!input.provider || typeof input.provider.inherit !== 'boolean') throw new Error('Choose a provider source.');
+            const config = input.provider.inherit ? {...store.state.globalProvider} : validateProvider(input.provider,agent.provider);
+            changedAgents = await changeProviders(config,[agent]); agent.providerOverride = !input.provider.inherit;
+          }
+          agent.customization = customization;
           if (agent === store.state.agents[0]) store.state.customization = agent.customization;
-          runtime.changed(); return response(agent.customization);
+          runtime.changed(); await Promise.all(changedAgents.map(agent => runtime.refreshAccount(agent.id))); return response(agent.customization);
         }
         if (pathname === '/api/appearance' && req.method === 'PUT') {
           const input = await json(req);
-          if (!Object.hasOwn(palettes,input.palette) || !Object.hasOwn(choices.motion,input.motion)) throw new Error('Choose a palette and motion preference.');
-          store.state.appearance = {palette:input.palette,motion:input.motion}; runtime.changed(); return response(store.state.appearance);
+          store.state.appearance = validateAppearance(input); runtime.changed(); return response(store.state.appearance);
         }
         if (pathname === '/api/preferences' && req.method === 'PUT') {
           const input = await json(req); if (typeof input.text !== 'string' || input.text.length > 8000) throw new Error('Memory must be at most 8,000 characters.');
           if (input.currency !== undefined && !currencies.includes(input.currency)) throw new Error('Choose a supported currency.');
+          const appearance = input.appearance === undefined ? undefined : validateAppearance(input.appearance);
           const owner = validateProfile({...defaults,...store.state.owner,...Object.fromEntries(ownerPreferenceKeys.filter(key=>Object.hasOwn(input,key)).map(key=>[key,input[key]]))});
+          const config = input.provider === undefined ? null : validateProvider(input.provider,store.state.globalProvider);
+          const changedAgents = config ? await changeGlobalProvider(config) : [];
           store.state.owner = Object.fromEntries(ownerPreferenceKeys.map(key=>[key,owner[key]]));
           store.state.preferences = input.text.trim();
           if (input.currency !== undefined) store.state.currency = input.currency;
-          runtime.changed(); return response({ ok: true });
+          if (appearance !== undefined) store.state.appearance = appearance;
+          runtime.changed(); await Promise.all(changedAgents.map(agent => runtime.refreshAccount(agent.id))); return response({ ok: true });
         }
         if (pathname === '/api/provider' && req.method === 'PUT') {
-          const agent = findAgent(store.state, url.searchParams.get('agentId') ?? undefined);
-          const provider = runtime.providers.get(agent.id); const login = logins.get(agent.id);
-          if (runtime.active?.agentId === agent.id) throw new Error('Stop the active task before changing AI provider.');
-          const config = validateProvider(await json(req), agent.provider);
-          if (login?.loginId) await provider.request('account/login/cancel', { loginId: login.loginId }).catch(() => {});
-          if (runtime.active?.agentId === agent.id) throw new Error('Stop the active task before changing AI provider.');
-          logins.delete(agent.id); provider.configure(config); agent.provider = config;
-          runtime.accounts.set(agent.id, { account:null, connectionError:null });
-          if (agent === store.state.agents[0]) { store.state.provider = config; runtime.account = null; runtime.connectionError = null; runtime.rateLimits = null; }
-          runtime.changed(); await runtime.refreshAccount(agent.id);
+          const input = await json(req), global = url.searchParams.get('scope') === 'global';
+          if (input.inherit !== undefined && typeof input.inherit !== 'boolean') throw new Error('Choose a provider source.');
+          const agent = global ? null : findAgent(store.state,url.searchParams.get('agentId') ?? undefined);
+          const config = !global && input.inherit ? { ...store.state.globalProvider } : validateProvider(input,global ? store.state.globalProvider : agent.provider);
+          const changedAgents = global ? await changeGlobalProvider(config) : await changeProviders(config,[agent]);
+          if (agent) agent.providerOverride = !input.inherit;
+          runtime.changed(); await Promise.all(changedAgents.map(agent => runtime.refreshAccount(agent.id)));
           return response(publicProvider(config));
         }
-        if (pathname === '/api/account/refresh' && req.method === 'POST') { const agent = findAgent(store.state, url.searchParams.get('agentId') ?? undefined); await runtime.refreshAccount(agent.id); return response({ ok: true }); }
+        if (pathname === '/api/account/refresh' && req.method === 'POST') { const agent = url.searchParams.get('scope') === 'global' ? globalConnection(true) : findAgent(store.state, url.searchParams.get('agentId') ?? undefined); await runtime.refreshAccount(agent.id); return response({ ok: true }); }
         if (pathname === '/api/account/login' && req.method === 'POST') {
-          const agent = findAgent(store.state, url.searchParams.get('agentId') ?? undefined);
+          const agent = url.searchParams.get('scope') === 'global' ? globalConnection(true) : findAgent(store.state, url.searchParams.get('agentId') ?? undefined);
           const provider = runtime.providers.get(agent.id); let login = logins.get(agent.id);
           if (agent.provider.type !== 'codex') throw new Error('Use your provider’s sign-in instructions in Settings.');
           if (runtime.active) throw new Error('Stop the active task before changing your Codex sign-in.');

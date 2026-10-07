@@ -1,28 +1,27 @@
 import { $, api, toast } from './ui.js';
-import { defaults, resolveProfile, ownerPreferenceKeys, palettes, choices, paletteDetails, specializations, avatarSvg, sampleReply, validateProfile } from './profile.js';
+import { defaults, resolveProfile, ownerPreferenceKeys, palettes, choices, paletteDetails, materialDefaults, customColorKeys, appearanceVars, validateAppearance, specializations, avatarSvg, sampleReply, validateProfile } from './profile.js';
 
-let getState, saved, step = 0, firstRun = false, adding = false, editingId = null, lastApplied = '', appearanceOnly = false;
+let getState, saved, providerDraft = () => undefined, step = 0, firstRun = false, adding = false, editingId = null, lastApplied = '', appearanceOnly = false;
 const toneDetails = {warm:'Friendly, thoughtful, plainspoken.',crisp:'The answer first. Keep it short.',playful:'A little wit, plenty of useful work.',formal:'Courteous, precise, professional.',patient:'Calm explanations, one step at a time.',coach:'Practical next steps and encouragement.'};
-const shapeDetails = {squircle:'Your everyday companion',bean:'Soft and easygoing',orb:'Curious and bright',cat:'A little independent',robot:'Ready to get things done',fox:'Quick and resourceful'};
 let ownerDraft = {};
 const readDraft = () => ({...Object.fromEntries(new FormData($('#customize-form'))),...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$('#customize-form').elements.namedItem(key).disabled ? ownerDraft[key] : $('#customize-form').elements.namedItem(key).value])),overrideWorkspace:$('#workspace-override').checked});
-const setPalette = (node, palette) => Object.entries(palettes[palette].vars).forEach(([key,value])=>node.style.setProperty(`--${key}`,value));
+export const setAppearance = (node, appearance) => Object.entries(appearanceVars(appearance)).forEach(([key,value])=>node.style.setProperty(`--${key}`,value));
+const setPalette = (node, palette) => setAppearance(node,{palette});
 
 export function applyProfile(profile, appearance = {}, owner = {}) {
   const p = resolveProfile(profile,appearance,owner), signature = JSON.stringify([p,appearance,owner]);
   if (signature === lastApplied) return;
-  lastApplied = signature; setPalette(document.documentElement,p.palette);
+  lastApplied = signature; setAppearance(document.documentElement,{...appearance,palette:p.palette,customColors:profile?.overrideWorkspace ? {} : appearance.customColors});
   document.documentElement.dataset.motion = p.motion;
   $('#agent-name').textContent = p.name;
   $('#reply-agent').title = p.name;
   document.querySelectorAll('[data-agent-avatar]').forEach(node=>node.innerHTML=avatarSvg(p));
   $('#owner-name').textContent = owner.ownerName || 'Your space';
   $('.owner-avatar').textContent = Array.from(owner.ownerName || 'You')[0].toUpperCase();
-  $('#settings-appearance-summary').textContent = `${palettes[appearance.palette || defaults.palette].name} · ${choices.motion[appearance.motion || defaults.motion]}`;
   $('label[for="prompt"]').textContent = `What would you like ${p.name} to do?`;
   document.title = p.name === 'Odwyn' ? 'Odwyn' : `Odwyn · ${p.name}`;
   $('link[rel="icon"]').href = `data:image/svg+xml,${encodeURIComponent(avatarSvg(p))}`;
-  $('meta[name="theme-color"]').content = palettes[p.palette].vars.paper;
+  $('meta[name="theme-color"]').content = appearanceVars({...appearance,palette:p.palette,customColors:profile?.overrideWorkspace ? {} : appearance.customColors}).paper;
 }
 
 function preview() {
@@ -32,25 +31,21 @@ function preview() {
   $('#workspace-override-fields').hidden = !appearanceOnly && !draft.overrideWorkspace;
   setPalette($('#profile-preview'),p.palette);
   $('#profile-preview').dataset.motion = p.motion;
-  $('#preview-preferences').textContent = `${choices.language[p.language]} · ${choices.detail[p.detail]}`;
-  $('#preview-brand-name').textContent = $('#preview-agent-name').textContent = p.name;
-  $('#preview-owner').textContent = p.ownerName || 'You';
-  $('#preview-heading').textContent = `Message ${p.name}`;
-  $('#preview-specialty').textContent = p.specialization || 'Ask a question or give a task.';
+  $('#appearance-inherit-hint').hidden = appearanceOnly || draft.overrideWorkspace;
+  $('#preview-brand-name').textContent = p.name;
+  $('#preview-specialty').textContent = p.specialization || 'General assistant';
   $('#preview-reply').textContent = sampleReply(p);
-  for (const id of ['preview-brand-avatar','preview-message-avatar','preview-mascot']) $(`#${id}`).innerHTML = avatarSvg(p);
+  $('#preview-mascot').innerHTML = avatarSvg(p);
   document.querySelectorAll('#avatar-choices label').forEach(label=>label.querySelector('span').innerHTML=avatarSvg({...p,shape:label.querySelector('input').value}));
   document.querySelectorAll('[data-specialty]').forEach(button=>button.setAttribute('aria-pressed',String(p.specialization === specializations[button.dataset.specialty])));
 }
 
 function showStep(next) {
   step = next;
-  document.querySelectorAll('[data-profile-step]').forEach((node,i)=>node.hidden = i !== step);
-  document.querySelectorAll('[data-custom-step]').forEach((button,i)=>{ if (i === step) button.setAttribute('aria-current','step'); else button.removeAttribute('aria-current'); });
-  $('#customize-back').hidden = appearanceOnly || step === 1 || step === 0 || step === 3;
-  $('#customize-next').hidden = appearanceOnly || step !== 1; $('#customize-save').hidden = !appearanceOnly && ![0,2].includes(step);
+  document.querySelectorAll('[data-profile-step]').forEach(node=>node.hidden = Number(node.dataset.profileStep) !== step);
+  document.querySelectorAll('[data-custom-step]').forEach(button=>{ if (Number(button.dataset.customStep) === step) button.setAttribute('aria-current','page'); else button.removeAttribute('aria-current'); });
+  $('#customize-save').hidden = false;
   $('.profile-layout').scrollTop = 0;
-  $('#customize-preview').textContent = 'Preview';
 }
 
 export function openCustomization(onboarding = false, newAgent = false, workspaceAppearance = false, providerOnly = false) {
@@ -63,64 +58,87 @@ export function openCustomization(onboarding = false, newAgent = false, workspac
   for (const key of ownerPreferenceKeys) $('#customize-form').elements.namedItem(key).disabled = false;
   for (const [key,value] of Object.entries(draft)) { const field = $('#customize-form').elements.namedItem(key); if (field) field.value = value; }
   $('#workspace-override').checked = !adding && !!getState()?.customization?.overrideWorkspace;
-  $('#workspace-override-label').hidden = $('#workspace-inherit-hint').hidden = appearanceOnly;
-  $('#customize-title').textContent = appearanceOnly ? firstRun ? 'Customize your workspace' : 'Workspace appearance' : adding ? 'Add an agent' : firstRun ? 'Create your first agent' : 'Customize your agent';
-  document.querySelectorAll('[data-custom-step]').forEach(button=>button.hidden = appearanceOnly || adding && button.dataset.customStep === '3');
-  $('.profile-steps').hidden = appearanceOnly;
-  $('#customize-eyebrow').textContent = firstRun ? 'FIRST-TIME SETUP' : appearanceOnly ? 'WORKSPACE · ALL AGENTS' : adding ? 'NEW AGENT · MAXIMUM 5' : 'AGENT & PERSONALITY';
-  $('#customize-save').childNodes[0].textContent = appearanceOnly ? firstRun ? 'Continue to create agent' : 'Save appearance' : adding ? 'Add agent' : firstRun ? 'Create agent & continue' : 'Save changes';
-  $('#customize-defaults').textContent = appearanceOnly ? 'Use defaults & continue' : 'Keep defaults';
+  $('#agent-appearance-controls').hidden = appearanceOnly;
+  $('.profile-sidebar').hidden = appearanceOnly;
+  $('#agent-provider-tab').hidden = appearanceOnly;
+  $('.profile-layout').classList.toggle('profile-layout-single',appearanceOnly);
+  $('#customize-form').querySelectorAll('details').forEach(node=>node.open = false);
+  $('#customize-title').textContent = providerOnly ? 'AI provider' : appearanceOnly ? 'Workspace appearance' : adding ? 'Add agent' : firstRun ? 'Create your first agent' : 'Edit agent';
+  $('#customize-description').textContent = providerOnly ? `Connection settings for ${draft.name}.` : appearanceOnly ? 'Choose the theme and animation for Odwyn.' : adding || firstRun ? 'Start with a name and focus. You can change everything later.' : 'Changes apply to this agent’s next task.';
+  $('#customize-save').textContent = appearanceOnly ? firstRun ? 'Continue' : 'Save changes' : adding ? 'Create agent' : firstRun ? 'Create agent' : 'Save changes';
+  $('#customize-defaults').textContent = 'Use defaults';
   $('#customize-defaults').hidden = !firstRun || adding; $('#customize-status').textContent = '';
   showStep(appearanceOnly ? 0 : providerOnly ? 3 : 1); preview();
-  $('#customize-dialog').dispatchEvent(new Event('customization-open'));
+  $('#customize-dialog').dispatchEvent(new CustomEvent('customization-open',{detail:{adding:adding || firstRun && !appearanceOnly}}));
   $('#customize-dialog').showModal();
+  if (!appearanceOnly) $(providerOnly ? '#provider-source' : '#agent-name-input').focus();
 }
 
-async function save(profile) {
-  const continueSetup = firstRun && appearanceOnly, agentSetup = firstRun && !appearanceOnly;
+async function save(profile, resetAppearance = false) {
+  const workspaceSetup = appearanceOnly, newAgent = adding, continueSetup = firstRun && appearanceOnly, agentSetup = firstRun && !appearanceOnly;
   const buttons = $('#customize-form').querySelectorAll('button'); buttons.forEach(button=>button.disabled=true);
   $('#customize-status').textContent = 'Saving…';
   try {
-    const result = appearanceOnly ? await api('/api/appearance',{palette:profile.palette,motion:profile.motion},'PUT') : await api(adding ? '/api/agents' : `/api/customization?agentId=${editingId}`,validateProfile(profile),adding ? 'POST' : 'PUT');
-    $('#customize-dialog').close(); await saved(result,adding,agentSetup); toast(appearanceOnly ? 'Workspace appearance saved.' : adding ? 'Agent added. Choose its AI provider.' : firstRun ? 'Your space is ready.' : 'Saved. Your agent gets the changes on its next task.');
+    const result = workspaceSetup ? await api('/api/appearance',{...(resetAppearance ? {} : getState().appearance),palette:profile.palette,motion:profile.motion},'PUT') : await api(newAgent ? '/api/agents' : `/api/customization?agentId=${editingId}`,{...validateProfile(profile),provider:providerDraft()},newAgent ? 'POST' : 'PUT');
+    $('#customize-dialog').close(); await saved(result,newAgent,agentSetup); toast(workspaceSetup ? 'Appearance saved.' : newAgent || agentSetup ? 'Agent created.' : 'Agent saved. Changes apply to its next task.');
     if (continueSetup) openCustomization(true);
   } catch (error) { $('#customize-status').textContent = error.message; }
   finally { buttons.forEach(button=>button.disabled=false); }
 }
 
-export function setupCustomization(state, onSaved) {
-  getState = state; saved = onSaved;
-  $('#palette-choices').innerHTML = Object.entries(palettes).map(([value,p])=>`<label class="palette-option"><input type="radio" name="palette" value="${value}"><svg viewBox="0 0 96 32" aria-hidden="true">${p.colors.map((color,i)=>`<rect x="${i*32}" width="32" height="32" fill="${color}"/>`).join('')}</svg><span><strong>${p.name}</strong><small>${paletteDetails[value]}</small></span></label>`).join('');
-  $('#avatar-choices').innerHTML = Object.entries(choices.shape).map(([value,name])=>`<label class="avatar-option"><input type="radio" name="shape" value="${value}"><span></span><strong>${name}</strong><small>${shapeDetails[value]}</small></label>`).join('');
+export function readWorkspaceAppearance() {
+  return {palette:$('#preferences-form').elements.namedItem('workspacePalette').value,motion:$('#settings-motion').value,...Object.fromEntries(Object.keys(materialDefaults).map(key=>[key,Number($(`#appearance-${key}`).value)])),customColors:$('#appearance-custom-colors').checked ? Object.fromEntries(customColorKeys.map(key=>[key,$(`#appearance-color-${key}`).value])) : {}};
+}
+
+function previewWorkspaceAppearance() {
+  const draft = readWorkspaceAppearance();
+  for (const key of Object.keys(materialDefaults)) $(`#appearance-${key}-value`).textContent = `${draft[key]}${{opacity:'%',blur:'px',depth:'%',radius:'px'}[key]}`;
+  for (const key of customColorKeys) $(`#appearance-color-${key}-value`).textContent = $(`#appearance-color-${key}`).value;
+  $('#appearance-color-fields').hidden = !$('#appearance-custom-colors').checked;
+  try {
+    validateAppearance(draft);setAppearance($('#appearance-preview'),draft);
+    $('#appearance-preview-status').textContent = '';
+  } catch (error) { $('#appearance-preview-status').textContent = error.message; }
+}
+
+export function fillWorkspaceAppearance(appearance = {}) {
+  $('#preferences-form').elements.namedItem('workspacePalette').value = appearance.palette || defaults.palette;
+  $('#settings-motion').value = appearance.motion || defaults.motion;
+  $('#appearance-custom-colors').checked = !!Object.keys(appearance.customColors || {}).length;
+  const vars = appearanceVars(appearance);
+  for (const key of customColorKeys) $(`#appearance-color-${key}`).value = vars[key];
+  for (const [key,value] of Object.entries(materialDefaults)) $(`#appearance-${key}`).value = appearance[key] ?? value;
+  previewWorkspaceAppearance();
+}
+
+export function setupCustomization(state, onSaved, readProvider = () => undefined) {
+  getState = state; saved = onSaved; providerDraft = readProvider;
+  for (const [id,name] of [['palette-choices','palette'],['settings-palette-choices','workspacePalette']]) $(`#${id}`).innerHTML = Object.entries(palettes).map(([value,p])=>`<label class="palette-option"><input type="radio" name="${name}" value="${value}"><svg viewBox="0 0 96 32" aria-hidden="true">${p.colors.map((color,i)=>`<rect x="${i*32}" width="32" height="32" fill="${color}"/>`).join('')}</svg><span><strong>${p.name}</strong><small>${paletteDetails[value]}</small></span></label>`).join('');
+  $('#avatar-choices').innerHTML = Object.entries(choices.shape).map(([value,name])=>`<label class="avatar-option"><input type="radio" name="shape" value="${value}"><span></span><strong>${name}</strong></label>`).join('');
   for (const key of ['eyes','mouth','accessory','motion','language','detail']) $(`#customize-form select[name="${key}"]`).innerHTML = Object.entries(choices[key]).map(([value,name])=>`<option value="${value}">${name}</option>`).join('');
   $('#specialty-presets').innerHTML = Object.keys(specializations).map(key=>`<button type="button" data-specialty="${key}" aria-pressed="false">${key === 'general' ? 'All-rounder' : key[0].toUpperCase()+key.slice(1)}</button>`).join('');
   document.querySelectorAll('[data-specialty]').forEach(button=>button.onclick=()=>{ $('#agent-specialization').value = specializations[button.dataset.specialty]; preview(); });
-  document.querySelectorAll('[data-profile-icon]').forEach(node=>{
-    const kind = node.dataset.profileIcon;
-    if (kind === 'agent') { node.innerHTML = avatarSvg(defaults); return; }
-    const id = `step-${kind}`, body = kind === 'look' ? '<path d="M60 18C34 18 15 35 15 58s20 42 43 42c12 0 17-7 12-15-5-9 0-16 12-16h8c26 0 16-51-30-51Z"/>' : '<circle cx="60" cy="36" r="21"/><path d="M24 98V86a36 36 0 0 1 72 0v12Z"/>';
-    node.innerHTML = `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="${id}"><stop stop-color="#ffe1bb"/><stop offset=".5" stop-color="#ee9970"/><stop offset="1" stop-color="#a64b44"/></linearGradient></defs><g fill="#9c5047" transform="translate(2 5)">${body}</g><g fill="url(#${id})">${body}</g>${kind === 'look' ? '<circle cx="35" cy="53" r="8" fill="#84ad83"/><circle cx="57" cy="37" r="8" fill="#658bbd"/><circle cx="80" cy="44" r="8" fill="#d98bab"/>' : ''}</svg>`;
-  });
   $('#tone-choices').innerHTML = Object.entries(choices.tone).map(([value,name])=>`<label class="tone-option"><input type="radio" name="tone" value="${value}"><span><strong>${name}</strong><small>${toneDetails[value]}</small></span></label>`).join('');
   $('#customize-form').oninput = preview;
-  $('#appearance-open').onclick = () => openCustomization(false,false,true);
-  $('#customize-close').onclick = () => $('#customize-dialog').close();
-  $('#customize-preview').onclick = () => {
-    const button = $('#customize-preview');
-    if (button.textContent === 'Preview') { $('#profile-preview').scrollIntoView({block:'start',behavior:'smooth'}); button.textContent = 'Choices'; }
-    else { $('.profile-layout').scrollTo({top:0,behavior:'smooth'}); button.textContent = 'Preview'; }
+  $('#settings-motion').innerHTML = $('#customize-form select[name="motion"]').innerHTML;
+  $('#settings-appearance-controls').oninput = event => {
+    if (event.target.name==='workspacePalette') {
+      $('#appearance-custom-colors').checked = false;
+      for (const key of customColorKeys) $(`#appearance-color-${key}`).value = palettes[event.target.value].vars[key];
+    }
+    previewWorkspaceAppearance();
   };
-  $('#customize-defaults').onclick = () => save({...defaults});
-  $('#customize-back').onclick = () => showStep(step-1);
-  $('#customize-next').onclick = () => { const invalid = $(`[data-profile-step="${step}"]`).querySelector(':invalid'); if (invalid) return invalid.reportValidity(); showStep(step+1); };
+  $('#appearance-reset').onclick = () => {
+    const draft = readWorkspaceAppearance();fillWorkspaceAppearance({palette:draft.palette,motion:draft.motion});
+  };
+  $('#customize-close').onclick = () => $('#customize-dialog').close();
+  $('#customize-cancel').onclick = () => $('#customize-dialog').close();
+  $('#customize-defaults').onclick = () => save({...defaults},true);
   document.querySelectorAll('[data-custom-step]').forEach(button=>button.onclick=()=>showStep(Number(button.dataset.customStep)));
-  $('#preview-source').onclick = event => event.preventDefault();
   $('#customize-form').onsubmit = event => {
     event.preventDefault();
-    if (step === 3) { $('#provider-save').click(); return; }
-    if (!appearanceOnly && step === 1) { $('#customize-next').click(); return; }
-    const invalid = !appearanceOnly && $('#customize-form').querySelector('[data-profile-step="1"] :invalid,[data-profile-step="2"] :invalid');
-    if (invalid) { showStep(Number(invalid.closest('[data-profile-step]').dataset.profileStep)); invalid.reportValidity(); return; }
+    const invalid = !appearanceOnly && $('#customize-form').querySelector(':invalid');
+    if (invalid) { showStep(Number(invalid.closest('[data-profile-step]').dataset.profileStep)); const details = invalid.closest('details'); if (details) details.open = true; invalid.focus(); invalid.reportValidity(); return; }
     void save(readDraft());
   };
 }

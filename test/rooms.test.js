@@ -35,6 +35,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
   };
   const scout = await request('/api/agents',{...defaults,name:'Scout',shape:'fox'});
   const offline = await request('/api/agents',{...defaults,name:'Writer',shape:'robot'});
+  app.runtime.state.globalProvider.configured = true;
   app.runtime.providers.get(scout.id).stop(); app.runtime.addProvider(scout.id,second);
   app.runtime.state.agents.find(agent=>agent.id===scout.id).provider.configured = true;
   await app.runtime.refreshAccount(); await app.runtime.refreshAccount(scout.id); app.runtime.changed();

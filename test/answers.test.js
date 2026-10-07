@@ -11,7 +11,7 @@ test('assistant cards cover shopping outcomes, preserve fallback content, and fi
   const directory = mkdtempSync(join(tmpdir(), 'odwyn-answers-'));
   const codex = new EventEmitter(); codex.request = async () => ({ account: null }); codex.stop = () => {};
   const app = createApp({ directory, user: 'owner', password: 'test-password-long-enough', codex, browser: { close: async () => {} } });
-  app.runtime.state.customization = defaults; app.runtime.state.provider.configured = true;
+  app.runtime.state.customization = defaults; app.runtime.state.provider.configured = true; app.runtime.state.globalProvider.configured = true;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: app.fetch });
   const browser = await chromium.launch();
   const context = await browser.newContext({ httpCredentials: { username: 'owner', password: 'test-password-long-enough' } });
@@ -168,6 +168,17 @@ test('assistant cards cover shopping outcomes, preserve fallback content, and fi
       const replies = [...document.querySelectorAll('.message-assistant')];
       return replies.map(node=>[node.querySelector('.message-meta strong').textContent,node.querySelectorAll('.answer-file').length]);
     })).toEqual([['Reviewer',1],['Coordinator',0]]);
+    expect(await page.evaluate(async () => {
+      const { insertMessages } = await import('/views.js');
+      const { defaults } = await import('/profile.js');
+      const at = new Date().toISOString();
+      for (const kind of ['room','chat']) {
+        document.querySelector('#view').innerHTML = '<div id="messages"></div>';
+        insertMessages({customization:defaults,agents:[],files:[{id:'file',name:'result.csv'}],jobs:[{id:'file-job',files:['file']}],conversations:[{id:'test',kind,messages:[{id:'empty',role:'assistant',text:'',at},{id:'space',role:'assistant',text:' \n\t',at},{id:'missing',role:'assistant',at},{id:'useful',role:'assistant',text:'Real finding.',at},{id:'attachment',role:'assistant',text:'',jobId:'file-job',at}]}]},'test');
+        if (document.querySelectorAll('.message').length !== 2 || document.querySelectorAll('.answer-file').length !== 1 || !document.querySelector('.message').textContent.includes('Real finding.')) return false;
+      }
+      return true;
+    })).toBe(true);
     expect(errors).toEqual([]);
   } finally {
     await browser.close(); server.stop(true); await app.close(); rmSync(directory, { recursive: true, force: true });

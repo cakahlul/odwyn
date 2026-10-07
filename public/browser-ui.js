@@ -5,7 +5,12 @@ const minimizedPreviews = new Set();
 let previewJobId = null;
 export function setBrowserVisible(visible) {
   document.body.classList.toggle('browser-closed', !visible);
-  $('#browser-toggle').setAttribute('aria-expanded', String(visible));
+  const toggle = $('#browser-toggle'), panel = $('#browser-panel');
+  if (!visible && panel.contains(document.activeElement)) toggle.focus();
+  panel.inert = !visible;
+  toggle.setAttribute('aria-expanded', String(visible));
+  toggle.title = visible ? 'Hide browser panel' : 'Open browser panel';
+  toggle.setAttribute('aria-label', toggle.title);
   if (visible) void refreshFrame();
 }
 
@@ -107,7 +112,14 @@ async function action(input) {
 export function setupBrowser(stateGetter) {
   getState = stateGetter;
   emptyMarkup = $('#browser-viewport').innerHTML;
-  $('#browser-toggle').onclick = () => setBrowserVisible(document.body.classList.contains('browser-closed'));
+  $('#browser-toggle').onclick = () => {
+    const visible = document.body.classList.contains('browser-closed');
+    setBrowserVisible(visible);
+    if (visible) $('#browser-close').focus();
+  };
+  $('#browser-panel').addEventListener('keydown', event => {
+    if (event.key === 'Escape') { setBrowserVisible(false); event.preventDefault(); event.stopPropagation(); }
+  });
   $('#browser-close').onclick = () => setBrowserVisible(false);
   $('#browser-refresh').onclick = refreshFrame;
   $('#takeover-button').onclick = control;

@@ -118,9 +118,16 @@ test('API protects files and browser control, persists uploads and validates sch
     expect((await request('/api/customization','PUT',{...override,overrideWorkspace:false})).status).toBe(200);
 
     expect(app.runtime.state.currency).toBe('source');
-    expect((await request('/api/preferences','PUT',{text:'Based in Jakarta',currency:'IDR',ownerName:'Global Alex',language:'id',detail:'brief',userContext:'Shared background'})).status).toBe(200);
+    expect((await request('/api/preferences','PUT',{text:'Based in Jakarta',currency:'IDR',ownerName:'Global Alex',language:'id',detail:'brief',userContext:'Shared background',appearance:{palette:'harbor',motion:'reduced'}})).status).toBe(200);
     expect(app.runtime.state.currency).toBe('IDR');
-    const reopened=openStore(directory); expect(reopened.state.currency).toBe('IDR'); reopened.close();
+    expect(app.runtime.state.appearance).toEqual({palette:'harbor',motion:'reduced'});
+    const reopened=openStore(directory); expect(reopened.state.currency).toBe('IDR'); expect(reopened.state.appearance).toEqual(app.runtime.state.appearance); reopened.close();
+    for (const appearance of [null,{palette:'__proto__',motion:'system'},{palette:'paper',motion:'invalid'}]) {
+      expect((await request('/api/preferences','PUT',{text:'Invalid change',ownerName:'Changed name',currency:'USD',appearance})).status).toBe(400);
+      expect(app.runtime.state.appearance).toEqual({palette:'harbor',motion:'reduced'});
+      expect(app.runtime.state.owner.ownerName).toBe('Global Alex');
+      expect(app.runtime.state.preferences).toBe('Based in Jakarta'); expect(app.runtime.state.currency).toBe('IDR');
+    }
     expect((await request('/api/preferences','PUT',{text:'Invalid change',currency:'NOT_A_CURRENCY'})).status).toBe(400);
     expect((await request('/api/preferences','PUT',{text:'Bad name',ownerName:'x'.repeat(41)})).status).toBe(400);
     expect((await request('/api/preferences','PUT',{text:'Bad language',language:'__proto__'})).status).toBe(400);
@@ -130,6 +137,7 @@ test('API protects files and browser control, persists uploads and validates sch
     await request('/api/preferences','PUT',{text:'Based in Jakarta'});
     expect(app.runtime.state.owner.ownerName).toBe('Global Alex');
     expect(app.runtime.state.currency).toBe('IDR');
+    expect(app.runtime.state.appearance).toEqual({palette:'harbor',motion:'reduced'});
     expect((await (await request('/api/state')).json()).preferences).toBe('Based in Jakarta');
     await request(`/api/jobs/${job.id}/cancel`,'POST',{});
     expect(app.runtime.state.jobs[0].status).toBe('cancelled');

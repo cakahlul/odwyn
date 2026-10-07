@@ -1,8 +1,8 @@
 import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date } from './ui.js';
 import { renderChat, insertMessages, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
 import { setupBrowser, updateBrowser } from './browser-ui.js';
-import { setupCustomization, applyProfile, openCustomization } from './customize.js';
-import { defaults, choices, ownerPreferenceKeys, avatarSvg, currencies, effortLevels } from './profile.js';
+import { setupCustomization, applyProfile, openCustomization, fillWorkspaceAppearance, readWorkspaceAppearance } from './customize.js';
+import { defaults, agentColor, choices, ownerPreferenceKeys, avatarSvg, currencies, effortLevels } from './profile.js';
 
 // Carry browser preferences forward from the previous product name.
 for (const [storage, keys] of [[localStorage, ['agent','closed-agents','bubble-positions']], [sessionStorage, ['drafts']]]) {
@@ -15,7 +15,7 @@ for (const [storage, keys] of [[localStorage, ['agent','closed-agents','bubble-p
 
 for (const key of ['language','detail']) $(`#global-${key}`).innerHTML = Object.entries(choices[key]).map(([value,label])=>`<option value="${value}">${label}</option>`).join('');
 
-let state = null, conversationId = null, view = 'chat', filter = 'all', signature = '', busy = false, attachments = [], providerSetup = false, providerAgentId = null;
+let state = null, conversationId = null, view = 'chat', filter = 'all', signature = '', busy = false, attachments = [], providerAgentId = null, providerGlobal = false, providerAdding = false;
 let workspace = null, agentId = localStorage.getItem('odwyn-agent'), switching = false, dockSignature = '';
 const drafts = new Map(JSON.parse(sessionStorage.getItem('odwyn-drafts') || '[]'));
 const closedAgents = new Set(JSON.parse(localStorage.getItem('odwyn-closed-agents') || '[]'));
@@ -29,7 +29,7 @@ const providers = { codex: ['Codex','gpt-6.1-sol'], claude: ['Claude Code','sonn
 const currencyNames = new Intl.DisplayNames(['en'],{type:'currency'});
 $('#preferred-currency').innerHTML = currencies.map(code=>`<option value="${code}">${code === 'source' ? 'Original currency' : `${code} · ${esc(currencyNames.of(code))}`}</option>`).join('');
 hydrateIcons(); setupBrowser(() => state);
-setupCustomization(() => state, async (result, adding, onboarding) => { signature = ''; await refresh(); if (adding) await switchAgent(result.id); if (adding || onboarding && !state.provider.configured) openAgentProvider(true); });
+setupCustomization(() => state, async (result, adding, onboarding) => { $('#provider-api-key').value = ''; signature = ''; await refresh(); if (adding) await switchAgent(result.id); if (onboarding && !workspace.globalProvider.configured) openSettings(); }, () => $('#provider-source').value === 'global' ? {inherit:true} : {...providerInput(),inherit:false});
 
 function selectState() {
   if (!workspace) return;
@@ -49,15 +49,15 @@ function renderDock() {
     $('#sidebar-agent-list').innerHTML = data.map(agent => {
       const p = {...defaults,...agent.customization}, selected = agent.id === agentId;
       const label = selected ? 'Active' : closedAgents.has(agent.id) ? 'Closed' : 'Minimized';
-      return `<div class="sidebar-agent-row"><button class="sidebar-agent" data-select-agent="${esc(agent.id)}" aria-pressed="${selected}" title="Open ${esc(p.name)}">${avatarSvg(p)}<span><strong>${esc(p.name)}</strong><small>${esc(providers[agent.provider.type][0])} · ${agent.status === 'waiting' ? 'Needs you' : label}</small></span></button><details class="agent-menu" data-manage-agent="${esc(agent.id)}" ${openMenu === agent.id ? 'open' : ''}><summary aria-label="Manage ${esc(p.name)}" title="Manage ${esc(p.name)}">⋯</summary><div class="agent-menu-actions"><button data-agent-action="customize" data-agent-id="${esc(agent.id)}">Customize agent</button><button data-agent-action="settings" data-agent-id="${esc(agent.id)}">AI provider</button><button class="delete-agent" data-agent-action="delete" data-agent-id="${esc(agent.id)}" ${data.length === 1 ? 'disabled title="Add a replacement before deleting your last agent"' : ''}>Delete agent</button></div></details></div>`;
+      return `<div class="sidebar-agent-row"><button class="sidebar-agent" aria-label="Open ${esc(p.name)}" data-status="${esc(agent.status || '')}" data-select-agent="${esc(agent.id)}" aria-pressed="${selected}" title="Open ${esc(p.name)}">${avatarSvg(p)}<span><strong>${esc(p.name)}</strong><small>${esc(providers[agent.provider.type][0])} · ${agent.status === 'waiting' ? 'Needs you' : label}</small></span></button><details class="agent-menu" data-manage-agent="${esc(agent.id)}" ${openMenu === agent.id ? 'open' : ''}><summary aria-label="Manage ${esc(p.name)}" title="Manage ${esc(p.name)}">⋯</summary><div class="agent-menu-actions"><button data-agent-action="customize" data-agent-id="${esc(agent.id)}">Customize agent</button><button data-agent-action="settings" data-agent-id="${esc(agent.id)}">AI provider</button><button class="delete-agent" data-agent-action="delete" data-agent-id="${esc(agent.id)}" ${data.length === 1 ? 'disabled title="Add a replacement before deleting your last agent"' : ''}>Delete agent</button></div></details></div>`;
     }).join('');
     $('#reply-agent').innerHTML = (room ? '<option value="all">All agents</option>' : '') + data.filter(a => !room || room.memberIds.includes(a.id)).map(a => `<option value="${esc(a.id)}">${esc(a.customization?.name || defaults.name)}</option>`).join('');
     const recipient = roomRecipients.get(room?.id) || 'all';
     $('#reply-agent').value = room ? room.memberIds.includes(recipient) ? recipient : 'all' : agentId || '';
-    $('#agent-dock').innerHTML = data.filter(a => (a.id !== agentId || a.id === transitionAgentId) && !closedAgents.has(a.id)).map(agent => {
+    $('#agent-dock').innerHTML = data.filter(a => (a.id !== agentId || a.id === transitionAgentId) && !closedAgents.has(a.id)).map((agent,index) => {
       const p = {...defaults,...agent.customization};
       const status = agent.status === 'waiting' || agent.status === 'takeover' ? 'Needs your input' : agent.status === 'queued' ? 'Queued' : agent.status ? 'Working' : '';
-      return `<div class="agent-slot" data-bubble="${esc(agent.id)}"><button class="bubble-restore" data-agent="${esc(agent.id)}" aria-label="Restore ${esc(p.name)}${status ? `, ${status}` : ''}" aria-describedby="bubble-help" title="Restore ${esc(p.name)}${status ? ` · ${status}` : ''}">${avatarSvg(p)}<span class="agent-slot-name">${esc(p.name)}</span></button><button class="bubble-close" data-close-agent="${esc(agent.id)}" aria-label="Close ${esc(p.name)}" title="Close ${esc(p.name)}">${icon('close')}</button>${status ? `<span class="agent-slot-status ${agent.status === 'running' ? 'running' : ''}" aria-hidden="true">${agent.status === 'waiting' || agent.status === 'takeover' ? '!' : '•'}</span>` : ''}</div>`;
+      return `<div class="agent-slot" data-bubble="${esc(agent.id)}" style="--float-delay:-${index*1.3}s;--float-duration:${5+index*.6}s"><button class="bubble-restore" data-agent="${esc(agent.id)}" aria-label="Restore ${esc(p.name)}${status ? `, ${status}` : ''}" aria-describedby="bubble-help" title="Restore ${esc(p.name)}${status ? ` · ${status}` : ''}"><span class="agent-slot-note"><strong class="agent-slot-name">${esc(p.name)}</strong>${status ? `<small>${esc(status === 'Needs your input' ? 'Needs you' : status)}</small>` : ''}</span><span class="bubble-avatar">${avatarSvg(p)}</span></button><button class="bubble-close" data-close-agent="${esc(agent.id)}" aria-label="Close ${esc(p.name)}" title="Close ${esc(p.name)}">${icon('close')}</button>${status ? `<span class="agent-slot-status ${agent.status === 'running' ? 'running' : ''}" aria-hidden="true">${agent.status === 'waiting' || agent.status === 'takeover' ? '!' : '•'}</span>` : ''}</div>`;
     }).join(''); dockSignature = next;
     if (focused) $('#agent-dock').querySelector(`[data-agent="${focused}"]`)?.focus({preventScroll:true});
     if (closeFocus) $('#agent-dock').querySelector(`[data-close-agent="${closeFocus}"]`)?.focus({preventScroll:true});
@@ -78,7 +78,7 @@ function renderRooms() {
   const rooms = workspace.conversations.filter(c => c.kind === 'room'), room = currentRoom();
   const listSignature = JSON.stringify([conversationId,view,workspace.agents.length,rooms.map(r=>[r.id,r.title,r.memberIds])]);
   if (listSignature !== roomListSignature) {
-    $('#room-list').innerHTML = rooms.length ? rooms.map(r=>`<button class="room-list-item ${r.id === room?.id ? 'selected' : ''}" data-conversation="${esc(r.id)}">${icon('chat')}<span><strong>${esc(r.title)}</strong><small>${r.memberIds.length} agents</small></span></button>`).join('') : `<p class="sidebar-empty">${workspace.agents.length < 2 ? 'Add another agent to create a room.' : 'Create a room for your agents.'}</p>`;
+    $('#room-list').innerHTML = rooms.length ? rooms.map(r=>`<button class="room-list-item ${r.id === room?.id ? 'selected' : ''}" data-conversation="${esc(r.id)}" aria-label="${esc(r.title)}" title="${esc(r.title)}">${icon('chat')}<span class="room-initial" aria-hidden="true">${esc(Array.from(r.title)[0]?.toUpperCase() || '#')}</span><span><strong>${esc(r.title)}</strong><small>${r.memberIds.length} agents</small></span></button>`).join('') : `<p class="sidebar-empty">${workspace.agents.length < 2 ? 'Add another agent to create a room.' : 'Create a room for your agents.'}</p>`;
     roomListSignature = listSignature;
   }
   $('#new-room').disabled = workspace.agents.length < 2 || busy || switching;
@@ -96,6 +96,7 @@ function renderRooms() {
   $('.permission-picker').hidden = $('#schedule-open').hidden = false;
   if (!room || !agentId) return;
   $('#room-heading').textContent = $('#room-label').textContent = room.title;
+  $('#room-participant-count').textContent = `${room.memberIds.length} agents · Shared conversation`;
   $('#room-details-open').setAttribute('aria-label',`Room details for ${room.title}`);
   $('#room-details-open').title = `${room.memberIds.length} agents · View room details`;
   const jobs = state.jobs.filter(j => j.conversationId === room.id);
@@ -119,8 +120,11 @@ function renderMentions() {
   const room = currentRoom(), prompt = $('#prompt');
   const match = prompt.value.slice(0,prompt.selectionStart).match(/(?:^|\s)@([^@\n"]*)$/);
   const members = room && match ? workspace.agents.filter(a=>room.memberIds.includes(a.id) && (a.customization?.name || defaults.name).toLowerCase().startsWith(match[1].toLowerCase())) : [];
-  const html = members.map(a=>`<button type="button" class="text-button" data-mention-agent="${esc(a.id)}">@${esc(a.customization?.name || defaults.name)}</button>`).join('');
-  if ($('#room-mentions').innerHTML !== html) $('#room-mentions').innerHTML = html;
+  const html = members.map(a=>`<button type="button" class="text-button agent-mention" data-mention-agent="${esc(a.id)}">@${esc(a.customization?.name || defaults.name)}</button>`).join('');
+  if ($('#room-mentions').innerHTML !== html) {
+    $('#room-mentions').innerHTML = html;
+    $('#room-mentions').querySelectorAll('button').forEach((button,index)=>button.style.setProperty('--agent-color',agentColor(members[index].customization)));
+  }
   $('#room-mentions').hidden = !members.length;
 }
 
@@ -134,15 +138,13 @@ function openRoomEditor(room = null) {
 }
 
 function positionBubbles() {
-  if ($('#agent-dock').hidden) { $('#main').style.setProperty('--bubble-space','0px'); return; }
-  const bubbles = [...$('#agent-dock').children], main = $('#main').getBoundingClientRect(), gap = 8, width = innerWidth <= 760 ? 140 : 160, height = 56;
-  const columns = Math.max(1,Math.floor((main.width-24+gap)/(width+gap))), rows = Math.ceil(bubbles.length/columns);
-  $('#main').style.setProperty('--bubble-space',bubbles.length ? `${rows*(height+gap)+16}px` : '0px');
-  bubbles.forEach((bubble,index) => {
+  if ($('#agent-dock').hidden) return;
+  const offsets = [[0,0],[100,48],[12,136],[112,180],[38,266]];
+  [...$('#agent-dock').children].forEach((bubble,index) => {
     if (drag?.bubble === bubble) return;
-    const row = Math.floor(index/columns), column = index%columns, rowCount = Math.min(columns,bubbles.length-row*columns);
-    const saved = bubblePositions[bubble.dataset.bubble];
-    placeBubble(bubble,saved ? saved.x*(innerWidth-width) : main.x+(main.width-rowCount*width-(rowCount-1)*gap)/2+column*(width+gap), saved ? saved.y*(innerHeight-height) : innerHeight-16-height-(rows-row-1)*(height+gap));
+    const [dx,dy] = offsets[index], saved = bubblePositions[bubble.dataset.bubble];
+    const width = bubble.offsetWidth, height = bubble.offsetHeight;
+    placeBubble(bubble,saved ? saved.x*(innerWidth-width) : innerWidth-width-24-dx, saved ? saved.y*(innerHeight-height) : innerHeight-height-24-dy);
   });
 }
 
@@ -258,6 +260,18 @@ function setNavigation(open) {
   $('.sidebar').inert = mobile.matches && !open;
   if (open && mobile.matches) ($('#new-chat').disabled ? $('.sidebar-agent') : $('#new-chat'))?.focus();
 }
+function setSidebarCollapsed(collapsed) {
+  document.body.classList.toggle('sidebar-collapsed',collapsed);
+  $('#sidebar-toggle').setAttribute('aria-expanded',String(!collapsed));
+  $('#sidebar-toggle').title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  $('#sidebar-toggle').setAttribute('aria-label',$('#sidebar-toggle').title);
+  if (collapsed) document.querySelectorAll('.agent-menu[open]').forEach(menu=>menu.open=false);
+}
+setSidebarCollapsed(localStorage.getItem('odwyn-sidebar-collapsed') === 'true');
+$('#sidebar-toggle').onclick = () => {
+  const collapsed = !document.body.classList.contains('sidebar-collapsed');
+  setSidebarCollapsed(collapsed); localStorage.setItem('odwyn-sidebar-collapsed',String(collapsed));
+};
 mobile.addEventListener('change', () => setNavigation(false)); setNavigation(false);
 
 function navigate(next = 'chat', id = null) {
@@ -277,27 +291,29 @@ function render() {
   applyProfile(agentId ? state.customization : null,state.appearance,state.owner);
   $('#composer-area').setAttribute('aria-label','Message your assistant');
   renderRooms();
-  $('#new-chat').disabled = $('#connection-button').disabled = !agentId;
+  $('.connection').classList.toggle('connected', !!workspace.globalRuntime.account);
+  const providerName = providers[workspace.globalProvider.type][0], globalRuntime = workspace.globalRuntime;
+  $('#connection-label').textContent = globalRuntime.account ? `${providerName} ready` : `Connect ${providerName}`;
+  $('#connection-button').setAttribute('aria-label',$('#connection-label').textContent);
+  $('#connection-button').title = globalRuntime.connectionError || `${providerName} · ${workspace.globalProvider.model}`;
+
+  $('#new-chat').disabled = !agentId;
   document.querySelectorAll('[data-view]').forEach(button => button.disabled = !agentId);
   if (!agentId) {
-    $('#agent-workspace').classList.remove('chat-start'); $('#main').classList.remove('chat-start'); $('#composer-area').hidden = true;
+    $('#agent-workspace').classList.remove('chat-start','floating-composer'); $('#main').classList.remove('chat-start'); $('#composer-area').hidden = true;
     $('#page-title').textContent = 'No conversation open';
     if (signature !== 'minimized') $('#view').innerHTML = `<div class="agents-empty"><h1>${workspace.agents.every(a => closedAgents.has(a.id)) ? 'No conversation open' : 'Your agents are minimized'}</h1><p>Choose an agent in the sidebar or restore a floating bubble. Your conversations stay in history.</p></div>`;
     signature = 'minimized';
     updateBrowser(state); return;
   }
   $('#run-status').hidden = !state.jobs.some(job => activeStatuses.includes(job.status));
-  $('.connection').classList.toggle('connected', !!state.runtime.account);
-  const providerName = providers[state.provider.type][0];
-  $('#connection-label').textContent = state.runtime.account ? `${providerName} ready` : `Connect ${providerName}`;
-  $('#connection-button').setAttribute('aria-label',$('#connection-label').textContent);
-  $('#connection-button').title = state.runtime.connectionError || (state.runtime.account ? `${providerName} · ${state.runtime.model}` : 'Configure your AI provider in Customize agent');
   const conversation = state.conversations.find(c => c.id === conversationId);
   const permissionJob = state.jobs.find(job=>job.conversationId === conversationId && job.id === state.runtime.activeJobId) || state.jobs.find(job=>job.conversationId === conversationId && job.status === 'queued');
   if (permissionJob && !$('#interaction-mode').disabled) $('#interaction-mode').value = permissionJob.interactionMode;
-  $('#prompt').placeholder = conversation?.kind === 'room' ? 'Set a goal, redirect discussion, or @mention an agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
+  $('#prompt').placeholder = conversation?.kind === 'room' ? 'Message the room, or @mention an agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#agent-workspace').classList.toggle('chat-start', view === 'chat' && !conversation);
+  $('#agent-workspace').classList.toggle('floating-composer',view === 'chat' && !!conversation);
   $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { runs:'Task runs', routines:'Routines', files:'Files & results' }[view];
   $('#page-title').disabled = view !== 'chat' || !conversation;
   $('#page-title').title = conversation && view === 'chat' ? 'Rename conversation' : '';
@@ -333,7 +349,7 @@ function render() {
   renderActivity(state,conversationId);
   const disabled = !!state.jobs.find(job => job.conversationId === conversationId && activeStatuses.includes(job.status));
   $('#send-button').disabled = busy || disabled && conversation?.kind !== 'room'; $('#send-button').title = disabled ? conversation?.kind === 'room' ? 'Stop current discussion and send this direction' : 'Finish or stop the active run before a follow-up.' : 'Send message';
-  if ($('#customize-dialog').open && providerAgentId === state.agentId) updateAccount();
+  if (providerGlobal ? $('#settings-dialog').open : $('#customize-dialog').open && providerAgentId === state.agentId) updateAccount();
 }
 
 async function refresh() {
@@ -359,13 +375,14 @@ function openSchedule() {
   $('#schedule-at').value = local.toISOString().slice(0,16); $('#schedule-status').textContent = ''; $('#schedule-dialog').showModal();
 }
 function updateAccount() {
-  const account = state?.runtime.account;
-  const type = state?.provider.type || 'codex';
+  const connection = providerGlobal ? workspace.globalRuntime : state.runtime;
+  const account = connection.account;
+  const type = (providerGlobal ? workspace.globalProvider : state.provider).type;
   $('#account-title').textContent = providers[type][0];
-  $('#account-description').textContent = state?.runtime.connectionError || (type === 'claude' ? (account ? `Signed in${account.email ? ` as ${account.email}` : ''}.` : 'Run claude auth login on the server, then refresh.') : type === 'openai' ? 'Requests use your configured API URL and model. Provider API billing applies.' : account?.email || 'Connect your ChatGPT account to start working.');
+  $('#account-description').textContent = connection.connectionError || (type === 'claude' ? (account ? `Signed in${account.email ? ` as ${account.email}` : ''}.` : 'Run claude auth login on the server, then refresh.') : type === 'openai' ? 'Requests use your configured API URL and model. Provider API billing applies.' : account?.email || 'Connect your ChatGPT account to start working.');
   $('#connect-account').textContent = account || type !== 'codex' ? 'Refresh' : 'Connect';
-  const login = state?.runtime.login;
-  $('#login-instructions').hidden = !login;
+  const login = connection.login;
+  $('#login-instructions').hidden = !login || $('#provider-account-box').hidden;
   if (login?.verificationUrl) {
     const node = $('#login-instructions'); node.replaceChildren();
     const p = document.createElement('p'); p.textContent = 'Open the sign-in page and enter this one-time code:';
@@ -375,6 +392,9 @@ function updateAccount() {
 }
 function providerFields() {
   const type = $('#provider-type').value, isAPI = type === 'openai';
+  const needsSave = providerAdding || type !== (providerGlobal ? workspace.globalProvider : state.provider).type;
+  $('#provider-account-box').hidden = needsSave; $('#provider-save-hint').hidden = !needsSave;
+  if (needsSave) $('#login-instructions').hidden = true;
   const selected=$('#provider-effort').value || 'default';
   $('#provider-effort').innerHTML=effortLevels[type].map(value=>`<option value="${value}">${value==='default' ? 'Model default' : value==='xhigh' ? 'Extra high' : value==='max' ? 'Maximum' : value[0].toUpperCase()+value.slice(1)}</option>`).join('');
   $('#provider-effort').value=effortLevels[type].includes(selected) ? selected : 'default';
@@ -384,39 +404,52 @@ function providerFields() {
   $('#provider-hint').textContent = type === 'claude' ? 'Uses Claude Code on this server. Sign in with claude auth login, then refresh below.' : isAPI ? 'Use a base URL such as https://api.openai.com/v1. Model must support tool calling; screenshots need vision.' : 'Uses Codex App Server with your ChatGPT subscription. Connect below after saving.';
 }
 function openSettings() {
+  providerGlobal = true; providerAdding = false;
+  $('#settings-provider-editor').append($('#provider-editor'));
+  $('#provider-editor').hidden = false;
+  $('#provider-form').querySelectorAll('input,select').forEach(field => field.disabled = false);
+  fillProvider(workspace.globalProvider);
+  fillWorkspaceAppearance(workspace.appearance);
   for (const key of ownerPreferenceKeys) $(`#global-${key}`).value = workspace.owner?.[key] ?? defaults[key];
   $('#preferred-currency').value = workspace.currency || 'source';
   $('#preferences').value = workspace.preferences || ''; $('#settings-status').textContent = '';
   $('#settings-dialog').showModal();
 }
-function openAgentProvider(onboarding = false) {
-  providerSetup = onboarding;
+function openAgentProvider() {
   openCustomization(false,false,false,true);
 }
-$('#customize-dialog').addEventListener('customization-open', () => {
-  providerAgentId = state.agentId;
-  $('#provider-save').textContent = providerSetup ? 'Save & continue' : 'Save provider';
+function fillProvider(config) {
   $('#provider-status').textContent = '';
-  $('#provider-type').value = state.provider.type; $('#provider-model').value = state.provider.model;
-  $('#provider-base-url').value = state.provider.baseUrl; $('#provider-api-key').value = '';
-  $('#provider-api-key').placeholder = state.provider.hasApiKey ? 'Saved key — leave blank to keep' : 'Optional for local models';
-  providerFields(); $('#provider-effort').value=state.provider.effort || 'default'; updateAccount();
+  $('#provider-type').value = config.type; $('#provider-model').value = config.model;
+  $('#provider-base-url').value = config.baseUrl; $('#provider-api-key').value = '';
+  $('#provider-api-key').placeholder = config.hasApiKey ? 'Saved key — leave blank to keep' : 'Optional for local models';
+  providerFields(); $('#provider-effort').value = config.effort || 'default'; updateAccount();
+}
+function providerSource() {
+  const inherited = $('#provider-source').value === 'global';
+  $('#provider-editor').hidden = inherited;
+  $('#provider-inherit-hint').hidden = !inherited;
+  $('#provider-inherit-hint').textContent = `${providers[workspace.globalProvider.type][0]} · ${workspace.globalProvider.model}. Change the workspace provider in Odwyn Settings.`;
+  $('#provider-form').querySelectorAll('input,select').forEach(field => field.disabled = inherited);
+  if (!inherited) providerFields();
+}
+$('#provider-source').onchange = providerSource;
+$('#customize-dialog').addEventListener('customization-open', event => {
+  providerGlobal = false; providerAdding = event.detail.adding; providerAgentId = state.agentId;
+  $('#agent-provider-editor').append($('#provider-editor'));
+  $('#provider-editor').hidden = false;
+  $('#provider-form').querySelectorAll('input,select').forEach(field => field.disabled = false);
+  fillProvider(event.detail.adding ? workspace.globalProvider : state.provider);
+  $('#provider-source').value = !event.detail.adding && workspace.agents.find(agent => agent.id === state.agentId).providerOverride ? 'custom' : 'global';
+  providerSource();
 });
-$('#customize-dialog').addEventListener('close', () => { if (!$('#customize-dialog').open) { providerSetup = false; providerAgentId = null; } });
+$('#customize-dialog').addEventListener('close', () => { if (!$('#customize-dialog').open) { providerAgentId = null; } });
 $('#provider-type').onchange = () => {
-  const type = $('#provider-type').value;
-  $('#provider-model').value = type === state.provider.type ? state.provider.model : providers[type][1];
-  providerFields(); $('#provider-effort').value=type === state.provider.type ? state.provider.effort || 'default' : 'default';
+  const config = providerGlobal ? workspace.globalProvider : state.provider, type = $('#provider-type').value;
+  $('#provider-model').value = type === config.type ? config.model : providers[type][1];
+  providerFields(); $('#provider-effort').value = type === config.type ? config.effort || 'default' : 'default';
 };
-$('#provider-save').onclick = async () => {
-  const invalid = $('#provider-form').querySelector(':invalid'); if (invalid) return invalid.reportValidity(); $('#provider-save').disabled = true; $('#provider-status').textContent = 'Saving…';
-  try {
-    await api(`/api/provider?agentId=${providerAgentId}`,{ type:$('#provider-type').value, model:$('#provider-model').value, effort:$('#provider-effort').value, baseUrl:$('#provider-base-url').value, apiKey:$('#provider-api-key').value },'PUT');
-    $('#provider-api-key').value = ''; await refresh(); $('#provider-status').textContent = 'Saved. Applies to your next task.';
-    if (providerSetup) $('#customize-dialog').close();
-  } catch (error) { $('#provider-status').textContent = error.message; }
-  finally { $('#provider-save').disabled = false; }
-};
+const providerInput = () => ({type:$('#provider-type').value,model:$('#provider-model').value,effort:$('#provider-effort').value,baseUrl:$('#provider-base-url').value,apiKey:$('#provider-api-key').value});
 function search() {
   const query = $('#search-input').value.toLowerCase();
   const found = state?.conversations.filter(c => c.title.toLowerCase().includes(query) || c.messages.some(m => m.text.toLowerCase().includes(query))) || [];
@@ -500,7 +533,7 @@ $('#interaction-mode').onchange = async () => {
   try { await perform(async () => { for (const job of jobs) await api(`/api/jobs/${job.id}/permissions`,{interactionMode:mode}); }); }
   finally { selector.disabled = false; render(); }
 };
-$('#settings-open').onclick = () => openSettings(); $('#connection-button').onclick = () => openAgentProvider();
+$('#settings-open').onclick = () => openSettings();
 $('#schedule-open').onclick = openSchedule;
 $('#menu-button').onclick = () => setNavigation(!document.body.classList.contains('nav-open'));
 $('#nav-scrim').onclick = () => { setNavigation(false); $('#menu-button').focus(); };
@@ -542,8 +575,13 @@ $('#room-mentions').onclick = event => {
   prompt.setRangeText(`@${/^[\p{L}\p{N}_-]+$/u.test(name) ? name : JSON.stringify(name)} `,start,end,'end');
   prompt.focus(); prompt.dispatchEvent(new Event('input'));
 };
-$('#preferences-form').onsubmit = event => { event.preventDefault(); void perform(async () => { await api('/api/preferences',{ ...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$(`#global-${key}`).value])), text:$('#preferences').value, currency:$('#preferred-currency').value },'PUT'); $('#settings-status').textContent = 'Preferences saved. Applies to your next task.'; }); };
-$('#connect-account').onclick = () => perform(async () => { $('#connect-account').disabled = true; try { await api(`${state?.runtime.account || state?.provider.type !== 'codex' ? '/api/account/refresh' : '/api/account/login'}?agentId=${agentId}`,{}); } finally { $('#connect-account').disabled = false; } });
+$('#preferences-form').onsubmit = event => { event.preventDefault(); void perform(async () => { await api('/api/preferences',{ ...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$(`#global-${key}`).value])), provider:providerInput(), text:$('#preferences').value, currency:$('#preferred-currency').value, appearance:readWorkspaceAppearance() },'PUT'); $('#provider-api-key').value = ''; $('#settings-dialog').close(); toast('Settings saved. Applies to your next task.'); }); };
+$('#connect-account').onclick = () => perform(async () => {
+  const connection = providerGlobal ? workspace.globalRuntime : state.runtime, config = providerGlobal ? workspace.globalProvider : state.provider;
+  $('#connect-account').disabled = true;
+  try { await api(`${connection.account || config.type !== 'codex' ? '/api/account/refresh' : '/api/account/login'}?${providerGlobal ? 'scope=global' : `agentId=${providerAgentId}`}`,{}); }
+  finally { $('#connect-account').disabled = false; }
+});
 $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(async () => {
   await api('/api/schedules',{ agentId:$('#schedule-agent').value || agentId, prompt:$('#schedule-prompt').value, at:new Date($('#schedule-at').value).toISOString(), intervalMinutes:Number($('#schedule-interval').value), interactionMode:'confirm' });
   $('#schedule-dialog').close(); navigate('routines'); toast('Routine scheduled.');
@@ -608,11 +646,18 @@ document.addEventListener('keydown', event => {
   }
 });
 
+new ResizeObserver(() => {
+  const panel = $('#agent-workspace'), feed = $('#view');
+  const atBottom = feed.scrollHeight-feed.scrollTop-feed.clientHeight<100;
+  panel.style.setProperty('--composer-height',`${$('#composer-area').getBoundingClientRect().height}px`);
+  if (panel.classList.contains('floating-composer') && atBottom) feed.scrollTo({top:feed.scrollHeight,behavior:'instant'});
+}).observe($('#composer-area'));
+
 $('#view').innerHTML = '<div class="loading-state" role="status"><img src="/mark.svg" width="48" height="48" alt=""><p>Making room for your day…</p></div>';
 await refresh();
 if (state && agentId) { restoreDraft(); signature = ''; render(); }
 const initial = location.hash.slice(1).split('/');
 if (agentId && ['chat','runs','routines','files'].includes(initial[0])) { view = initial[0]; conversationId = initial[1] || null; signature = ''; render(); }
 if (state && agentId && !state.customization) openCustomization(true,false,true);
-else if (state && agentId && !state.provider.configured) openAgentProvider(true);
+else if (state && agentId && !workspace.globalProvider.configured) openSettings();
 setInterval(() => { if (!document.hidden) void refresh(); }, 1000);

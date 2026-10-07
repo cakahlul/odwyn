@@ -1,26 +1,84 @@
 export const agentModeInstructions = `Always-on modes, mandatory for every turn and every agent:
-Caveman ultra: fragments required, plain words, no filler. Drop articles (a/an/the), pleasantries and conjunctions when meaning stays clear; preserve grammar markers in other languages. Do not write conversational paragraphs. Default answer: at most three short lines, no blank paragraphs, 35 words total; room discussion: at most 30 words per turn. A routine explanation should look like "Pool reuses open DB connections. Fewer handshakes; lower latency. Caps concurrency; exhausted pool waits or times out." State each fact once. Lead with the answer or new evidence. No greetings, praise, preambles, tool narration, decorative headings, repeated acknowledgments or recap of prior replies. Do not announce these modes. Prefer "Connection pool reuses DB connections. Fewer handshakes; lower latency." over a paragraph introducing the topic. Preserve negatives, technical terms, numbers, units, evidence, links, requested language and safety. Expand only when explicitly requested content, a complete deliverable, accuracy or safety requires it. Code, product JSON, files and requested writing retain their required format and voice.
+Caveman ultra: compact phrasing, plain words, no filler. Drop articles (a/an/the), pleasantries and conjunctions when meaning stays clear; preserve grammar markers in other languages. In rooms, use brief natural chat sentences or fragments; preserve conversational flow without robotic status reports or mandatory name prefixes. Default answer: at most three short lines, no blank paragraphs, 35 words total; room discussion: at most 30 words per turn. A routine explanation should look like "Pool reuses open DB connections. Fewer handshakes; lower latency. Caps concurrency; exhausted pool waits or times out." State each fact once. Lead with the answer or new evidence. No greetings, praise, preambles, tool narration, decorative headings, repeated acknowledgments or recap of prior replies. Do not announce these modes. Prefer "Connection pool reuses DB connections. Fewer handshakes; lower latency." over a paragraph introducing the topic. Preserve negatives, technical terms, numbers, units, evidence, links, requested language and safety. Expand only when explicitly requested content, a complete deliverable, accuracy or safety requires it. Code, product JSON, files and requested writing retain their required format and voice.
 Ponytail ultra: smallest correct solution and next action. Inspect the real flow first. Reuse existing code, standard library and native features; delete before adding. No speculative abstractions, dependencies, scaffolding, feature tours or plans for work nobody requested. Prefer a small concrete improvement over a broad redesign. Implement authorized work instead of merely proposing it; verify with the smallest meaningful check. Never cut explicit requirements, input validation, security, accessibility or error handling that prevents data loss.
 These rules override personality tone, saved reply-depth preferences and verbose historical replies. Stay concise after interruptions and redirections.`;
 
 export const currencies = ['source', ...Intl.supportedValuesOf('currency')];
 export const effortLevels = {codex:['default','none','minimal','low','medium','high','xhigh','max'],claude:['default','low','medium','high','max'],openai:['default','none','minimal','low','medium','high','xhigh','max']};
 export const defaults = { palette:'paper', motion:'system', shape:'squircle', bodyColor:'#f26945', eyeColor:'#292b28', mouthColor:'#292b28', eyes:'bars', mouth:'smile', accessory:'none', name:'Odwyn', specialization:'', ownerName:'', tone:'warm', language:'auto', detail:'adaptive', userContext:'' };
+export const agentColor = profile => /^#[0-9a-f]{6}$/i.test(profile?.bodyColor) ? profile.bodyColor : defaults.bodyColor;
 export const ownerPreferenceKeys = ['ownerName','language','detail','userContext'];
 export function resolveProfile(profile, appearance = {}, owner = {}) {
   return {...defaults,...profile,...(profile?.overrideWorkspace ? {} : {...appearance,...Object.fromEntries(ownerPreferenceKeys.filter(key=>owner[key] !== undefined).map(key=>[key,owner[key]]))})};
 }
 export const palettes = {
-  paper: { name:'Paper & ember', colors:['#faf9f5','#f0efe9','#f26945'], vars:{ paper:'#faf9f5', sidebar:'#f0efe9', surface:'#fffefa', ink:'#292b28', muted:'#596052', line:'#dedfd5', orange:'#f26945', 'orange-deep':'#b93d20', 'orange-light':'#fff0e8', wash:'#e8ebdf', selected:'#e1e3d8' } },
-  fern: { name:'Fern', colors:['#f6f8f1','#e7eddf','#81ae76'], vars:{ paper:'#f6f8f1', sidebar:'#e7eddf', surface:'#fffffa', ink:'#28372b', muted:'#536450', line:'#d5dfcc', orange:'#81ae76', 'orange-deep':'#326341', 'orange-light':'#e9f2e3', wash:'#e2ebd9', selected:'#d4e2cb' } },
-  harbor: { name:'Harbor', colors:['#f5f8fa','#e7edf2','#78acd0'], vars:{ paper:'#f5f8fa', sidebar:'#e7edf2', surface:'#fcfeff', ink:'#26333f', muted:'#506473', line:'#d5dfe6', orange:'#78acd0', 'orange-deep':'#285f87', 'orange-light':'#e5f1fa', wash:'#e1ebf2', selected:'#d3e3ef' } },
-  rose: { name:'Rose', colors:['#fcf7f6','#f1e8e7','#dc9d9f'], vars:{ paper:'#fcf7f6', sidebar:'#f1e8e7', surface:'#fffdfb', ink:'#3e2c30', muted:'#735a60', line:'#e6d8d8', orange:'#dc9d9f', 'orange-deep':'#9a3f54', 'orange-light':'#fce8ee', wash:'#f2e2e5', selected:'#ead6dc' } },
-  clay: { name:'Clay', colors:['#faf7f0','#eee6d8','#d9a06e'], vars:{ paper:'#faf7f0', sidebar:'#eee6d8', surface:'#fffdf6', ink:'#3d3229', muted:'#70604f', line:'#e1d7c7', orange:'#d9a06e', 'orange-deep':'#94532a', 'orange-light':'#faebda', wash:'#eee2d0', selected:'#e5d5bc' } },
+  paper: { name:'Mineral', colors:['#e8edf2', '#dce4ed', '#df603b'], vars:{'paper':'#e8edf2','sidebar':'#dce4ed','orange':'#df603b','surface':'#fbfcfe','ink':'#192330','muted':'#4c5c70','line':'#c4cfdd','orange-deep':'#a43b20','orange-light':'#fff0e8','wash':'#dfe6ef','selected':'#cdd9e8','shadow-ink':'#08111e','scheme':'light','green':'#246b4d','green-light':'#dfe6ef','danger':'#a73532'} },
+  fern: { name:'Forest', colors:['#dce8e3', '#ccddd5', '#278369'], vars:{'paper':'#dce8e3','sidebar':'#ccddd5','orange':'#278369','surface':'#f7fcfa','ink':'#17352c','muted':'#365749','line':'#b8cec3','orange-deep':'#16634c','orange-light':'#e1f3eb','wash':'#d4e5dc','selected':'#bbd5c8','shadow-ink':'#08111e','scheme':'light','green':'#246b4d','green-light':'#d4e5dc','danger':'#a73532'} },
+  harbor: { name:'Tidal', colors:['#dce6f2', '#cad9eb', '#3378d1'], vars:{'paper':'#dce6f2','sidebar':'#cad9eb','orange':'#3378d1','surface':'#f7faff','ink':'#1a304a','muted':'#365575','line':'#b3c9e1','orange-deep':'#215ca7','orange-light':'#e2edfc','wash':'#d3e0f0','selected':'#b8cfe9','shadow-ink':'#08111e','scheme':'light','green':'#246b4d','green-light':'#d3e0f0','danger':'#a73532'} },
+  rose: { name:'Garnet', colors:['#eae0e6', '#deccd6', '#ad466a'], vars:{'paper':'#eae0e6','sidebar':'#deccd6','orange':'#ad466a','surface':'#fff9fc','ink':'#3c2532','muted':'#634555','line':'#d1b8c6','orange-deep':'#923554','orange-light':'#fae4ee','wash':'#e6d5df','selected':'#d8bccd','shadow-ink':'#08111e','scheme':'light','green':'#246b4d','green-light':'#e6d5df','danger':'#a73532'} },
+  clay: { name:'Bronze', colors:['#e9e1d5', '#ddd0bd', '#ae6737'], vars:{'paper':'#e9e1d5','sidebar':'#ddd0bd','orange':'#ae6737','surface':'#fffbf4','ink':'#382b20','muted':'#594835','line':'#cebea8','orange-deep':'#884a22','orange-light':'#fae9d6','wash':'#e6d9c5','selected':'#d5bea0','shadow-ink':'#08111e','scheme':'light','green':'#246b4d','green-light':'#e6d9c5','danger':'#a73532'} },
+  graphite: { name:'Graphite', colors:['#151b23', '#1b2430', '#ed976b'], vars:{'paper':'#151b23','sidebar':'#1b2430','orange':'#ed976b','surface':'#253140','ink':'#eff4fa','muted':'#bfccdb','line':'#43536a','orange-deep':'#ffba95','orange-light':'#49342e','wash':'#303e50','selected':'#40516a','shadow-ink':'#08111e','scheme':'dark','green':'#92d7b5','green-light':'#303e50','danger':'#ffaaa7'} },
+  midnight: { name:'Midnight', colors:['#101d2d', '#162b40', '#6dbbe7'], vars:{'paper':'#101d2d','sidebar':'#162b40','orange':'#6dbbe7','surface':'#20374e','ink':'#eef6fc','muted':'#c3d4e3','line':'#3c5c77','orange-deep':'#a5ddfc','orange-light':'#254c67','wash':'#2a455f','selected':'#375b7b','shadow-ink':'#08111e','scheme':'dark','green':'#92d7b5','green-light':'#2a455f','danger':'#ffaaa7'} },
 };
 export const choices = { motion:{system:'Follow device',reduced:'Less motion'}, shape:{ squircle:'Pocket', bean:'Bean', orb:'Orbit', cat:'Cat', robot:'Robot', fox:'Fox' }, eyes:{ bars:'Classic', dots:'Dots', happy:'Happy', wink:'Wink', sleepy:'Relaxed', wide:'Curious' }, mouth:{ smile:'Smile', grin:'Grin', o:'Surprised', flat:'Calm', cheerful:'Cheerful' }, accessory:{ none:'None', antenna:'Antenna', spark:'Spark', cap:'Cap', headphones:'Headphones', bow:'Bow' }, tone:{ warm:'Warm', crisp:'Direct', playful:'Playful', formal:'Professional', patient:'Patient', coach:'Encouraging' }, language:{auto:'Match my message',en:'English',id:'Bahasa Indonesia',es:'Español',fr:'Français',ja:'日本語'}, detail:{adaptive:'Adapt to the task',brief:'Keep it brief',detailed:'Explain in detail'} };
 export const toneInstructions = { warm:'Friendly and supportive, with plain language.', crisp:'Concise and direct. Lead with the answer; skip filler.', playful:'Light wit and a relaxed voice. Keep serious matters clear and respectful.', formal:'Professional, courteous and precise.', patient:'Patient and calm. Explain unfamiliar ideas step by step, without assuming prior knowledge.', coach:'Encouraging and practical. Break work into achievable next steps without empty praise.' };
 export const detailInstructions = {adaptive:'Match the depth to the task.',brief:'Keep replies short, with the answer first and only essential details.',detailed:'Explain the reasoning, relevant details and useful examples.'};
-export const paletteDetails = {paper:'Warm neutrals with a lively ember accent.',fern:'Fresh greens for a quiet workspace.',harbor:'Cool blues with a clear, airy feel.',rose:'Soft pinks with a warm, personal touch.',clay:'Earthy sand and terracotta tones.'};
+export const paletteDetails = {paper:'Cool mineral glass. Fired orange accent.',fern:'Forest greens. Polished jade accent.',harbor:'Ocean glass. Deep blue accent.',rose:'Smoked rose. Garnet accent.',clay:'Sandstone glass. Burnished bronze accent.',graphite:'Dark graphite. Copper light.',midnight:'Deep navy glass. Ice blue light.'};
+export const materialDefaults = {opacity:78,blur:24,depth:65,radius:16};
+export const materialLimits = {opacity:[60,100],blur:[0,32],depth:[0,100],radius:[4,24]};
+export const customColorKeys = ['paper','surface','orange'];
+const hexColor = /^#[0-9a-f]{6}$/i;
+const rgb = color => [1,3,5].map(start=>parseInt(color.slice(start,start+2),16));
+const mixColor = (a,b,weight) => '#'+rgb(a).map((value,i)=>Math.round(value*(1-weight)+rgb(b)[i]*weight).toString(16).padStart(2,'0')).join('');
+const luminance = color => rgb(color).map(value=>{value/=255;return value<=.04045 ? value/12.92 : ((value+.055)/1.055)**2.4;}).reduce((sum,value,i)=>sum+value*[.2126,.7152,.0722][i],0);
+const contrast = (a,b) => (Math.max(luminance(a),luminance(b))+.05)/(Math.min(luminance(a),luminance(b))+.05);
+
+export function appearanceVars(appearance = {}) {
+  const vars = {...(palettes[appearance.palette] || palettes.paper).vars}, custom = appearance.customColors || {};
+  if (Object.keys(custom).length) {
+    Object.assign(vars,custom);
+    const score = color => Math.min(contrast(color,vars.paper),contrast(color,vars.surface));
+    vars.ink = score('#17212e')>=score('#f4f7fb') ? '#17212e' : '#f4f7fb';
+    if (score(vars.ink)<4.5) vars.ink = score('#000000')>=score('#ffffff') ? '#000000' : '#ffffff';
+    vars.scheme = luminance(vars.paper)<.2 ? 'dark' : 'light';
+    vars.muted = mixColor(vars.ink,vars.surface,.2);
+    if (score(vars.muted)<4.5) vars.muted = vars.ink;
+    vars.sidebar = mixColor(vars.paper,vars.surface,.25);
+    vars.wash = mixColor(vars.surface,vars.paper,.6);
+    vars.selected = mixColor(vars.wash,vars.orange,.12);
+    vars.line = mixColor(vars.surface,vars.ink,.22);
+    vars['orange-light'] = mixColor(vars.surface,vars.orange,.12);
+    vars['orange-deep'] = mixColor(vars.orange,vars.ink,.45);
+    vars.green = vars.scheme==='dark' ? '#92d7b5' : '#246b4d';
+    vars['green-light'] = vars.wash;
+    vars.danger = vars.scheme==='dark' ? '#ffaaa7' : '#a73532';
+    for (const key of ['orange-deep','green','danger']) if (contrast(vars[key],vars.surface)<4.5) vars[key] = vars.ink;
+  }
+  vars['accent-ink'] = contrast('#17212e',vars.orange)>=contrast('#f4f7fb',vars.orange) ? '#17212e' : '#f4f7fb';
+  return {...vars,...Object.fromEntries(Object.entries(materialDefaults).map(([key,value])=>['ui-'+key,appearance[key] ?? value]))};
+}
+
+export function validateAppearance(input) {
+  if (!input || typeof input!=='object' || Array.isArray(input) || !Object.hasOwn(palettes,input.palette) || !Object.hasOwn(choices.motion,input.motion)) throw new Error('Choose a palette and motion preference.');
+  const result = {palette:input.palette,motion:input.motion};
+  for (const [key,[min,max]] of Object.entries(materialLimits)) {
+    if (input[key]===undefined) continue;
+    if (!Number.isInteger(input[key]) || input[key]<min || input[key]>max) throw new Error(`Choose ${key} between ${min} and ${max}.`);
+    result[key] = input[key];
+  }
+  if (input.customColors!==undefined) {
+    if (!input.customColors || typeof input.customColors!=='object' || Array.isArray(input.customColors)) throw new Error('Choose custom colors.');
+    result.customColors = {};
+    for (const [key,color] of Object.entries(input.customColors)) {
+      if (!customColorKeys.includes(key) || typeof color!=='string' || !hexColor.test(color)) throw new Error('Use six-digit hex colors for background, surface, and accent.');
+      result.customColors[key] = color.toLowerCase();
+    }
+    const vars = appearanceVars(result);
+    if ([vars.paper,vars.surface,vars.selected].some(color=>contrast(vars.ink,color)<4.5)) throw new Error('Choose background and surface colors with similar brightness for readable text.');
+  }
+  return result;
+}
+
 export const specializations = {general:'',research:'Research and compare options. Verify facts and cite sources.',coding:'Help with coding, debugging and technical explanations.',travel:'Plan trips, compare flights and stays, and organize itineraries.',shopping:'Compare products, prices and sellers. Track purchase details and receipts.',writing:'Help draft, edit and improve clear, natural writing.'};
 
 export function validateProfile(input) {

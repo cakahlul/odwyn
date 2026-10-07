@@ -1,5 +1,5 @@
 import { $, esc, icon, mascot, badge, date, richText, activeStatuses } from './ui.js';
-import { defaults, resolveProfile, avatarSvg } from './profile.js';
+import { defaults, agentColor, resolveProfile, avatarSvg } from './profile.js';
 
 const suggestions = [
   ['globe','Research a topic','Find information and include sources.','Research the best places to visit in Yogyakarta for a relaxed weekend. Use the browser and include your sources.'],
@@ -31,12 +31,12 @@ export function renderChat(state, conversationId) {
     const paused = document.body.classList.contains('mascot-paused');
     return `<div class="welcome"><div class="welcome-title"><div><h1>Message ${esc(profile.name)}</h1><p>${esc(profile.specialization || 'Ask a question or give a task. Attach files for context.')}</p></div><button type="button" class="mascot-stage" data-mascot-toggle aria-label="Animate agent avatar" aria-pressed="${!paused}" title="${paused ? 'Resume' : 'Pause'} avatar animation">${state.customization ? avatarSvg(profile,'mascot') : mascot}<i class="mascot-spark spark-one" aria-hidden="true"></i><i class="mascot-spark spark-two" aria-hidden="true"></i><i class="mascot-spark spark-three" aria-hidden="true"></i></button></div><section class="suggestions" aria-label="${recent.length ? 'Recent conversations' : 'Example tasks'}"><h2 class="suggestions-heading">${recent.length ? 'Recent conversations' : 'Example tasks'}</h2>${rows}</section></div>`;
   }
-  if (conversation.kind === 'room' && !conversation.messages.length) return '<div class="room-welcome"><span class="eyebrow">A SHARED SPACE FOR DIFFERENT PERSPECTIVES</span><h2>Start the conversation</h2><p>Set a goal and your agents will discuss, work, and verify the result together. Type @ to call an agent. Send a new direction anytime; all replies stay visible here.</p></div>';
+  if (conversation.kind === 'room' && !conversation.messages.length) return '<div class="room-welcome"><span class="eyebrow">Your room</span><h2>Start the conversation</h2><p>Send a message to everyone, or @mention an agent to bring them in.</p></div>';
   const browsing = jobs.find(job => job.id === state.runtime.activeJobId && (job.browserUsed || job.events.some(event=>/^(Reading page|navigate|click|fill|type|press|scroll|select|tab|new tab|back|screenshot|save screenshot|wait|upload|dialog)$/.test(event.label))));
   const waiting = jobs.find(job => job.pending);
   const workingAgent = state.agents.find(a => a.id === latest?.agentId);
   const workingProfile = workingAgent?.customization || profile;
-  return `<div class="conversation"><div class="conversation-start"><span>${esc(date(conversation.createdAt))}</span><span class="conversation-line"></span></div><div class="messages" id="messages"></div>${conversation.discussion ? `<p id="room-discussion-status" class="field-hint" role="status">${esc({active:`Working toward your goal · Round ${conversation.discussion.round}`,completed:'Goal complete · Shared result agreed',stopped:'Discussion stopped',paused:'Discussion paused · Review progress and send a message to continue'}[conversation.discussion.status] || '')}</p>` : ''}${browsing ? `<details class="conversation-browser" id="conversation-browser" data-job="${esc(browsing.id)}"><summary>${icon('globe')}<strong>Live browser</strong><span class="preview-minimize">Minimize</span><span class="preview-expand">Show browser</span></summary><div class="conversation-browser-content"><div id="conversation-browser-url" class="conversation-browser-url"></div><img id="conversation-browser-image" width="1280" height="800" alt="Live view of the page the assistant is browsing" draggable="false" hidden><p id="conversation-browser-status" role="status">Opening browser…</p><div class="conversation-browser-footer"><span>What ${esc(state.runtime.activeAgentName || profile.name)} sees · updates live</span><button type="button" class="text-button" data-browser-controls>Browser controls${icon('arrow-up-right')}</button></div></div></details><button type="button" class="browser-preview-bubble" data-restore-browser aria-label="Show live browser" hidden>${icon('globe')}<span>Live browser</span>${icon('arrow-up-right')}</button>` : ''}${waiting ? pendingCard(waiting) : ''}${latest && activeStatuses.includes(latest.status) ? `<div class="working-row">${avatarSvg(workingProfile,"working-avatar")}<span><strong>${esc(workingProfile.name)}</strong>${badge(latest.status)}<small>${esc(latest.events.at(-1)?.detail || (latest.status === 'queued' && !workingAgent?.runtime.account ? 'Configure your AI provider in Customize agent to begin.' : 'Working through your request.'))}</small></span><button class="text-button" ${conversation.kind === 'room' ? `data-stop-room="${esc(conversation.id)}"` : `data-cancel="${esc(latest.id)}"`}>${conversation.kind === 'room' ? 'Stop discussion' : 'Stop'}</button></div>` : ''}${latest?.error ? `<div class="task-error"><strong>${esc(badgeText(latest.status))}</strong><p>${esc(latest.error)}</p><button class="secondary-button" data-retry="${esc(latest.id)}">Review & resume${icon('play')}</button></div>` : ''}${renderAttachments(state,jobs.filter(job=>!conversation.messages.some(m=>m.role==='assistant' && !m.roomReport && m.jobId===job.id)).flatMap(job=>job.files))}</div>`;
+  return `<div class="conversation"><div class="conversation-start"><time datetime="${esc(conversation.createdAt)}">${esc(date(conversation.createdAt))}</time></div><div class="messages" id="messages"></div>${conversation.discussion ? `<p id="room-discussion-status" class="field-hint" role="status">${esc({active:`Working toward your goal · Round ${conversation.discussion.round}`,completed:'Goal complete · Shared result agreed',stopped:'Discussion stopped',paused:'Discussion paused · Review progress and send a message to continue'}[conversation.discussion.status] || '')}</p>` : ''}${browsing ? `<details class="conversation-browser" id="conversation-browser" data-job="${esc(browsing.id)}"><summary>${icon('globe')}<strong>Live browser</strong><span class="preview-minimize">Minimize</span><span class="preview-expand">Show browser</span></summary><div class="conversation-browser-content"><div id="conversation-browser-url" class="conversation-browser-url"></div><img id="conversation-browser-image" width="1280" height="800" alt="Live view of the page the assistant is browsing" draggable="false" hidden><p id="conversation-browser-status" role="status">Opening browser…</p><div class="conversation-browser-footer"><span>What ${esc(state.runtime.activeAgentName || profile.name)} sees · updates live</span><button type="button" class="text-button" data-browser-controls>Browser controls${icon('arrow-up-right')}</button></div></div></details><button type="button" class="browser-preview-bubble" data-restore-browser aria-label="Show live browser" hidden>${icon('globe')}<span>Live browser</span>${icon('arrow-up-right')}</button>` : ''}${waiting ? pendingCard(waiting) : ''}${latest && activeStatuses.includes(latest.status) ? `<div class="working-row">${avatarSvg(workingProfile,"working-avatar")}<span><strong>${esc(workingProfile.name)}</strong>${badge(latest.status)}<small>${esc(latest.events.at(-1)?.detail || (latest.status === 'queued' && !workingAgent?.runtime.account ? 'Connect the AI provider in Settings or Customize agent to begin.' : 'Working through your request.'))}</small></span><button class="text-button" ${conversation.kind === 'room' ? `data-stop-room="${esc(conversation.id)}"` : `data-cancel="${esc(latest.id)}"`}>${conversation.kind === 'room' ? 'Stop discussion' : 'Stop'}</button></div>` : ''}${latest?.error ? `<div class="task-error"><strong>${esc(badgeText(latest.status))}</strong><p>${esc(latest.error)}</p><button class="secondary-button" data-retry="${esc(latest.id)}">Review & resume${icon('play')}</button></div>` : ''}${renderAttachments(state,jobs.filter(job=>!conversation.messages.some(m=>m.role==='assistant' && !m.roomReport && m.jobId===job.id)).flatMap(job=>job.files))}</div>`;
 }
 
 function badgeText(status) { return status === 'interrupted' ? 'Paused after an interruption' : 'This needs a little attention'; }
@@ -50,19 +50,52 @@ export function insertMessages(state, conversationId) {
   const container = $('#messages');
   if (!container) return;
   const conversation = state.conversations.find(c => c.id === conversationId);
+  container.classList.toggle('room-messages',conversation?.kind === 'room');
+  container.classList.toggle('private-messages',conversation?.kind !== 'room');
+  const authors = new Set();
+  const members = conversation?.kind === 'room' ? state.agents.filter(agent=>conversation.memberIds.includes(agent.id)) : [];
   for (const message of conversation?.messages || []) {
+    const files = message.role === 'assistant' && !message.roomReport && conversation.messages.findLast(m=>m.role==='assistant' && !m.roomReport && m.jobId===message.jobId) === message ? state.jobs.find(j=>j.id===message.jobId)?.files || [] : [];
+    if (!message.text?.trim() && !files.some(id=>state.files?.some(file=>file.id===id))) continue;
     const author = message.agentId || state.jobs.find(j => j.id === message.jobId)?.agentId || conversation.agentId || state.agentId;
+    if (message.role === 'assistant') authors.add(author);
     const profile = {...defaults,...(state.agents.find(a => a.id === author)?.customization || message.agentProfile || state.customization)};
     const ownerName = state.owner?.ownerName ?? profile.ownerName;
     const article = document.createElement('article'); article.className = `message message-${message.role === 'user' ? 'user' : 'assistant'}`;
-    article.innerHTML = `<div class="message-meta">${message.role === 'assistant' ? avatarSvg(profile,'message-avatar') : `<span class="message-owner">${esc(Array.from(ownerName || 'You')[0].toUpperCase())}</span>`}<strong>${esc(message.role === 'assistant' ? profile.name : ownerName || 'You')}</strong><time>${esc(new Intl.DateTimeFormat(undefined, { hour:'numeric', minute:'2-digit' }).format(new Date(message.at)))}</time><button class="icon-button copy-message" data-copy="${esc(message.id)}" aria-label="Copy message">${icon('copy')}</button></div>`;
-    article.append(richText(message.text, { cards:message.role === 'assistant' }));
-    if (message.role === 'assistant' && !message.roomReport && conversation.messages.findLast(m=>m.role==='assistant' && !m.roomReport && m.jobId===message.jobId) === message) {
-      const files = state.jobs.find(j=>j.id===message.jobId)?.files || [];
-      article.insertAdjacentHTML('beforeend',renderAttachments(state,files));
+    article.style.setProperty('--agent-color',agentColor(profile));
+    const name = message.role === 'assistant' ? profile.name : ownerName || 'You';
+    article.setAttribute('aria-label',`Message from ${name}`);
+    article.innerHTML = `${message.role === 'assistant' ? avatarSvg(profile,'message-avatar') : `<span class="message-owner" aria-hidden="true">${esc(Array.from(ownerName || 'You')[0].toUpperCase())}</span>`}<div class="message-bubble"><div class="message-meta"><strong>${esc(name)}</strong></div></div>`;
+    const bubble = article.querySelector('.message-bubble'), content = richText(message.text, {cards:message.role === 'assistant'});
+    if (members.length) colorMentions(content,members);
+    bubble.append(content);
+    if (files.length) {
+      bubble.insertAdjacentHTML('beforeend',renderAttachments(state,files));
       article.querySelectorAll('.answer-file img').forEach(img=>img.addEventListener('error',()=>{ img.parentElement.hidden=true; },{once:true}));
     }
+    bubble.insertAdjacentHTML('beforeend',`<div class="message-footer"><time datetime="${esc(message.at)}">${esc(new Intl.DateTimeFormat(undefined, {hour:'numeric',minute:'2-digit'}).format(new Date(message.at)))}</time><button class="icon-button copy-message" data-copy="${esc(message.id)}" aria-label="Copy message">${icon('copy')}</button></div>`);
     container.append(article);
+  }
+  container.classList.toggle('multiple-senders',authors.size > 1);
+}
+
+function colorMentions(content, members) {
+  const names = new Map();
+  for (const agent of members) { const name = (agent.customization?.name || defaults.name).toLowerCase(); names.set(name,names.has(name) ? null : agent); }
+  const walker = document.createTreeWalker(content,NodeFilter.SHOW_TEXT), nodes = [];
+  while (walker.nextNode()) if (!walker.currentNode.parentElement.closest('a,code,pre,button')) nodes.push(walker.currentNode);
+  for (const node of nodes) {
+    const fragment = document.createDocumentFragment(); let end = 0;
+    for (const match of node.textContent.matchAll(/(^|\s)@("(?:\\.|[^"\\\n])*"|[\p{L}\p{N}_-]+)/gu)) {
+      let name = match[2];
+      if (name.startsWith('"')) { try { name = JSON.parse(name); } catch { continue; } }
+      const agent = names.get(name.toLowerCase()); if (!agent) continue;
+      const start = match.index + match[1].length;
+      fragment.append(node.textContent.slice(end,start));
+      const mention = document.createElement('span'); mention.className = 'agent-mention'; mention.textContent = `@${name}`; mention.style.setProperty('--agent-color',agentColor(agent.customization));
+      fragment.append(mention); end = match.index + match[0].length;
+    }
+    if (end) { fragment.append(node.textContent.slice(end)); node.replaceWith(fragment); }
   }
 }
 
