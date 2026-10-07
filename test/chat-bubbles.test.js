@@ -84,19 +84,19 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
     });
     for(const width of [320,1440]){
       await page.setViewportSize({width,height:900});
-      for(const draft of ['Short reply',Array(6).fill('A longer draft that expands the floating composer.').join('\n')]){
+      for(const draft of ['Short reply',Array(6).fill('A longer draft that expands the composer.').join('\n')]){
         await page.locator('#prompt').fill(draft);
-        await page.waitForFunction(()=>Math.abs(parseFloat(document.querySelector('#agent-workspace').style.getPropertyValue('--composer-height'))-document.querySelector('#composer-area').getBoundingClientRect().height)<1);
+        await page.waitForFunction(()=>document.querySelector('#view').getBoundingClientRect().bottom<=document.querySelector('#composer-area').getBoundingClientRect().top);
         await page.locator('#view').evaluate(node=>node.scrollTo({top:node.scrollHeight,behavior:'instant'}));
         const feed=await page.locator('#view').boundingBox(),composer=await page.locator('#composer').boundingBox(),last=await page.locator('.message-footer').last().boundingBox();
-        expect(feed.y+feed.height).toBeGreaterThan(composer.y+composer.height);
+        expect(feed.y+feed.height).toBeLessThanOrEqual(composer.y);
         expect(last.y+last.height).toBeLessThan(composer.y-12);
         expect(composer.y+composer.height).toBeLessThanOrEqual(900);
       }
       await page.locator('#prompt').fill('');
       await page.locator('#prompt').blur();
       await page.locator('#view').evaluate(node=>node.scrollTo({top:Math.max(0,node.scrollHeight-node.clientHeight-180),behavior:'instant'}));
-      await page.screenshot({path:join(artifacts,`floating-composer-${width}.png`),animations:'disabled'});
+      await page.screenshot({path:join(artifacts,`chat-composer-${width}.png`),animations:'disabled'});
     }
     expect(errors).toEqual([]);
   }finally{await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}

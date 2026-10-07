@@ -300,7 +300,7 @@ function render() {
   $('#new-chat').disabled = !agentId;
   document.querySelectorAll('[data-view]').forEach(button => button.disabled = !agentId);
   if (!agentId) {
-    $('#agent-workspace').classList.remove('chat-start','floating-composer'); $('#main').classList.remove('chat-start'); $('#composer-area').hidden = true;
+    $('#agent-workspace').classList.remove('chat-start'); $('#main').classList.remove('chat-start'); $('#composer-area').hidden = true;
     $('#page-title').textContent = 'No conversation open';
     if (signature !== 'minimized') $('#view').innerHTML = `<div class="agents-empty"><h1>${workspace.agents.every(a => closedAgents.has(a.id)) ? 'No conversation open' : 'Your agents are minimized'}</h1><p>Choose an agent in the sidebar or restore a floating bubble. Your conversations stay in history.</p></div>`;
     signature = 'minimized';
@@ -313,7 +313,6 @@ function render() {
   $('#prompt').placeholder = conversation?.kind === 'room' ? 'Message the room, or @mention an agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#agent-workspace').classList.toggle('chat-start', view === 'chat' && !conversation);
-  $('#agent-workspace').classList.toggle('floating-composer',view === 'chat' && !!conversation);
   $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { runs:'Task runs', routines:'Routines', files:'Files & results' }[view];
   $('#page-title').disabled = view !== 'chat' || !conversation;
   $('#page-title').title = conversation && view === 'chat' ? 'Rename conversation' : '';
@@ -647,10 +646,9 @@ document.addEventListener('keydown', event => {
 });
 
 new ResizeObserver(() => {
-  const panel = $('#agent-workspace'), feed = $('#view');
+  const feed = $('#view');
   const atBottom = feed.scrollHeight-feed.scrollTop-feed.clientHeight<100;
-  panel.style.setProperty('--composer-height',`${$('#composer-area').getBoundingClientRect().height}px`);
-  if (panel.classList.contains('floating-composer') && atBottom) feed.scrollTo({top:feed.scrollHeight,behavior:'instant'});
+  if (view === 'chat' && conversationId && atBottom) feed.scrollTo({top:feed.scrollHeight,behavior:'instant'});
 }).observe($('#composer-area'));
 
 $('#view').innerHTML = '<div class="loading-state" role="status"><img src="/mark.svg" width="48" height="48" alt=""><p>Making room for your day…</p></div>';
