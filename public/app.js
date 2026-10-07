@@ -1,3 +1,4 @@
+import { renderWorkflows, setupWorkflows } from './workflows-ui.js';
 import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date } from './ui.js';
 import { renderChat, insertMessages, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
 import { setupBrowser, updateBrowser } from './browser-ui.js';
@@ -313,7 +314,7 @@ function render() {
   $('#prompt').placeholder = conversation?.kind === 'room' ? 'Message the room, or @mention an agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#agent-workspace').classList.toggle('chat-start', view === 'chat' && !conversation);
-  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { runs:'Task runs', routines:'Routines', files:'Files & results' }[view];
+  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { runs:'Task runs', routines:'Routines', files:'Files & results', workflows:'Workflows & skills' }[view];
   $('#page-title').disabled = view !== 'chat' || !conversation;
   $('#page-title').title = conversation && view === 'chat' ? 'Rename conversation' : '';
   $('#page-title').setAttribute('aria-label',conversation && view === 'chat' ? `Rename conversation: ${conversation.title}` : $('#page-title').textContent);
@@ -328,13 +329,13 @@ function render() {
   $('#routine-note').textContent = nextRoutine?.prompt || '';
   $('#routine-note-detail').textContent = nextRoutine ? `Next: ${date(nextRoutine.nextAt)}` : '';
   $('#composer-area').hidden = view !== 'chat';
-  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, data: view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : state.files });
+  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, data: view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : view === 'workflows' ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
     const pendingCard = $('#view .approval-card');
     const pendingFocus = pendingCard?.contains(document.activeElement) ? document.activeElement : null;
-    $('#view').innerHTML = view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state) : renderFiles(state);
+    $('#view').innerHTML = view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state) : view === 'workflows' ? renderWorkflows(state) : renderFiles(state);
     const nextPendingCard = $('#view .approval-card');
     if (pendingCard && nextPendingCard?.dataset.request === pendingCard.dataset.request) {
       nextPendingCard.replaceWith(pendingCard);
@@ -631,7 +632,7 @@ document.addEventListener('click', event => {
 });
 document.addEventListener('submit', event => {
   const form = event.target.closest('[data-answer-job]'); if (!form) return;
-  event.preventDefault(); void perform(() => api(`/api/jobs/${form.dataset.answerJob}/answer`,{ requestId:form.dataset.request, answer:new FormData(form).get('answer') }));
+  event.preventDefault(); void perform(() => api(`/api/jobs/${form.dataset.answerJob}/answer`,{ requestId:form.dataset.request, answer:new FormData(form).get('answer'), selected:new FormData(form).getAll('selected') }));
 });
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && $('.agent-menu[open]')) { const menu = $('.agent-menu[open]'); menu.open = false; menu.querySelector('summary').focus(); event.preventDefault(); return; }
@@ -655,7 +656,9 @@ $('#view').innerHTML = '<div class="loading-state" role="status"><img src="/mark
 await refresh();
 if (state && agentId) { restoreDraft(); signature = ''; render(); }
 const initial = location.hash.slice(1).split('/');
-if (agentId && ['chat','runs','routines','files'].includes(initial[0])) { view = initial[0]; conversationId = initial[1] || null; signature = ''; render(); }
+if (agentId && ['chat','runs','routines','files','workflows'].includes(initial[0])) { view = initial[0]; conversationId = initial[1] || null; signature = ''; render(); }
 if (state && agentId && !state.customization) openCustomization(true,false,true);
 else if (state && agentId && !workspace.globalProvider.configured) openSettings();
 setInterval(() => { if (!document.hidden) void refresh(); }, 1000);
+
+setupWorkflows(()=>workspace,()=>agentId,job=>navigate('chat',job.conversationId),refresh);

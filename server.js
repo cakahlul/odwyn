@@ -6,6 +6,7 @@ import { openStore, findAgent, deleteAgent, createRoom, updateRoom } from './sto
 import { AIProvider, validateProvider, publicProvider, providerModels } from './providers.js';
 import { Browser } from './browser.js';
 import { Runtime } from './runtime.js';
+import { validateWorkflow, validateSkill } from './workflows.js';
 import { validateProfile, defaults, ownerPreferenceKeys, currencies, validateAppearance } from './public/profile.js';
 import { fetchImage } from './proxy.js';
 import { imageMime } from './files.js';
@@ -130,6 +131,25 @@ export function createApp(options = {}) {
           if (url.searchParams.get('revision') === String(runtime.revision)) return new Response(null, { status: 204, headers });
           // ponytail: a JSON state row suits one owner; use indexed tables when history gets large.
           return response({ revision: runtime.revision, ...store.state, agents:store.state.agents.map(agent => ({ ...agent, provider:publicProvider(agent.provider), runtime:{ ...runtime.accounts.get(agent.id), login:logins.get(agent.id) || null } })), globalProvider:publicProvider(store.state.globalProvider), globalRuntime:{...runtime.accounts.get(globalConnection().id),login:logins.get(globalConnection().id) || null}, provider: publicProvider(store.state.provider), runtime: { account: runtime.account, connectionError: runtime.connectionError, model: store.state.provider.model, activeJobId: runtime.active?.id || null, takeover: runtime.takeover, browserOpen: !!browser.context, rateLimits: runtime.rateLimits || null, login:logins.get(store.state.agents[0].id) || null } });
+        }
+        const definitionMatch = pathname.match(/^\/api\/(workflows|skills)(?:\/([a-f0-9-]{36}))?(?:\/(run))?$/);
+        if (definitionMatch) {
+          const [,collection,id,action]=definitionMatch, items=store.state[collection], existing=items.find(item=>item.id===id);
+          if (id && !existing) return response({error:'Definition not found.'},404);
+          if (collection==='workflows' && id && action==='run' && req.method==='POST') return response(runtime.launchWorkflow(existing,await json(req)),201);
+          if (!action && (req.method==='POST' && !id || req.method==='PUT' && id)) {
+            const input={...await json(req),id:id || randomUUID()};
+            const item=collection==='workflows' ? validateWorkflow(input,store.state):validateSkill(input);
+            if (collection==='skills' && (items.some(s=>s.id!==id && s.command===item.command) || store.state.workflows.some(w=>w.command===item.command))) throw new Error('Command already exists.');
+            if(existing) items.splice(items.indexOf(existing),1,item);else items.unshift(item);
+            runtime.changed();return response(item,existing ? 200:201);
+          }
+          if (!action && id && req.method==='DELETE') {
+            if(collection==='skills' && store.state.workflows.some(w=>w.steps.some(s=>s.skills.includes(id)))) throw new Error('Remove this skill from workflow steps before deleting it.');
+            items.splice(items.indexOf(existing),1);runtime.changed();return response({ok:true});
+          }
+          if (!action && req.method==='GET') return response(id ? existing:items);
+          return response({error:'Method not allowed.'},405);
         }
         if (pathname === '/api/rooms' && req.method === 'POST') {
           const room = createRoom(store.state,await json(req)); runtime.changed(); return response(room,201);
@@ -281,7 +301,7 @@ export function createApp(options = {}) {
         }
         if (pathname.startsWith('/api/')) return response({ error: 'Endpoint not found.' }, 404);
         if (!['GET','HEAD'].includes(req.method)) return response({ error: 'Method not allowed.' }, 405);
-        const files = { '/': 'index.html', '/app.js': 'app.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/browser-ui.js': 'browser-ui.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
+        const files = { '/': 'index.html', '/app.js': 'app.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
         if (!files[pathname]) return response({ error: 'Not found.' }, 404);
         return new Response(Bun.file(join(root, 'public', files[pathname])), { headers });
       } catch (error) { return response({ error: error.message || 'Something went wrong. Try again.' }, 400); }

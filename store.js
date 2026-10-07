@@ -13,7 +13,7 @@ export function openStore(directory) {
   chmodSync(filename, 0o600);
   db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL)');
   const row = db.query('SELECT value FROM state WHERE id=1').get();
-  const state = { conversations: [], jobs: [], schedules: [], files: [], preferences: '', currency:'source', customization: null, ...JSON.parse(row?.value || '{}') };
+  const state = { conversations: [], jobs: [], schedules: [], files: [], workflows: [], skills: [], workflowRuns: [], preferences: '', currency:'source', customization: null, ...JSON.parse(row?.value || '{}') };
   state.agents ||= [{ id: randomUUID(), customization: state.customization }];
   state.owner ||= Object.fromEntries(ownerPreferenceKeys.map(key=>[key,state.customization?.[key] ?? state.agents[0].customization?.[key] ?? defaults[key]]));
   state.appearance ||= {palette:state.customization?.palette || 'paper',motion:state.customization?.motion || 'system'};
@@ -52,14 +52,15 @@ export function openStore(directory) {
     const conversation = state.conversations.find(c=>c.id===id);
     if (!conversation) throw new Error('Conversation not found.');
     if (state.jobs.some(j=>j.conversationId===id && ['queued','running','waiting','takeover','stopping'].includes(j.status))) throw new Error('Stop this conversation’s tasks before deleting it.');
-    const conversations = state.conversations, jobs = state.jobs;
+    const conversations = state.conversations, jobs = state.jobs, workflowRuns = state.workflowRuns;
     try {
       state.conversations = conversations.filter(c=>c.id!==id);
       state.jobs = jobs.filter(j=>j.conversationId!==id);
+      state.workflowRuns = workflowRuns.filter(r=>r.conversationId!==id);
       for (const message of conversation.messages) indexed.delete(message.id);
       db.query('DELETE FROM chat_chunks WHERE conversationId = ?').run(id);
       save();
-    } catch(error) { state.conversations = conversations; state.jobs = jobs; throw error; }
+    } catch(error) { state.conversations = conversations; state.jobs = jobs; state.workflowRuns = workflowRuns; throw error; }
   });
   return { directory, state, save, search, deleteConversation, close: () => db.close() };
 }
@@ -73,6 +74,7 @@ export function findAgent(state, id = state.agents[0].id) {
 export function deleteAgent(state, id) {
   const agent = findAgent(state,id);
   if (state.agents.length === 1) throw new Error('Keep at least one agent. Add a replacement first.');
+  if (state.workflows?.some(w=>w.steps.some(s=>s.agentId===id)) || state.workflowRuns?.some(r=>['running','waiting','takeover'].includes(r.status) && (r.agentId===id || r.workflow.steps.some(s=>s.agentId===id)))) throw new Error('Update or finish workflows using this agent before deleting it.');
   const rooms = state.conversations.filter(c => c.kind === 'room' && c.memberIds.includes(id));
   if (state.jobs.some(j => (j.agentId === id || rooms.some(r => r.id === j.conversationId)) && ['queued','running','waiting','takeover','stopping'].includes(j.status))) throw new Error('Stop this agent’s tasks and room discussions before deleting it.');
   state.agents = state.agents.filter(a => a.id !== id);
@@ -144,23 +146,25 @@ export function createJob(state, input, recordMessage = true) {
 }
 
 export function recoverJobs(state) {
+  for (const run of state.workflowRuns || []) if (['running','waiting','takeover'].includes(run.status)) { run.status = 'interrupted'; run.error = 'Service restarted. Review progress before resuming.'; }
   for (const room of state.conversations) if (room.kind === 'room' && room.discussion?.status === 'active') {
     room.discussion.status = 'paused';
     for (const job of state.jobs) if (job.roomRoundId === room.discussion.id && job.status === 'queued') {
       job.status = 'interrupted'; job.error = 'The service restarted. Review progress before continuing the discussion.'; job.endedAt = new Date().toISOString();
     }
   }
-  for (const job of state.jobs) if (['running','waiting','takeover','stopping'].includes(job.status)) {
+  for (const job of state.jobs) if (['running','waiting','takeover','stopping'].includes(job.status) || job.status==='queued' && state.workflowRuns?.some(r=>r.id===job.workflowRunId && r.status==='interrupted')) {
     job.status = 'interrupted'; job.error = 'The service restarted. Review progress, then resume; completed website actions are not undone.'; job.endedAt = new Date().toISOString(); job.pending = null; delete job.stopResult;
   }
 }
 
-export function enqueueSchedules(state, now = new Date()) {
+export function enqueueSchedules(state, now = new Date(), submit = input=>createJob(state,input)) {
   let count = 0;
   for (const schedule of state.schedules) {
     if (!schedule.enabled || new Date(schedule.nextAt) > now) continue;
     if (state.jobs.some(j => j.scheduleId === schedule.id && ['queued','running','waiting','takeover','stopping','interrupted'].includes(j.status))) continue;
-    createJob(state, { prompt: schedule.prompt, agentId: schedule.agentId, interactionMode: schedule.interactionMode, scheduleId: schedule.id });
+    try { submit({ prompt: schedule.prompt, agentId: schedule.agentId, interactionMode: schedule.interactionMode, scheduleId: schedule.id }); delete schedule.error; }
+    catch(error) { schedule.enabled=false; schedule.error=error.message; count++; continue; }
     schedule.lastAt = now.toISOString();
     if (schedule.intervalMinutes) schedule.nextAt = new Date(now.valueOf() + schedule.intervalMinutes * 60_000).toISOString();
     else schedule.enabled = false;

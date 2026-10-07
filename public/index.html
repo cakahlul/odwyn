@@ -22,13 +22,13 @@
       <button class="new-chat" id="new-chat" aria-label="New conversation" title="New conversation"><span class="plus" aria-hidden="true">+</span><span class="sidebar-label">New conversation</span> <kbd>⌘ N</kbd></button>
       <nav class="navigation">
         <button data-view="chat" aria-label="Chat" title="Chat" class="nav-item active"><span data-icon="chat"></span><span class="sidebar-label">Chat</span></button>
-        <button data-view="runs" aria-label="Task runs" title="Task runs" class="nav-item"><span data-icon="activity"></span><span class="sidebar-label">Task runs</span><span class="nav-status" id="run-status" role="img" aria-label="Active tasks" title="Active tasks" hidden></span></button>
         <button data-view="routines" aria-label="Routines" title="Routines" class="nav-item"><span data-icon="clock"></span><span class="sidebar-label">Routines</span></button>
+        <button data-view="workflows" aria-label="Workflows & skills" title="Workflows & skills" class="nav-item"><span data-icon="workflow"></span><span class="sidebar-label">Workflows & skills</span></button>
         <button data-view="files" aria-label="Files & results" title="Files & results" class="nav-item"><span data-icon="folder"></span><span class="sidebar-label">Files & results</span></button>
       </nav>
       <section class="sidebar-rooms" aria-label="Conversation rooms"><div class="sidebar-agents-heading"><strong>Rooms</strong><button class="icon-button" id="new-room" aria-label="Create conversation room" title="Create conversation room"><span class="plus" aria-hidden="true">+</span></button></div><div id="room-list" class="room-list"></div></section>
       </div>
-      <div class="history-label"><span>CONVERSATIONS</span><button class="icon-button" id="search-open" title="Search conversations" aria-label="Search conversations"><span data-icon="search"></span></button></div>
+      <div class="history-label"><span>CONVERSATIONS</span><div class="history-actions"><button data-view="runs" class="icon-button history-runs" aria-label="Task runs" title="Task runs"><span data-icon="history"></span><span class="nav-status" id="run-status" role="img" aria-label="Active tasks" title="Active tasks" hidden></span></button><button class="icon-button" id="search-open" title="Search conversations" aria-label="Search conversations"><span data-icon="search"></span></button></div></div>
       <div id="history" class="history"><p class="sidebar-empty">No conversations yet.</p></div>
       <div class="sidebar-bottom">
         <button type="button" class="routine-summary" data-view="routines" hidden><span data-icon="clock"></span><span><strong id="routine-note"></strong><small id="routine-note-detail"></small></span></button>

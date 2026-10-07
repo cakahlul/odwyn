@@ -48,6 +48,7 @@ The Codex provider uses ChatGPT subscription authentication rather than API-key 
 
 ## Using it
 
+- **Task runs:** use the history icon beside **Conversations** to inspect active tasks and execution history, or resume interrupted work.
 - **Chat:** give an outcome; follow-up messages continue the selected provider’s conversation. Saved chats remain searchable across providers.
 - **Browser:** browsing opens a live preview in the active conversation, including rooms. **Minimize** replaces it with a floating **Live browser** button. **Browser controls** opens tabs, activity and takeover. **Take control** pauses subsequent agent actions; **Hand back** resumes them. Answer any pending question after completing a sign-in.
 - **Terminal:** ask an agent to run commands or work with local files. All providers use `odwyn_terminal`, a non-interactive `/bin/sh` in `data/workspace` (or the configured data directory). **Ask me** and **Approve safe actions** show each command’s full text for approval. **Always approve** runs task-related terminal commands automatically. The approval card also offers **Always approve**, and changing the permission selector to that mode releases a pending command. Commands run with the server user’s filesystem, environment and network permissions, without a sandbox. Default timeout: 30 seconds; maximum: 120 seconds. Output is capped at 32 KiB per stream. Stop, shutdown and timeout kill the command and its process group. No interactive terminal or persistent shell; use `cd` inside a command when needed.
@@ -59,6 +60,22 @@ The Codex provider uses ChatGPT subscription authentication rather than API-key 
 - **Stop / Review & resume:** stop execution or continue an interrupted task after checking what already happened on the website.
 
 One task uses the shared browser at a time. Other tasks wait in a persistent queue. After a task or room discussion ends, its tabs and browser close before the next task starts; saved sign-ins remain. Room participants share open pages until the discussion ends. Owner takeover keeps the browser open. A restart marks unfinished active work as interrupted; it requires review before resuming. Recurring schedules do not duplicate queued, active or interrupted runs.
+
+## Workflows and skills
+
+Open **Workflows & skills** in the sidebar to create a workflow, customize the research template, or import a JSON definition. Workflows are user-defined; no task-specific review behavior is built into the runner. **New workflow** and **Edit** open a nearly fullscreen canvas. Click **+** to pick a step; it connects automatically. Drag nodes to arrange them, connect output ports to input ports, and click a node to configure its agent, skills, tools, or action in the side panel. Conditions have separate True and False ports. Select a connection to delete it; **Fit**, zoom, and **Arrange** help navigate the graph. Workflow settings hold launch inputs. Returning a connection to an earlier step creates a loop; the configurable execution limit bounds every run.
+
+Six block types are available: **Agent**, **Browser**, **Terminal**, **Condition**, **Approval**, and **Output**. Agent steps have custom instructions, allowed tools and text or JSON output. Browser and terminal blocks use the existing Odwyn action parameters and approval policies. Conditions compare values without executing expressions. Approval blocks pause for the owner’s instructions and optional item selection; their outputs contain `answer` and, when configured, `selected`. Output blocks display mapped text or JSON in chat. Browser use stays serialized for the entire workflow. Runs execute in individual chats.
+
+Name a workflow command, then invoke it from chat with `/research Odwyn` or `$research Odwyn`. Plain arguments fill the first input. Multiple inputs use JSON: `/research {"topic":"Odwyn","audience":"engineering"}`. Missing required inputs pause for an answer. Typing `/` or `$` shows registered commands. **Run** opens an input form. To schedule a workflow, use its command as a routine’s task; each scheduled run uses the definition saved when it starts. If a command is renamed or deleted, update its routines; invalid commands pause the routine with an error.
+
+Map data with `{{inputs.topic}}`, `{{steps.research}}`, `{{steps.review.answer}}`, `{{steps.review.selected}}`, or a nested JSON field such as `{{steps.research.findings}}`. A reference occupying the entire value preserves its JSON type; embedded references become text. `{{run.visits}}` exposes the number of completed steps for loop conditions. Missing references fail the step. Terminal references must appear outside shell quotes and heredocs; mapped values are quoted as shell arguments automatically.
+
+Create skills as reusable named instructions and select them on agent steps. Skills also have their own `/command` and `$command` invocation. Workflow and skill command names must be unique. The definition editor supports every workflow field through **Workflow settings → Definition (JSON)**; export saves a JSON definition. When moving between workspaces, update referenced skill and agent IDs to match the destination workspace.
+
+Run history saves the workflow and skills snapshot, inputs, step outputs, attempts and failures. Editing a saved definition affects future runs. Failed, cancelled or interrupted runs resume only their current step through **Review & resume** in chat; completed steps stay saved. Service restarts interrupt unfinished workflows, including queued steps. Automatic retries require both a retry count and explicit confirmation that a step is safe to repeat. Browser interactions and terminal commands still follow the selected permission mode. Direct terminal blocks fail on unsuccessful exit or timeout; command results stay attached to the failed step.
+
+Verify the editor, commands, selections, approvals, persistence and responsive layouts with `bun run check:workflows`. This check uses a fake provider and does not consume inference allowance.
 
 ## VPS, PM2 and your existing tunnel
 

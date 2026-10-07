@@ -29,9 +29,15 @@ test('sidebar rail saves space, keeps menus usable, persists, and preserves the 
     expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(68);
     expect((await page.locator('#main').boundingBox()).width-before.width).toBe(164);
     expect(await page.getByRole('button',{name:'Expand sidebar',exact:true}).getAttribute('aria-expanded')).toBe('false');
-    for(const label of ['Chat','Task runs','Routines','Files & results']){
+    expect(await page.locator('.navigation [data-view="runs"]').count()).toBe(0);
+    expect(await page.locator('.history-label [data-view="runs"]').count()).toBe(1);
+    expect(await page.locator('[data-view="workflows"] [data-icon]').getAttribute('data-icon')).toBe('workflow');
+    for(const label of ['Chat','Routines','Workflows & skills','Files & results']){
       const button=page.locator('.navigation').getByRole('button',{name:label,exact:true});expect(await button.getAttribute('title')).toBe(label);await button.click();
     }
+    await page.getByRole('button',{name:'Task runs',exact:true}).click();
+    expect(await page.locator('.history-runs').getAttribute('title')).toBe('Task runs');
+    await page.getByRole('heading',{name:'Task runs',exact:true}).waitFor();
     await page.getByRole('button',{name:'Odwyn settings',exact:true}).click();await page.getByRole('heading',{name:'Odwyn settings'}).waitFor();await page.getByRole('button',{name:'Close settings'}).click();
     await page.getByRole('button',{name:'Search conversations',exact:true}).click();expect(await page.locator('#search-dialog').isVisible()).toBe(true);await page.keyboard.press('Escape');
     await page.getByRole('button',{name:'Open Rei',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#agent-name').textContent==='Rei' && !document.querySelector('#minimize-agent').disabled);
