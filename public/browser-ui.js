@@ -100,8 +100,8 @@ export function updateBrowser(state) {
   if (controlled) setBrowserVisible(true);
 }
 
-async function control() {
-  try { await api('/api/browser/takeover', { enabled: !getState()?.runtime.takeover }); await refreshFrame(); }
+async function control(enabled = !getState()?.runtime.takeover) {
+  try { await api('/api/browser/takeover', { enabled }); await refreshFrame(); }
   catch (error) { handleError(error); }
 }
 async function action(input) {
@@ -122,8 +122,8 @@ export function setupBrowser(stateGetter) {
   });
   $('#browser-close').onclick = () => setBrowserVisible(false);
   $('#browser-refresh').onclick = refreshFrame;
-  $('#takeover-button').onclick = control;
-  $('#browser-viewport').addEventListener('click', event => { if (event.target.closest('#open-browser')) void control(); });
+  $('#takeover-button').onclick = () => control();
+  $('#browser-viewport').addEventListener('click', event => { if (event.target.closest('#open-browser')) void control(true); });
   $('#browser-tab').onclick = () => {
     $('#browser-content').hidden = false; $('#activity-content').hidden = true;
     $('#browser-tab').classList.add('selected'); $('#activity-tab').classList.remove('selected');
