@@ -372,14 +372,24 @@ async function refresh() {
 
 async function perform(fn) { try { await fn(); await refresh(); } catch (error) { handleError(error); } }
 function openSchedule() {
-  const room=currentRoom(), members=room ? workspace.agents.filter(a=>room.memberIds.includes(a.id)) : workspace.agents.filter(a=>a.id===agentId);
-  $('#schedule-agent-field').hidden = !room;
+  const room=currentRoom(), members=workspace.agents;
   $('#schedule-agent').innerHTML=members.map(a=>`<option value="${esc(a.id)}">${esc(a.customization?.name || defaults.name)}</option>`).join('');
   $('#schedule-agent').value=room && room.memberIds.includes($('#reply-agent').value) ? $('#reply-agent').value : members.find(a=>a.id===agentId)?.id || members[0]?.id;
+  $('#schedule-call').innerHTML='<option value="">Task</option>'+[['Skills',workspace.skills],['Workflows',workspace.workflows]].map(([label,items])=>`<optgroup label="${label}">${items.map(item=>`<option value="${esc(item.command)}">/${esc(item.command)} · ${esc(item.name)}</option>`).join('')}</optgroup>`).join('');
   $('#schedule-prompt').value = $('#prompt').value;
+  updateScheduleCall();
   const soon = new Date(Date.now() + 60 * 60_000); const local = new Date(soon.valueOf() - soon.getTimezoneOffset() * 60_000);
   $('#schedule-at').value = local.toISOString().slice(0,16); $('#schedule-status').textContent = ''; $('#schedule-dialog').showModal();
 }
+function updateScheduleCall() {
+  const command=$('#schedule-call').value, workflow=workspace.workflows.find(w=>w.command===command), skill=workspace.skills.find(s=>s.command===command);
+  $('#schedule-task-field').hidden=!!workflow;
+  $('#schedule-prompt').required=!command;
+  $('#schedule-prompt-label').textContent=skill ? 'Instructions or arguments (optional)' : 'What needs doing?';
+  $('#schedule-call-hint').textContent=workflow ? `${workflow.description || ''} Workflow steps use their assigned agents, or the selected agent.` : skill?.description || 'Enter a task, or a /skill or /workflow command.';
+  $('#schedule-inputs').innerHTML=workflow ? workflow.inputs.map(f=>`<label>${esc(f.label || f.name)}<input name="${esc(f.name)}" value="${esc(f.default ?? '')}" ${f.required ? 'required':''}></label>`).join('') : '';
+}
+$('#schedule-call').onchange=updateScheduleCall;
 function updateAccount() {
   const connection = providerGlobal ? workspace.globalRuntime : state.runtime;
   const account = connection.account;
@@ -597,8 +607,10 @@ $('#connect-account').onclick = () => perform(async () => {
   finally { $('#connect-account').disabled = false; }
 });
 $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(async () => {
-  await api('/api/schedules',{ agentId:$('#schedule-agent').value || agentId, prompt:$('#schedule-prompt').value, at:new Date($('#schedule-at').value).toISOString(), intervalMinutes:Number($('#schedule-interval').value), interactionMode:'confirm' });
-  $('#schedule-dialog').close(); navigate('routines'); toast('Routine scheduled.');
+  const selectedAgent=$('#schedule-agent').value || agentId, command=$('#schedule-call').value;
+  const argumentsText=workspace.workflows.some(w=>w.command===command) ? JSON.stringify(Object.fromEntries([...$('#schedule-inputs').querySelectorAll('input')].map(input=>[input.name,input.value]))) : $('#schedule-prompt').value.trim();
+  await api('/api/schedules',{ agentId:selectedAgent, prompt:command ? `/${command}${argumentsText ? ' '+argumentsText : ''}` : $('#schedule-prompt').value, at:new Date($('#schedule-at').value).toISOString(), intervalMinutes:Number($('#schedule-interval').value), interactionMode:'confirm' });
+  $('#schedule-dialog').close(); await refresh(); await switchAgent(selectedAgent); navigate('routines'); toast('Routine scheduled.');
 }); };
 
 document.addEventListener('click', event => {

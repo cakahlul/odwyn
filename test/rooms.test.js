@@ -75,7 +75,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     await page.locator('#interaction-mode').selectOption('safe');
     expect(await page.locator('#schedule-open').isVisible()).toBe(true);
     await page.locator('#schedule-open').click();
-    expect(await page.locator('#schedule-agent option').count()).toBe(2);
+    expect(await page.locator('#schedule-agent option').evaluateAll(nodes=>nodes.map(n=>n.value))).toEqual([primary,scout.id,offline.id]);
     expect(await page.locator('#schedule-agent').inputValue()).toBe(primary);
     await page.keyboard.press('Escape');
     await page.locator('#prompt').fill('Compare weekend plans'); await page.locator('#prompt').press('Enter');

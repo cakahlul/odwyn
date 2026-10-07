@@ -526,6 +526,7 @@ export class Runtime {
   schedule(input) {
     const agent = findAgent(this.state, input.agentId);
     const prompt = textInput(input.prompt);
+    workflowInvocation(prompt, this.state);
     const at = new Date(input.at);
     if (!Number.isFinite(at.valueOf()) || at <= new Date()) throw new Error('Choose a future date and time.');
     const intervalMinutes = Number(input.intervalMinutes || 0);
