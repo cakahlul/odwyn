@@ -21,6 +21,44 @@ class FakeCodex extends EventEmitter {
   reject() {}
 }
 
+test('task cleanup blocks the next task, skips queued cancellations and owner takeover, and preserves room handoffs', async () => {
+  const dir = mkdtempSync(join(tmpdir(),'odwyn-task-cleanup-')), store = openStore(dir), codex = new FakeCodex();
+  let resets = 0, release;
+  const browser = {reset:()=>{resets++;return new Promise(resolve=>{release=resolve;});}};
+  const runtime = new Runtime({store,codex,browser,workspace:dir});
+  try {
+    await runtime.refreshAccount();
+    for (const status of ['completed','failed','cancelled','interrupted']) {
+      const job = runtime.submit({prompt:'First task'}); await runtime.drain();
+      const next = runtime.submit({prompt:'Next task'});
+      runtime.finish(job,status);
+      const cleaning = runtime.cleaning, drain = runtime.drain();
+      expect(resets).toBe(['completed','failed','cancelled','interrupted'].indexOf(status)+1);
+      expect(next.status).toBe('queued');
+      expect(runtime.active).toBeNull();
+      release(); await cleaning; await drain;
+      expect(runtime.active).toBe(next);
+      await runtime.setTakeover(true);
+      runtime.finish(next,'completed');
+      expect(runtime.cleaning).toBeNull();
+      await runtime.setTakeover(false);
+    }
+    store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
+    runtime.addProvider('scout',new FakeCodex()); await runtime.refreshAccount('scout');
+    const room = createRoom(store.state,{title:'Shared work',memberIds:[store.state.agents[0].id,'scout']});
+    runtime.submitRoom(room.id,{prompt:'Discuss'}); await runtime.drain();
+    runtime.finish(runtime.active,'completed');
+    expect(resets).toBe(4);
+    await runtime.drain();
+    const queued = runtime.submit({prompt:'Cancel queued task'});
+    await runtime.cancel(queued.id);
+    expect(resets).toBe(4);
+    await runtime.cancelRoom(room.id);
+    expect(resets).toBe(5);
+    release(); await runtime.cleaning;
+  } finally {release?.();runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('rooms choose a relevant opener and follow replies instead of fixed participant order', async () => {
   const dir = mkdtempSync(join(tmpdir(),'odwyn-room-dialogue-')), store = openStore(dir);
   const primary = store.state.agents[0].id, first = new FakeCodex(), scout = new FakeCodex(), writer = new FakeCodex();

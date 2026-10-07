@@ -164,6 +164,7 @@ export class Runtime {
   }
 
   drain() {
+    if (this.cleaning) return this.cleaning.then(() => this.drain());
     if (this.starting) return this.starting;
     if (this.closed || this.active || this.takeover) return Promise.resolve();
     let job = [...this.state.jobs].reverse().find(j => j.status === 'queued' && this.accounts.get(j.agentId)?.account);
@@ -422,6 +423,7 @@ export class Runtime {
   }
 
   finish(job, status, error = null) {
+    const wasActive = this.active === job;
     if (this.terminalRun?.job === job) this.terminalRun.controller.abort();
     const conversation = this.conversation(job), session = conversation?.sessions?.[job.agentId];
     if (conversation) conversation.messages = conversation.messages.filter(m=>m.jobId !== job.id || m.role !== 'assistant' || m.text?.trim());
@@ -467,6 +469,11 @@ export class Runtime {
         }
       }
       this.changed();
+    }
+    if (wasActive && !this.closed && !this.takeover && discussion?.status !== 'active' && this.browser.reset) {
+      this.cleaning = this.browser.reset()
+        .catch(error => this.event(job, 'Browser cleanup failed', error.message))
+        .finally(() => { this.cleaning = null; this.changed(); });
     }
   }
 

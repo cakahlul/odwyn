@@ -58,7 +58,7 @@ The Codex provider uses ChatGPT subscription authentication rather than API-key 
 - **Memory:** inspect and edit preferences in Settings. The assistant can search related saved conversations using `odwyn_search`: SQLite FTS5 ranks keyword matches across 1,500-character message chunks and returns up to five excerpts. Chat history and this index survive restarts and provider changes. Memory is context, not permission to perform new actions.
 - **Stop / Review & resume:** stop execution or continue an interrupted task after checking what already happened on the website.
 
-One task uses the shared browser at a time. Other tasks wait in a persistent queue. A restart marks unfinished active work as interrupted; it requires review before resuming. Recurring schedules do not duplicate queued, active or interrupted runs.
+One task uses the shared browser at a time. Other tasks wait in a persistent queue. After a task or room discussion ends, its tabs and browser close before the next task starts; saved sign-ins remain. Room participants share open pages until the discussion ends. Owner takeover keeps the browser open. A restart marks unfinished active work as interrupted; it requires review before resuming. Recurring schedules do not duplicate queued, active or interrupted runs.
 
 ## VPS, PM2 and your existing tunnel
 

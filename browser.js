@@ -28,7 +28,7 @@ export class Browser {
       this.context.setDefaultTimeout(12_000);
       this.context.setDefaultNavigationTimeout(30_000);
       this.context.on('page', page => { this.attach(page); this.page = page; });
-      this.context.on('close', () => { this.context = null; this.page = null; this.dialog = null; this.proxy?.close(); this.proxy = null; });
+      this.context.on('close', () => { this.context = null; this.page = null; this.dialog = null; this.last = null; this.proxy?.close(); this.proxy = null; });
       for (const page of this.context.pages()) this.attach(page);
       this.page = this.context.pages()[0] || await this.context.newPage();
     } catch (error) { this.proxy.close(); this.proxy = null; throw error; }
@@ -145,6 +145,13 @@ export class Browser {
       if (this.dialog) return { jobId: this.owner, url: this.page.url(), dialog: this.dialog.message(), tabs: [] };
       return { jobId: this.owner, url: this.page.url(), title: await this.page.title(), image: (await this.page.screenshot({ type: 'jpeg', quality: 65 })).toString('base64'), width: 1280, height: 800,
         tabs: this.context.pages().map((page, index) => ({ index, url: page.url(), active: page === this.page })) };
+    });
+  }
+
+  reset() {
+    return this.serial(async () => {
+      try { await this.context?.close(); }
+      finally { this.proxy?.close(); this.proxy = null; this.context = null; this.page = null; this.dialog = null; this.last = null; }
     });
   }
 

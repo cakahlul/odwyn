@@ -5,6 +5,36 @@ import { join } from 'node:path';
 import { browserActionRisk } from '../security.js';
 import { Browser } from '../browser.js';
 
+test('browser reset closes all tabs and proxy, clears snapshots, and reopens with saved sign-ins', async () => {
+  const directory = mkdtempSync(join(tmpdir(),'odwyn-browser-reset-'));
+  const browser = new Browser({directory});
+  try {
+    await browser.action({action:'read'});
+    const context = browser.context, proxy = browser.proxy;
+    await context.addCookies([{name:'session',value:'saved',domain:'example.com',path:'/',expires:Math.floor(Date.now()/1000)+3600}]);
+    const extra = await context.newPage(), pages = context.pages();
+    await extra.setContent('<button onclick="alert(\'Pending\')">Open</button>');
+    await browser.action({action:'read'});
+    await browser.action({action:'click',ref:'0'});
+    const reset = browser.reset(), read = browser.action({action:'read'});
+    await reset;
+    expect(pages.every(page=>page.isClosed())).toBe(true);
+    expect(browser.last).toBeNull();
+    expect(browser.dialog).toBeNull();
+    const snapshot = await read;
+    expect(browser.context).not.toBe(context);
+    expect(browser.proxy).not.toBe(proxy);
+    expect(snapshot.tabs).toHaveLength(1);
+    expect(snapshot.url).toBe('about:blank');
+    expect((await browser.context.cookies('https://example.com')).find(cookie=>cookie.name==='session')?.value).toBe('saved');
+    await browser.reset();
+    await browser.reset();
+    expect(await browser.frame()).toBeNull();
+    expect(browser.context).toBeNull();
+    expect(browser.proxy).toBeNull();
+  } finally { await browser.close(); rmSync(directory,{recursive:true,force:true}); }
+},30_000);
+
 test('real browser references, form interactions, evidence, dialogs and network isolation', async () => {
   const directory = mkdtempSync(join(tmpdir(),'odwyn-browser-')); const files=[];
   const browser = new Browser({directory,onFile:file=>files.push(file)});
