@@ -567,12 +567,18 @@ $('#composer').onsubmit = async event => {
   busy = false; render();
 };
 $('#prompt').onkeydown = event => {
-  if (event.key === 'ArrowDown' && !$('#room-mentions').hidden) { event.preventDefault(); $('#room-mentions button')?.focus(); }
+  if (event.key === 'Enter' && event.altKey && !event.isComposing) { event.preventDefault(); promptMention()?.click(); }
+  else if (event.key === 'ArrowDown' && !$('#room-mentions').hidden) { event.preventDefault(); $('#room-mentions button')?.focus(); }
   else if (event.key === 'Escape') $('#room-mentions').hidden = true;
   else if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#composer').requestSubmit(); }
 };
 $('#prompt').oninput = () => { $('#prompt').style.height = 'auto'; $('#prompt').style.height = Math.min($('#prompt').scrollHeight,260) + 'px'; renderMentions(); };
-$('#prompt').onclick = renderMentions;
+function promptMention(event) {
+  const prompt=$('#prompt');if(prompt.selectionStart!==prompt.selectionEnd) return;
+  return [...$('#prompt-highlights').querySelectorAll('[data-mention-link]')].find(mention=>event ? [...mention.getClientRects()].some(box=>event.clientX>=box.left && event.clientX<=box.right && event.clientY>=box.top && event.clientY<=box.bottom) : prompt.selectionStart>=Number(mention.dataset.start) && prompt.selectionStart<=Number(mention.dataset.end));
+}
+$('#prompt').onclick = event => { renderMentions();if(!event.shiftKey)promptMention(event)?.click(); };
+$('#prompt').title = 'Click a highlighted mention to open it. Alt + Enter opens the mention at the cursor.';
 new ResizeObserver(() => { $('#prompt-highlights').style.width = $('#prompt').clientWidth + 'px'; }).observe($('#prompt'));
 $('#prompt').onscroll = () => { $('#prompt-highlights').scrollTop = $('#prompt').scrollTop; $('#prompt-highlights').scrollLeft = $('#prompt').scrollLeft; };
 $('#room-mentions').onclick = event => {
@@ -597,7 +603,8 @@ $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(a
 
 document.addEventListener('click', event => {
   document.querySelectorAll('.agent-menu[open]').forEach(menu => { if (!menu.contains(event.target)) menu.open = false; });
-  const target = event.target.closest('button,a'); if (!target) return;
+  const target = event.target.closest('button,a,[data-mention-link]'); if (!target) return;
+  if (target.dataset.mentionCommand) { navigate('workflows');return; }
   if (target.dataset.agentAction) {
     if (busy || switching) return;
     const id = target.dataset.agentId, action = target.dataset.agentAction, agent = workspace.agents.find(a=>a.id===id);

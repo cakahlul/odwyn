@@ -261,6 +261,8 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:6px; bac
 .message-bubble .result-files { margin-left:0; }
 .agent-mention { font-weight:600; color:color-mix(in srgb,var(--agent-color) 30%,var(--ink)); background:color-mix(in srgb,var(--agent-color) 14%,transparent); border-radius:4px; box-decoration-break:clone; }
 .skill-mention { font-weight:600; color:color-mix(in srgb,var(--workspace-accent,var(--orange)) 20%,var(--ink)); background:color-mix(in srgb,var(--workspace-accent,var(--orange)) 14%,transparent); border-radius:4px; box-decoration-break:clone; }
+button[data-mention-link] { display:inline; padding:0; text-align:inherit; line-height:inherit; vertical-align:baseline; }
+button[data-mention-link]:hover { text-decoration:underline; }
 @media (max-width:760px) {
   .message { gap:6px; margin-bottom:10px; }
   .message-bubble { max-width:90%; padding:10px 12px 5px; }

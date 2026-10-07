@@ -23,19 +23,21 @@ export function setupWorkflows(getState,getAgent,onRun,refresh) {
   $('#workflow-run-form').onsubmit=async event=>{event.preventDefault();try{const inputs=Object.fromEntries(new FormData(event.target));const job=await api(`/api/workflows/${running.id}/run`,{agentId:getAgent(),inputs,interactionMode:$('#interaction-mode').value});$('#workflow-run-dialog').close();await refresh();onRun(job);}catch(error){showError('#workflow-run-error',error);}};
   $('#workflow-import-file').onchange=async event=>{try{const file=event.target.files[0];if(!file)return;if(file.size>30000)throw new Error('Choose a workflow definition under 30 KB.');const imported=JSON.parse(await file.text());delete imported.id;editor.open(imported);}catch(error){handleError(error);}finally{event.target.value='';}};
   document.addEventListener('click',async event=>{
-    const target=event.target.closest('button');if(!target)return;const state=getState();if(!state)return;
+    const target=event.target.closest('button,[data-mention-link]');if(!target)return;const state=getState();if(!state)return;
+    const workflowEdit=target.dataset.workflowEdit || state.workflows.find(w=>w.command===target.dataset.mentionCommand)?.id;
+    const skillEdit=target.dataset.skillEdit || state.skills.find(s=>s.command===target.dataset.mentionCommand)?.id;
     try {
       if(target.dataset.workflowCommand){$('#prompt').value=target.dataset.workflowCommand+' ';$('#prompt').dispatchEvent(new Event('input'));$('#prompt').focus();}
       if(target.hasAttribute('data-workflow-new'))editor.open(blank());
       if(target.hasAttribute('data-workflow-template'))editor.open(sample());
       if(target.hasAttribute('data-workflow-import'))$('#workflow-import-file').click();
-      if(target.dataset.workflowEdit)editor.open(state.workflows.find(w=>w.id===target.dataset.workflowEdit));
+      if(workflowEdit)editor.open(state.workflows.find(w=>w.id===workflowEdit));
       if(target.dataset.workflowDelete && confirm('Delete this workflow? Existing run history stays saved.')){await api(`/api/workflows/${target.dataset.workflowDelete}`,{},'DELETE');await refresh();}
       if(target.dataset.workflowExport){const workflow=structuredClone(state.workflows.find(w=>w.id===target.dataset.workflowExport));delete workflow.id;const link=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(workflow,null,2)],{type:'application/json'}));link.href=url;link.download=`${workflow.command}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
       if(target.hasAttribute('data-skill-close'))$('#skill-editor').close();
       if(target.hasAttribute('data-run-close'))$('#workflow-run-dialog').close();
       if(target.hasAttribute('data-history-close'))$('#workflow-history').close();
-      if(target.hasAttribute('data-skill-new') || target.dataset.skillEdit){skillId=target.dataset.skillEdit || null;const skill=state.skills.find(s=>s.id===skillId) || {};for(const name of ['name','command','description','instructions'])$('#skill-form').elements[name].value=skill[name] || '';$('#skill-error').textContent='';$('#skill-editor').showModal();}
+      if(target.hasAttribute('data-skill-new') || skillEdit){skillId=skillEdit || null;const skill=state.skills.find(s=>s.id===skillId) || {};for(const name of ['name','command','description','instructions'])$('#skill-form').elements[name].value=skill[name] || '';$('#skill-error').textContent='';$('#skill-editor').showModal();}
       if(target.dataset.skillDelete && confirm('Delete this skill?')){await api(`/api/skills/${target.dataset.skillDelete}`,{},'DELETE');await refresh();}
       if(target.dataset.workflowRun)openRun(state.workflows.find(w=>w.id===target.dataset.workflowRun));
       if(target.dataset.workflowHistory){const run=state.workflowRuns.find(r=>r.id===target.dataset.workflowHistory);$('#workflow-history-title').textContent=run.workflow.name;$('#workflow-history-content').innerHTML=`<p>${esc(run.status)} · ${esc(run.currentStep)} · ${run.visits} completed steps</p>${run.error ? `<p class="run-error">${esc(run.error)}</p>`:''}<h3>Inputs</h3><pre>${esc(JSON.stringify(run.inputs,null,2))}</pre>${Object.entries(run.outputs).map(([id,value])=>`<details open><summary>${esc(id)}</summary><pre>${esc(text(value))}</pre></details>`).join('')}<h3>Step history</h3>${state.jobs.filter(j=>j.workflowRunId===run.id).reverse().map(j=>`<p>${esc(j.workflowStepId)} · ${esc(j.status)} ${j.error ? `· ${esc(j.error)}`:''}</p>${j.workflowOutput!==undefined ? `<details><summary>Saved step result</summary><pre>${esc(text(j.workflowOutput))}</pre></details>`:''}`).join('')}`;$('#workflow-history').showModal();}

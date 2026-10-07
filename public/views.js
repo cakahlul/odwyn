@@ -98,7 +98,13 @@ export function colorMentions(content, members = [], skills = [], literal = fals
       const agent = names.get(name?.toLowerCase()); if (!skill && !agent) continue;
       const start = match.index + match[1].length;
       fragment.append(node.textContent.slice(end,start));
-      const mention = document.createElement('span'); mention.className = skill ? 'skill-mention' : 'agent-mention';
+      const mention = document.createElement(literal ? 'span' : 'button'); mention.className = skill ? 'skill-mention' : 'agent-mention';
+      if (!literal) mention.type = 'button';
+      mention.dataset.mentionLink = '';
+      if (skill) mention.dataset.mentionCommand=match[4];
+      else mention.dataset.agent=agent.id;
+      if (literal) {mention.dataset.start=String(start);mention.dataset.end=String(match.index+match[0].length);}
+      mention.title=skill ? `Open /${match[4]}` : `Open ${name}`;
       mention.textContent = literal || skill ? match[0].slice(match[1].length) : `@${name}`;
       if (agent) mention.style.setProperty('--agent-color',agentColor(agent.customization));
       fragment.append(mention); end = match.index + match[0].length;
