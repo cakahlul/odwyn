@@ -16,10 +16,11 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
   app.runtime.state.customization={...defaults,name:'Oddy',bodyColor:'#73ad63'};
   app.runtime.state.globalProvider.configured=true;first.provider.configured=true;
   app.runtime.state.skills=[{id:'review',name:'Review code',command:'review-code',description:'',instructions:'Review the code.'}];
+  app.runtime.state.workflows=[{id:'pr-review',name:'PR Review FE',command:'pr-review-fe',inputs:[],steps:[{id:'review',type:'output',prompt:'Review'}],start:'review'}];
   app.runtime.state.agents.push({id:'rei',customization:{...defaults,name:'Rei',bodyColor:'#668ad6'},provider:{...first.provider,configured:false}},{id:'kai',customization:{...defaults,name:'Kai Chen',bodyColor:'#a778c6'},provider:{...first.provider,configured:false}});
   const message=(id,role,text,agentId=first.id)=>({id,role,text,agentId,at});
   app.runtime.state.conversations=[
-    {id:'private',agentId:first.id,title:'Weekend plans',createdAt:at,messages:[message('p1','user','Any ideas for Saturday?'),message('p2','assistant','Coffee, then the botanical garden. Want a quieter route?'),message('p3','user','Yes, somewhere away from the crowds.'),message('p4','assistant','Try the north entrance. It’s usually quieter before 10.')]},
+    {id:'private',agentId:first.id,title:'Weekend plans',createdAt:at,messages:[message('p1','user','Any ideas for Saturday? /pr-review-fe $pr-review-fe'),message('p2','assistant','Coffee, then the botanical garden. Want a quieter route?'),message('p3','user','Yes, somewhere away from the crowds.'),message('p4','assistant','Try the north entrance. It’s usually quieter before 10.')]},
     {id:'room',kind:'room',memberIds:[first.id,'rei','kai'],agentId:first.id,title:'Weekend group',createdAt:at,messages:[message('r1','user','@Oddy @Rei, thoughts on Saturday?'),message('r2','assistant','The garden sounds good. @Rei can check the route.'),message('r3','assistant','Found a quieter entrance. @"Kai Chen", coffee nearby?','rei'),message('r4','assistant','Yes — a café across the road opens at 8.','kai')]}
   ];app.runtime.changed();
   const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}}),page=await context.newPage(),errors=[];
@@ -30,23 +31,27 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
     const user=await page.locator('.message-user .message-bubble').first().boundingBox(),agent=await page.locator('.message-assistant .message-bubble').first().boundingBox();expect(user.x).toBeGreaterThan(agent.x);
     expect(await page.locator('.private-messages .message-meta').first().isVisible()).toBe(false);
     expect(await page.locator('.message-assistant').first().evaluate(node=>node.style.getPropertyValue('--agent-color'))).toBe('#73ad63');
-    const draft='/review-code @Rei @"Kai Chen" <script> /unknown /review-code-extra /review-code/file email@Rei';
+    expect(await page.locator('#messages .skill-mention').allTextContents()).toEqual(['/pr-review-fe','$pr-review-fe']);
+    await page.locator('#prompt').fill('/pr-re');
+    await page.locator('[data-workflow-command="/pr-review-fe"]').click();
+    expect(await page.locator('#prompt-highlights .skill-mention').textContent()).toBe('/pr-review-fe');
+    const draft='/pr-review-fe /review-code @Rei @"Kai Chen" <script> /unknown /review-code-extra /review-code/file email@Rei';
     await page.locator('#prompt').fill(draft);
     expect(await page.locator('#prompt-highlights').textContent()).toBe(draft);
-    expect(await page.locator('#prompt-highlights .skill-mention').allTextContents()).toEqual(['/review-code']);
+    expect(await page.locator('#prompt-highlights .skill-mention').allTextContents()).toEqual(['/pr-review-fe','/review-code']);
     expect(await page.locator('#prompt-highlights .agent-mention').evaluateAll(nodes=>nodes.map(node=>[node.textContent,node.style.getPropertyValue('--agent-color')]))).toEqual([['@Rei','#668ad6'],['@"Kai Chen"','#a778c6']]);
     expect(await page.locator('#prompt-highlights script').count()).toBe(0);
     const colors=[];
     for(const palette of ['fern','harbor','graphite']){
       app.runtime.state.appearance={palette,motion:'reduced'};app.runtime.changed();
       await page.waitForFunction(accent=>document.documentElement.style.getPropertyValue('--workspace-accent')===accent,palettes[palette].vars.orange);
-      colors.push(await page.locator('#prompt-highlights .skill-mention').evaluate(node=>getComputedStyle(node).backgroundColor));
+      colors.push(await page.locator('#prompt-highlights .skill-mention').first().evaluate(node=>getComputedStyle(node).backgroundColor));
     }
     expect(new Set(colors).size).toBe(3);
     // Workspace skill colors stay global even when the active agent overrides its palette.
     app.runtime.state.customization={...first.customization,overrideWorkspace:true,palette:'rose'};app.runtime.changed();
     await page.waitForFunction(paper=>document.documentElement.style.getPropertyValue('--paper')===paper,palettes.rose.vars.paper);
-    expect(await page.locator('#prompt-highlights .skill-mention').evaluate(node=>getComputedStyle(node).backgroundColor)).toBe(colors.at(-1));
+    expect(await page.locator('#prompt-highlights .skill-mention').first().evaluate(node=>getComputedStyle(node).backgroundColor)).toBe(colors.at(-1));
     await page.screenshot({path:join(artifacts,'mention-highlights.png')});
     app.runtime.state.customization={...first.customization,overrideWorkspace:false};app.runtime.state.appearance={palette:'paper',motion:'reduced'};app.runtime.changed();
     await page.locator('#prompt').fill('');

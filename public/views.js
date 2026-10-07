@@ -70,7 +70,7 @@ export function insertMessages(state, conversationId) {
     const sourceJob=state.jobs.find(j=>j.id===message.jobId),step=sourceJob?.workflowStep;
     const response=message.role==='assistant' && step?.responsePrompt && conversation.messages.findLast(m=>m.jobId===message.jobId && m.role==='assistant')===message ? {jobId:sourceJob.id,messageId:message.id,items:step.responseItems,label:step.responseLabel,title:step.name,sent:!!message.responseJobId,selected:message.responseSelected,notes:message.responseNotes,disabled:sourceJob.status!=='completed' || state.workflowRuns?.find(run=>run.id===sourceJob.workflowRunId)?.status!=='completed' || state.jobs.some(j=>j.conversationId===conversationId && activeStatuses.includes(j.status))} : null;
     const bubble = article.querySelector('.message-bubble'), content = richText(message.text, {cards:message.role === 'assistant',response});
-    colorMentions(content,members,state.skills);
+    colorMentions(content,members,[...(state.skills || []),...(state.workflows || [])]);
     bubble.append(content);
     if (files.length) {
       bubble.insertAdjacentHTML('beforeend',renderAttachments(state,files));

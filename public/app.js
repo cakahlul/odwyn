@@ -121,7 +121,7 @@ function renderMentions() {
   const room = currentRoom(), prompt = $('#prompt');
   const highlights = $('#prompt-highlights');
   highlights.textContent = prompt.value;
-  colorMentions(highlights,workspace?.agents.filter(a=>!room || room.memberIds.includes(a.id)),workspace?.skills,true);
+  colorMentions(highlights,workspace?.agents.filter(a=>!room || room.memberIds.includes(a.id)),[...(workspace?.skills || []),...(workspace?.workflows || [])],true);
   if (prompt.value.endsWith('\n')) highlights.append('\n');
   highlights.scrollTop = prompt.scrollTop;
   highlights.scrollLeft = prompt.scrollLeft;
@@ -335,7 +335,7 @@ function render() {
   $('#routine-note').textContent = nextRoutine?.prompt || '';
   $('#routine-note-detail').textContent = nextRoutine ? `Next: ${date(nextRoutine.nextAt)}` : '';
   $('#composer-area').hidden = view !== 'chat';
-  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills], data: view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : view === 'workflows' ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
+  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : view === 'workflows' ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
