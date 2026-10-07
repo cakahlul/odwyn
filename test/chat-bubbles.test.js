@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { createApp } from '../server.js';
-import { defaults } from '../public/profile.js';
+import { defaults, palettes } from '../public/profile.js';
 
 test('private and group bubbles identify senders, color safe mentions, and fit mobile rich content',async()=>{
   const directory=mkdtempSync(join(tmpdir(),'odwyn-chat-bubbles-'));let app;
@@ -15,6 +15,7 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
   const first=app.runtime.state.agents[0],at=new Date().toISOString();
   app.runtime.state.customization={...defaults,name:'Oddy',bodyColor:'#73ad63'};
   app.runtime.state.globalProvider.configured=true;first.provider.configured=true;
+  app.runtime.state.skills=[{id:'review',name:'Review code',command:'review-code',description:'',instructions:'Review the code.'}];
   app.runtime.state.agents.push({id:'rei',customization:{...defaults,name:'Rei',bodyColor:'#668ad6'},provider:{...first.provider,configured:false}},{id:'kai',customization:{...defaults,name:'Kai Chen',bodyColor:'#a778c6'},provider:{...first.provider,configured:false}});
   const message=(id,role,text,agentId=first.id)=>({id,role,text,agentId,at});
   app.runtime.state.conversations=[
@@ -29,6 +30,26 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
     const user=await page.locator('.message-user .message-bubble').first().boundingBox(),agent=await page.locator('.message-assistant .message-bubble').first().boundingBox();expect(user.x).toBeGreaterThan(agent.x);
     expect(await page.locator('.private-messages .message-meta').first().isVisible()).toBe(false);
     expect(await page.locator('.message-assistant').first().evaluate(node=>node.style.getPropertyValue('--agent-color'))).toBe('#73ad63');
+    const draft='/review-code @Rei @"Kai Chen" <script> /unknown /review-code-extra /review-code/file email@Rei';
+    await page.locator('#prompt').fill(draft);
+    expect(await page.locator('#prompt-highlights').textContent()).toBe(draft);
+    expect(await page.locator('#prompt-highlights .skill-mention').allTextContents()).toEqual(['/review-code']);
+    expect(await page.locator('#prompt-highlights .agent-mention').evaluateAll(nodes=>nodes.map(node=>[node.textContent,node.style.getPropertyValue('--agent-color')]))).toEqual([['@Rei','#668ad6'],['@"Kai Chen"','#a778c6']]);
+    expect(await page.locator('#prompt-highlights script').count()).toBe(0);
+    const colors=[];
+    for(const palette of ['fern','harbor','graphite']){
+      app.runtime.state.appearance={palette,motion:'reduced'};app.runtime.changed();
+      await page.waitForFunction(accent=>document.documentElement.style.getPropertyValue('--workspace-accent')===accent,palettes[palette].vars.orange);
+      colors.push(await page.locator('#prompt-highlights .skill-mention').evaluate(node=>getComputedStyle(node).backgroundColor));
+    }
+    expect(new Set(colors).size).toBe(3);
+    // Workspace skill colors stay global even when the active agent overrides its palette.
+    app.runtime.state.customization={...first.customization,overrideWorkspace:true,palette:'rose'};app.runtime.changed();
+    await page.waitForFunction(paper=>document.documentElement.style.getPropertyValue('--paper')===paper,palettes.rose.vars.paper);
+    expect(await page.locator('#prompt-highlights .skill-mention').evaluate(node=>getComputedStyle(node).backgroundColor)).toBe(colors.at(-1));
+    await page.screenshot({path:join(artifacts,'mention-highlights.png')});
+    app.runtime.state.customization={...first.customization,overrideWorkspace:false};app.runtime.state.appearance={palette:'paper',motion:'reduced'};app.runtime.changed();
+    await page.locator('#prompt').fill('');
     await page.screenshot({path:join(artifacts,'private-chat-bubbles.png')});
     await page.locator('#room-list [data-conversation="room"]').click();await page.locator('#messages.room-messages').waitFor();
     expect(await page.locator('.message-assistant .message-meta strong').allTextContents()).toEqual(['Oddy','Rei','Kai Chen']);expect(await page.locator('.room-messages .message-avatar').count()).toBe(3);
@@ -55,9 +76,10 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
     await page.evaluate(async()=>{
       const {insertMessages}=await import('/views.js'),{defaults}=await import('/profile.js');
       document.querySelector('#messages').replaceChildren();
-      insertMessages({agents:[{id:'rei',customization:{...defaults,name:'Rei',bodyColor:'#668ad6'}}],jobs:[],conversations:[{id:'safe',kind:'room',memberIds:['rei'],messages:[{id:'safe-message',role:'assistant',agentId:'rei',at:new Date().toISOString(),text:'@rei @Unknown email@Rei `@Rei` [@Rei](https://example.com)\n\n```txt\n@Rei\n```\n\n<script>alert(1)</script>\n\n| Column | Detail |\n| --- | --- |\n| Wide table | '+ 'A'.repeat(250)+' |'}]}]},'safe');
+      insertMessages({agents:[{id:'rei',customization:{...defaults,name:'Rei',bodyColor:'#668ad6'}}],skills:[{command:'review-code'}],jobs:[],conversations:[{id:'safe',kind:'room',memberIds:['rei'],messages:[{id:'safe-message',role:'assistant',agentId:'rei',at:new Date().toISOString(),text:'@rei @Unknown email@Rei `@Rei` [@Rei](https://example.com) /review-code $review-code /unknown `/review-code`\n\n```txt\n@Rei /review-code\n```\n\n<script>alert(1)</script>\n\n| Column | Detail |\n| --- | --- |\n| Wide table | '+ 'A'.repeat(250)+' |'}]}]},'safe');
     });
     expect(await page.locator('#messages .agent-mention').allTextContents()).toEqual(['@rei']);expect(await page.locator('#messages script').count()).toBe(0);expect(await page.locator('#messages a').getAttribute('href')).toBe('https://example.com');
+    expect(await page.locator('#messages .skill-mention').allTextContents()).toEqual(['/review-code','$review-code']);
     for(const width of [320,768,1024,1440]){
       await page.setViewportSize({width,height:900});
       expect(await page.locator('#view').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
@@ -93,6 +115,13 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
         expect(last.y+last.height).toBeLessThan(composer.y-12);
         expect(composer.y+composer.height).toBeLessThanOrEqual(900);
       }
+      await page.locator('#prompt').fill(Array(30).fill('/review-code @Rei a draft that wraps across several lines').join('\n')+'\n');
+      await page.locator('#prompt').evaluate(node=>{node.scrollTop=node.scrollHeight;node.dispatchEvent(new Event('scroll'));});
+      expect(await page.locator('#prompt').evaluate(node=>{
+        const mirror=document.querySelector('#prompt-highlights'),a=getComputedStyle(node),b=getComputedStyle(mirror);
+        return mirror.scrollTop===node.scrollTop && mirror.clientWidth===node.clientWidth && a.font===b.font;
+      })).toBe(true);
+      await page.screenshot({path:join(artifacts,`mention-composer-${width}.png`),animations:'disabled'});
       await page.locator('#prompt').fill('');
       await page.locator('#prompt').blur();
       await page.locator('#view').evaluate(node=>node.scrollTo({top:Math.max(0,node.scrollHeight-node.clientHeight-180),behavior:'instant'}));

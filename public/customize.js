@@ -12,6 +12,7 @@ export function applyProfile(profile, appearance = {}, owner = {}) {
   const p = resolveProfile(profile,appearance,owner), signature = JSON.stringify([p,appearance,owner]);
   if (signature === lastApplied) return;
   lastApplied = signature; setAppearance(document.documentElement,{...appearance,palette:p.palette,customColors:profile?.overrideWorkspace ? {} : appearance.customColors});
+  document.documentElement.style.setProperty('--workspace-accent',appearanceVars(appearance).orange);
   document.documentElement.dataset.motion = p.motion;
   $('#agent-name').textContent = p.name;
   $('#reply-agent').title = p.name;

@@ -33,6 +33,12 @@ export function validateWorkflow(input,state) {
       result.position={x:step.position.x,y:step.position.y};
     }
     if (['agent','approval','output'].includes(step.type) && !result.prompt) throw new Error('Add step instructions.');
+    if (['agent','output'].includes(step.type) && step.responsePrompt?.trim()) {
+      result.responsePrompt=textInput(step.responsePrompt,8000);
+      result.responseLabel=optionalText(step.responseLabel,80) || 'Send selected items';
+      result.responseItems=key(step.responseItems || 'items');
+      if(step.type==='agent') result.format='json';
+    }
     if(step.type==='approval') result.options=structuredClone(step.options || []);
     if (step.type==='browser' || step.type==='terminal') {
       if (!step.action || Array.isArray(step.action) || typeof step.action!=='object') throw new Error('Add action parameters.');

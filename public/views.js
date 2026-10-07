@@ -54,7 +54,7 @@ export function insertMessages(state, conversationId) {
   container.classList.toggle('room-messages',conversation?.kind === 'room');
   container.classList.toggle('private-messages',conversation?.kind !== 'room');
   const authors = new Set();
-  const members = conversation?.kind === 'room' ? state.agents.filter(agent=>conversation.memberIds.includes(agent.id)) : [];
+  const members = conversation?.kind === 'room' ? state.agents.filter(agent=>conversation.memberIds.includes(agent.id)) : state.agents;
   for (const message of conversation?.messages || []) {
     const files = message.role === 'assistant' && !message.roomReport && conversation.messages.findLast(m=>m.role==='assistant' && !m.roomReport && m.jobId===message.jobId) === message ? state.jobs.find(j=>j.id===message.jobId)?.files || [] : [];
     if (!message.text?.trim() && !files.some(id=>state.files?.some(file=>file.id===id))) continue;
@@ -67,8 +67,10 @@ export function insertMessages(state, conversationId) {
     const name = message.role === 'assistant' ? profile.name : ownerName || 'You';
     article.setAttribute('aria-label',`Message from ${name}`);
     article.innerHTML = `${message.role === 'assistant' ? avatarSvg(profile,'message-avatar') : `<span class="message-owner" aria-hidden="true">${esc(Array.from(ownerName || 'You')[0].toUpperCase())}</span>`}<div class="message-bubble"><div class="message-meta"><strong>${esc(name)}</strong></div></div>`;
-    const bubble = article.querySelector('.message-bubble'), content = richText(message.text, {cards:message.role === 'assistant'});
-    if (members.length) colorMentions(content,members);
+    const sourceJob=state.jobs.find(j=>j.id===message.jobId),step=sourceJob?.workflowStep;
+    const response=message.role==='assistant' && step?.responsePrompt && conversation.messages.findLast(m=>m.jobId===message.jobId && m.role==='assistant')===message ? {jobId:sourceJob.id,messageId:message.id,items:step.responseItems,label:step.responseLabel,title:step.name,sent:!!message.responseJobId,selected:message.responseSelected,notes:message.responseNotes,disabled:sourceJob.status!=='completed' || state.workflowRuns?.find(run=>run.id===sourceJob.workflowRunId)?.status!=='completed' || state.jobs.some(j=>j.conversationId===conversationId && activeStatuses.includes(j.status))} : null;
+    const bubble = article.querySelector('.message-bubble'), content = richText(message.text, {cards:message.role === 'assistant',response});
+    colorMentions(content,members,state.skills);
     bubble.append(content);
     if (files.length) {
       bubble.insertAdjacentHTML('beforeend',renderAttachments(state,files));
@@ -80,20 +82,25 @@ export function insertMessages(state, conversationId) {
   container.classList.toggle('multiple-senders',authors.size > 1);
 }
 
-function colorMentions(content, members) {
+export function colorMentions(content, members = [], skills = [], literal = false) {
   const names = new Map();
+  const commands = new Set(skills.map(skill=>skill.command));
   for (const agent of members) { const name = (agent.customization?.name || defaults.name).toLowerCase(); names.set(name,names.has(name) ? null : agent); }
   const walker = document.createTreeWalker(content,NodeFilter.SHOW_TEXT), nodes = [];
   while (walker.nextNode()) if (!walker.currentNode.parentElement.closest('a,code,pre,button')) nodes.push(walker.currentNode);
   for (const node of nodes) {
     const fragment = document.createDocumentFragment(); let end = 0;
-    for (const match of node.textContent.matchAll(/(^|\s)@("(?:\\.|[^"\\\n])*"|[\p{L}\p{N}_-]+)/gu)) {
+    for (const match of node.textContent.matchAll(/(^|\s)(?:@("(?:\\.|[^"\\\n])*"|[\p{L}\p{N}_-]+)|([/$])([a-z][a-z0-9_-]*)(?![\p{L}\p{N}_/-]))/gu)) {
       let name = match[2];
-      if (name.startsWith('"')) { try { name = JSON.parse(name); } catch { continue; } }
-      const agent = names.get(name.toLowerCase()); if (!agent) continue;
+      const skill = !name && commands.has(match[4]);
+      if (!name && !skill) continue;
+      if (name?.startsWith('"')) { try { name = JSON.parse(name); } catch { continue; } }
+      const agent = names.get(name?.toLowerCase()); if (!skill && !agent) continue;
       const start = match.index + match[1].length;
       fragment.append(node.textContent.slice(end,start));
-      const mention = document.createElement('span'); mention.className = 'agent-mention'; mention.textContent = `@${name}`; mention.style.setProperty('--agent-color',agentColor(agent.customization));
+      const mention = document.createElement('span'); mention.className = skill ? 'skill-mention' : 'agent-mention';
+      mention.textContent = literal || skill ? match[0].slice(match[1].length) : `@${name}`;
+      if (agent) mention.style.setProperty('--agent-color',agentColor(agent.customization));
       fragment.append(mention); end = match.index + match[0].length;
     }
     if (end) { fragment.append(node.textContent.slice(end)); node.replaceWith(fragment); }

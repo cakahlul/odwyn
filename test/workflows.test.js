@@ -33,6 +33,37 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../store.js';
 import { Runtime } from '../runtime.js';
+
+test('configured result selections send a durable follow-up to the producing agent',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'odwyn-response-')),store=openStore(dir),runtime=new Runtime({store,codex:new Provider(),browser:{},workspace:dir});
+  try {
+    await runtime.refreshAccount();
+    const data={type:'pr_review',prUrl:'https://example.com/pr/1',summary:'Review findings',feedback:[{id:'F1',comment:'First'},{id:'F2',comment:'Second'}]};
+    const workflow=validateWorkflow({name:'Review',command:'review',steps:[{id:'result',type:'agent',prompt:'Review the PR.',responseItems:'feedback',responseLabel:'Post selected feedback',responsePrompt:'Post only the selected feedback to the PR.'}]},store.state);
+    expect(workflow.steps[0].responseLabel).toBe('Post selected feedback');
+    expect(workflow.steps[0].format).toBe('json');
+    store.state.workflows.push(workflow);const source=runtime.submit({prompt:'/review'});await runtime.starting;await runtime.drain();
+    runtime.codex.emit('notification',{method:'item/completed',params:{threadId:source.threadId,item:{type:'agentMessage',id:'review-result',text:JSON.stringify(data)}}});
+    runtime.finish(source,'completed');await runtime.drain();
+    const message=runtime.conversation(source).messages.find(m=>m.jobId===source.id && m.role==='assistant');
+    expect(()=>runtime.respondToResult(source.id,{messageId:message.id,selected:['3']})).toThrow();
+    expect(()=>runtime.respondToResult(source.id,{messageId:message.id,selected:['1','1']})).toThrow();
+    expect(()=>runtime.respondToResult(source.id,{messageId:message.id,selected:[]})).toThrow();
+    const followup=runtime.respondToResult(source.id,{messageId:message.id,selected:['1']});
+    expect(followup.agentId).toBe(source.agentId);expect(followup.conversationId).toBe(source.conversationId);
+    expect(followup.prompt).toContain('Post only the selected feedback');
+    expect(followup.prompt).toContain('Selected items: [{"id":"F2","comment":"Second"}]');
+    expect(followup.prompt).toContain(data.prUrl);expect(followup.workflowRunId).toBeUndefined();
+    expect(message.responseJobId).toBe(followup.id);
+    expect(()=>runtime.respondToResult(source.id,{messageId:message.id,selected:['1']})).toThrow();
+    const reloaded=openStore(dir);
+    try {
+      const saved=reloaded.state.conversations.find(c=>c.id===source.conversationId).messages.find(m=>m.id===message.id);
+      expect(saved.responseJobId).toBe(followup.id);expect(saved.responseSelected).toEqual(['1']);
+      expect(reloaded.state.jobs.find(job=>job.id===source.id).workflowStep.responsePrompt).toBe(workflow.steps[0].responsePrompt);
+    } finally {reloaded.close();}
+  } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
 class Provider extends EventEmitter {
   child={}; calls=[];
   async request(method,params) {this.calls.push({method,params});return method==='account/read' ? {account:{type:'chatgpt'}}:method.startsWith('thread/') ? {thread:{id:'thread'}}:{turn:{id:'turn'}};}

@@ -33,6 +33,20 @@ test('assistant cards cover shopping outcomes, preserve fallback content, and fi
   ] };
   try {
     await page.goto(server.url.href); await page.locator('.welcome').waitFor();
+    const review={type:'pr_review',prUrl:'https://example.com/pull/12',commit:'abc123',summary:'Two findings need review.',feedback:[{id:'F1',severity:'major',location:'PR description',comment:'Include QA evidence.',sourceUrl:'https://example.com/evidence'},{id:'F2',severity:'minor',comment:'Clarify the title.'}]};
+    for(const reply of [JSON.stringify(review,null,2),'```json\n'+JSON.stringify(review)+'\n```',block(review)]){
+      await render(reply);
+      expect(await page.locator('.review-item').count()).toBe(2);
+      expect(await page.locator('.answer-review').textContent()).toContain('Two findings need review.');
+      expect(await page.locator('.review-item').first().textContent()).toContain('Include QA evidence.');
+      expect(await page.locator('.answer-review a').first().getAttribute('href')).toBe(review.prUrl);
+      expect(await page.locator('.answer-review input,.answer-review button').count()).toBe(0);
+    }
+    await render(JSON.stringify({...review,feedback:[{id:'<script>',comment:'<img src=x onerror=alert(1)>',sourceUrl:'javascript:alert(1)',extra:{nested:'preserved'}}]}));
+    expect(await page.locator('.review-item').textContent()).toContain('preserved');
+    expect(await page.locator('.answer-review script,.answer-review img,.answer-review a[href^="javascript:"]').count()).toBe(0);
+    await render(JSON.stringify({type:'pr_review',feedback:'invalid'}));
+    expect(await page.locator('.answer-review').count()).toBe(0);
     await render('Three options within your budget.\n\n' + block(products) + '\n\n> Check shipping before checkout.');
     expect(await page.locator('.product-card').count()).toBe(3);
     await render(block(products).replace('```odwyn','```sidekick'));

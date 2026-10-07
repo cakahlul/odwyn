@@ -1,6 +1,6 @@
 import { renderWorkflows, setupWorkflows } from './workflows-ui.js';
 import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date } from './ui.js';
-import { renderChat, insertMessages, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
+import { renderChat, insertMessages, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
 import { setupBrowser, updateBrowser } from './browser-ui.js';
 import { setupCustomization, applyProfile, openCustomization, fillWorkspaceAppearance, readWorkspaceAppearance } from './customize.js';
 import { defaults, agentColor, choices, ownerPreferenceKeys, avatarSvg, currencies, effortLevels } from './profile.js';
@@ -119,6 +119,12 @@ function renderRooms() {
 
 function renderMentions() {
   const room = currentRoom(), prompt = $('#prompt');
+  const highlights = $('#prompt-highlights');
+  highlights.textContent = prompt.value;
+  colorMentions(highlights,workspace?.agents.filter(a=>!room || room.memberIds.includes(a.id)),workspace?.skills,true);
+  if (prompt.value.endsWith('\n')) highlights.append('\n');
+  highlights.scrollTop = prompt.scrollTop;
+  highlights.scrollLeft = prompt.scrollLeft;
   const match = prompt.value.slice(0,prompt.selectionStart).match(/(?:^|\s)@([^@\n"]*)$/);
   const members = room && match ? workspace.agents.filter(a=>room.memberIds.includes(a.id) && (a.customization?.name || defaults.name).toLowerCase().startsWith(match[1].toLowerCase())) : [];
   const html = members.map(a=>`<button type="button" class="text-button agent-mention" data-mention-agent="${esc(a.id)}">@${esc(a.customization?.name || defaults.name)}</button>`).join('');
@@ -329,7 +335,7 @@ function render() {
   $('#routine-note').textContent = nextRoutine?.prompt || '';
   $('#routine-note-detail').textContent = nextRoutine ? `Next: ${date(nextRoutine.nextAt)}` : '';
   $('#composer-area').hidden = view !== 'chat';
-  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, data: view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : view === 'workflows' ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
+  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills], data: view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : view === 'workflows' ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
@@ -567,6 +573,8 @@ $('#prompt').onkeydown = event => {
 };
 $('#prompt').oninput = () => { $('#prompt').style.height = 'auto'; $('#prompt').style.height = Math.min($('#prompt').scrollHeight,260) + 'px'; renderMentions(); };
 $('#prompt').onclick = renderMentions;
+new ResizeObserver(() => { $('#prompt-highlights').style.width = $('#prompt').clientWidth + 'px'; }).observe($('#prompt'));
+$('#prompt').onscroll = () => { $('#prompt-highlights').scrollTop = $('#prompt').scrollTop; $('#prompt-highlights').scrollLeft = $('#prompt').scrollLeft; };
 $('#room-mentions').onclick = event => {
   const button = event.target.closest('[data-mention-agent]'); if (!button) return;
   const prompt = $('#prompt'), end = prompt.selectionStart;
@@ -634,6 +642,7 @@ document.addEventListener('submit', event => {
   const form = event.target.closest('[data-answer-job]'); if (!form) return;
   event.preventDefault(); void perform(() => api(`/api/jobs/${form.dataset.answerJob}/answer`,{ requestId:form.dataset.request, answer:new FormData(form).get('answer'), selected:new FormData(form).getAll('selected') }));
 });
+document.addEventListener('result-response-sent',() => { signature='';void refresh(); });
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && $('.agent-menu[open]')) { const menu = $('.agent-menu[open]'); menu.open = false; menu.querySelector('summary').focus(); event.preventDefault(); return; }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('#search-open').click(); }

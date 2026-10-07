@@ -64,8 +64,29 @@ function productCard(name, price, details = '', footer = '', { label = '', media
 const scalar = value => typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value));
 const optionalText = (data, keys) => keys.every(key => data[key] == null || typeof data[key] === 'string');
 
+export function reviewItem(value, index, selectId, checked = false) {
+  const item = value && typeof value === 'object' && !Array.isArray(value) ? value : typeof value==='string' ? {title:value} : {detail:value};
+  const titleKey = ['title','label','name','id'].find(key=>typeof item[key]==='string' && item[key].trim());
+  const title = item[titleKey] || `Item ${index+1}`;
+  const fields = Object.entries(item).filter(([key,value])=>![titleKey,'selected','severity'].includes(key) && value!=null);
+  const details = fields.map(([key,value])=>{
+    const text = typeof value==='object' ? JSON.stringify(value,null,2) : String(value);
+    const label = key.replace(/([a-z])([A-Z])/g,'$1 $2').replaceAll('_',' ');
+    const content = /url$/i.test(key) ? answerLink(text,esc(text),'',['http:','https:']) : esc(text);
+    return `<div><dt>${esc(label)}</dt><dd>${content}</dd></div>`;
+  }).join('');
+  const heading = selectId===undefined ? `<strong>${esc(title)}</strong>` : `<label class="review-item-choice"><input type="checkbox" name="selected" value="${esc(selectId)}" ${checked ? 'checked' : ''}><strong>${esc(title)}</strong></label>`;
+  return `<article class="review-item"><header>${heading}${typeof item.severity==='string' ? `<span class="review-severity">${esc(item.severity)}</span>` : ''}</header>${details ? `<dl class="review-item-details">${details}</dl>` : ''}</article>`;
+}
+
 function answerBlock(data) {
   if (!data || typeof data !== 'object' || !optionalText(data, ['title','detail','category','image','imageAlt','url','receiptUrl'])) return false;
+  if (['review','pr_review'].includes(data.type)) {
+    const items = data.items ?? data.feedback;
+    if (!Array.isArray(items) || items.length>100 || !optionalText(data,['summary','prUrl','commit'])) return false;
+    const source = data.prUrl || data.url;
+    return `<section class="answer-review"><header class="review-heading"><span class="card-category">${icon('shield')}Review</span><h3>${esc(data.title || 'Review results')}</h3>${data.summary ? `<p>${esc(data.summary)}</p>` : ''}<div class="review-context">${source ? answerLink(source,'View source ↗','',['http:','https:']) : ''}${data.commit ? `<code>${esc(data.commit)}</code>` : ''}<span>${items.length} ${items.length===1 ? 'item' : 'items'}</span></div></header><div class="review-items">${items.map((item,index)=>reviewItem(item,index)).join('') || '<p>No items to review.</p>'}</div></section>`;
+  }
   if (data.type === 'products') {
     if (!Array.isArray(data.items) || !data.items.every(item => item && typeof item.name === 'string' && item.name.trim() && (item.price == null || scalar(item.price)) && optionalText(item, ['seller','availability','detail','url','label','category','image','imageAlt']))) return false;
     if (!data.items.length) return `<section class="answer-empty"><strong>${esc(data.title || 'No products to show')}</strong>${data.detail ? `<p>${esc(data.detail)}</p>` : ''}</section>`;
@@ -106,7 +127,7 @@ markdown.use({ renderer: {
   image({ href, text, title }) { return cardImage(href,text,'info') || answerLink(href,esc(text || 'View image'),title); },
   code(token) {
     // Saved replies from before the rename keep their cards.
-    if (!['odwyn','sidekick'].includes(token.lang?.trim())) return false;
+    if (!['odwyn','sidekick','json'].includes(token.lang?.trim())) return false;
     try { return answerBlock(JSON.parse(token.text)); } catch { return false; }
   },
   table(token) {
@@ -124,9 +145,38 @@ markdown.use({ renderer: {
   },
 } });
 
-export function richText(text, { cards = true } = {}) {
+export function richText(text, { cards = true, response = null } = {}) {
   const container = document.createElement('div'); container.className = 'message-text';
-  container.innerHTML = (cards ? markdown : plainMarkdown).parse(String(text || ''));
+  let structured = false;
+  if (cards) {
+    try {
+      const data=JSON.parse(String(text).trim().replace(/^```(?:json|odwyn)?\s*|\s*```$/g,''));
+      if (response && data && Object.hasOwn(data,response.items)) {
+        const items=data[response.items];
+        if(Array.isArray(items) && items.length<=100) {
+          structured=answerBlock({type:'review',title:data.title || response.title,summary:data.summary,prUrl:data.prUrl,url:data.url,commit:data.commit,items});
+          if(structured) {
+            const form=`<form class="result-response" data-result-job="${esc(response.jobId)}" data-result-message="${esc(response.messageId)}"><fieldset ${response.disabled || response.sent ? 'disabled' : ''}><legend>Select items to send</legend><div class="review-items">${items.map((item,index)=>reviewItem(item,index,String(index),response.selected?.includes(String(index)))).join('')}</div><label class="result-response-notes">Instructions or edits (optional)<textarea name="answer" rows="2" maxlength="8000" placeholder="Add context for the agent…">${esc(response.notes || '')}</textarea></label><div class="result-response-footer"><small>${response.sent ? 'Selection sent to the agent.' : response.disabled ? 'Available after the current work finishes.' : 'Sends your selection to the agent as a new message.'}</small><button type="submit" class="primary-button" ${!items.length ? 'disabled' : ''}>${esc(response.sent ? 'Sent to agent' : response.label)}${icon('arrow-up')}</button></div></fieldset><p class="result-response-status" role="status"></p></form>`;
+            const template=document.createElement('template');template.innerHTML=structured;
+            template.content.querySelector('.review-items').outerHTML=form;structured=template.innerHTML;
+          }
+        }
+      }
+      structured ||= answerBlock(data);
+    } catch {}
+  }
+  container.innerHTML = structured || (cards ? markdown : plainMarkdown).parse(String(text || ''));
+  container.querySelectorAll('.result-response').forEach(form=>form.addEventListener('submit',async event=>{
+    event.preventDefault();const fields=new FormData(form),selected=fields.getAll('selected'),status=form.querySelector('[role=status]'),fieldset=form.querySelector('fieldset');
+    if(!selected.length){status.textContent='Select at least one item.';return;}
+    fieldset.disabled=true;status.textContent='Sending selection…';
+    try {
+      const job=await api(`/api/jobs/${form.dataset.resultJob}/respond`,{messageId:form.dataset.resultMessage,selected,answer:fields.get('answer')});
+      status.textContent='Selection sent to the agent.';form.querySelector('button').textContent='Sent to agent';
+      form.dispatchEvent(new CustomEvent('result-response-sent',{bubbles:true,detail:job}));
+    } catch(error){fieldset.disabled=false;status.textContent=error.message || 'Could not send selection.';}
+  }));
+  container.querySelectorAll('.result-response').forEach(form=>form.addEventListener('input',()=>{form.querySelector('[role=status]').textContent='';}));
   container.querySelectorAll('.card-media img').forEach(img => img.addEventListener('error', () => img.remove(), {once:true}));
   container.querySelectorAll('[data-save-receipt]').forEach(button => button.addEventListener('click', async () => {
     button.disabled = true; button.setAttribute('aria-busy','true');

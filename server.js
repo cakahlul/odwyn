@@ -180,9 +180,10 @@ export function createApp(options = {}) {
           const room = store.state.conversations.find(c=>c.id===input.conversationId && c.kind==='room');
           return response(room ? (await runtime.messageRoom(room.id,input))[0] : runtime.submit(input),201);
         }
-        const jobAction = pathname.match(/^\/api\/jobs\/([a-f0-9-]{36})\/(answer|cancel|retry|permissions)$/);
+        const jobAction = pathname.match(/^\/api\/jobs\/([a-f0-9-]{36})\/(answer|respond|cancel|retry|permissions)$/);
         if (jobAction && req.method === 'POST') {
           const [, id, action] = jobAction;
+          if (action === 'respond') return response(runtime.respondToResult(id,await json(req)),201);
           if (action === 'permissions') { runtime.setInteractionMode(id,(await json(req)).interactionMode); return response({ ok:true }); }
           if (action === 'answer') { runtime.answer(id, await json(req)); return response({ ok: true }); }
           if (action === 'cancel') { await runtime.cancel(id); return response({ ok: true }); }
