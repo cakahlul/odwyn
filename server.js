@@ -6,7 +6,7 @@ import { openStore, findAgent, deleteAgent, createRoom, updateRoom } from './sto
 import { AIProvider, validateProvider, publicProvider, providerModels } from './providers.js';
 import { Browser } from './browser.js';
 import { Runtime } from './runtime.js';
-import { validateWorkflow, validateSkill } from './workflows.js';
+import { validateWorkflow, validateSkill, importSkill } from './workflows.js';
 import { validateProfile, defaults, ownerPreferenceKeys, currencies, validateAppearance } from './public/profile.js';
 import { fetchImage } from './proxy.js';
 import { imageMime } from './files.js';
@@ -100,10 +100,10 @@ export function createApp(options = {}) {
     return ++entry.count > max;
   }
 
-  async function json(req) {
+  async function json(req, maxLength = 30_000) {
     if (!req.headers.get('content-type')?.startsWith('application/json')) throw new Error('Use JSON for this request.');
     const body = await req.text();
-    if (body.length > 30_000) throw new Error('Request is too large.');
+    if (body.length > maxLength) throw new Error('Request is too large.');
     try { const value = JSON.parse(body); if (!value || Array.isArray(value) || typeof value !== 'object') throw new Error(); return value; }
     catch { throw new Error('Invalid JSON request.'); }
   }
@@ -132,6 +132,8 @@ export function createApp(options = {}) {
           // ponytail: a JSON state row suits one owner; use indexed tables when history gets large.
           return response({ revision: runtime.revision, ...store.state, agents:store.state.agents.map(agent => ({ ...agent, provider:publicProvider(agent.provider), runtime:{ ...runtime.accounts.get(agent.id), login:logins.get(agent.id) || null } })), globalProvider:publicProvider(store.state.globalProvider), globalRuntime:{...runtime.accounts.get(globalConnection().id),login:logins.get(globalConnection().id) || null}, provider: publicProvider(store.state.provider), runtime: { account: runtime.account, connectionError: runtime.connectionError, model: store.state.provider.model, activeJobId: runtime.active?.id || null, takeover: runtime.takeover, browserOpen: !!browser.context, rateLimits: runtime.rateLimits || null, login:logins.get(store.state.agents[0].id) || null } });
         }
+        // JSON escaping expands file contents; importSkill enforces the 30 KB source limit.
+        if (pathname === '/api/skills/import' && req.method === 'POST') return response(importSkill((await json(req,200_000)).source));
         const definitionMatch = pathname.match(/^\/api\/(workflows|skills)(?:\/([a-f0-9-]{36}))?(?:\/(run))?$/);
         if (definitionMatch) {
           const [,collection,id,action]=definitionMatch, items=store.state[collection], existing=items.find(item=>item.id===id);

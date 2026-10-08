@@ -1,10 +1,21 @@
 import { test, expect } from 'bun:test';
-import { validateWorkflow, validateSkill, interpolate, workflowInvocation } from '../workflows.js';
+import { validateWorkflow, validateSkill, importSkill, interpolate, workflowInvocation } from '../workflows.js';
 
 const state = {agents:[{id:'a'}],skills:[],workflows:[]};
 const definition = {name:'Research',command:'research',inputs:[{name:'topic',required:true}],steps:[{id:'read',type:'agent',prompt:'Research {{inputs.topic}}',next:'report'},{id:'report',type:'output',prompt:'{{steps.read}}'}]};
+test('SKILL.md import reads YAML scalars, preserves Markdown, and rejects invalid or oversized input', () => {
+  const body = '# Review\n\n```js\nconst value = 1;\n```\n\n---\nKeep this separator.';
+  const imported = importSkill(`---\nname: "Review Code"\ndescription: >-\n  Check bugs and\n  cite locations.\nmetadata:\n  version: 1\n---\n${body}`);
+  expect(imported.name).toBe('Review Code');
+  expect(imported.command).toBe('review-code');
+  expect(imported.description).toBe('Check bugs and cite locations.');
+  expect(imported.instructions).toBe(body);
+  expect(importSkill('\uFEFF---\r\nname: review\r\ncommand: custom-review\r\n---\r\nReview carefully.').command).toBe('custom-review');
+  for (const source of ['# No frontmatter','---\nname: [\n---\nBody','---\ndescription: Missing name\n---\nBody','---\nname: review\n---\n','---\nname: review\n---\n'+'x'.repeat(30001)]) expect(()=>importSkill(source)).toThrow();
+});
 test('workflow definitions validate connections, skills and agents without executable expressions', () => {
   const workflow = validateWorkflow(definition,state);
+  expect(validateWorkflow({...definition,steps:[{id:'mcp',type:'agent',prompt:'Use MCP',tools:['mcp']}]},state).steps[0].tools).toEqual(['mcp']);
   expect(workflow.start).toBe('read');
   expect(() => validateWorkflow({...definition,steps:[{id:'read',type:'agent',prompt:'Read',next:'missing'}]},state)).toThrow();
   expect(() => validateWorkflow({...definition,steps:[{id:'read',type:'agent',prompt:'Read',agentId:'missing'}]},state)).toThrow();
@@ -91,6 +102,7 @@ test('workflow runs hand off agents, retain outputs, pause for approval and resu
     expect(run.status).toBe('completed');expect(run.outputs.approval.answer).toBe('Post only Hello');
     expect(run.outputs.end).toBe('Hello');
     expect(provider.calls.find(c=>c.method==='thread/start').params.dynamicTools.map(t=>t.name)).toEqual(['odwyn_ask']);
+    expect(provider.calls.find(c=>c.method==='thread/start').params.mcpEnabled).toBe(false);
     const bad=validateWorkflow({name:'Bad',command:'bad',steps:[{id:'first',type:'output',prompt:'Saved'},{id:'second',type:'output',prompt:'{{steps.missing}}'}]},store.state);
     store.state.workflows.push(bad);runtime.submit({prompt:'/bad'});await runtime.drain();await new Promise(resolve=>setTimeout(resolve,0));await runtime.drain();
     const failed=store.state.jobs.find(j=>j.workflowStepId==='second' && j.status==='failed');
@@ -106,6 +118,12 @@ test('workflow and skill APIs validate, persist and launch versioned runs', asyn
   const headers={authorization:'Basic '+Buffer.from('owner:test-password-long-enough').toString('base64'),origin:'https://assistant.test','content-type':'application/json'};
   const request=(path,method='GET',body)=>app.fetch(new Request('https://assistant.test'+path,{method,headers,...(body ? {body:JSON.stringify(body)}:{})}));
   try {
+    const imported=await request('/api/skills/import','POST',{source:'---\nname: imported-review\ndescription: Review code\n---\nRead the diff.'});
+    expect(imported.status).toBe(200);
+    expect((await imported.json()).instructions).toBe('Read the diff.');
+    expect((await request('/api/skills/import','POST',{source:'---\nname: quoted\n---\n'+'"'.repeat(19000)})).status).toBe(200);
+    expect(app.runtime.state.skills).toHaveLength(0);
+    expect((await request('/api/skills/import','POST',{source:'broken'})).status).toBe(400);
     const skill=await (await request('/api/skills','POST',{name:'Sources',command:'sources',instructions:'Cite sources.'})).json();expect(skill.id).toBeTruthy();
     const res=await request('/api/workflows','POST',{...definition,steps:[{id:'read',type:'agent',prompt:'Read {{inputs.topic}}',skills:[skill.id]}]});expect(res.status).toBe(201);
     const workflow=await res.json();

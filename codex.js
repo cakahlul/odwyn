@@ -2,12 +2,14 @@ import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { agentModeInstructions } from './public/profile.js';
 
 export class Codex extends EventEmitter {
-  constructor({ home, workspace, command = 'codex', model = (process.env.ODWYN_MODEL ?? process.env.SIDEKICK_MODEL) || 'gpt-6.1-sol', effort = 'default' }) {
+  constructor({ home, workspace, command = 'codex', model = (process.env.ODWYN_MODEL ?? process.env.SIDEKICK_MODEL) || 'gpt-6.1-sol', effort = 'default', mcpHome = process.env.CODEX_HOME || join(homedir(), '.codex') }) {
     super(); this.home = home; this.workspace = workspace; this.command = command; this.model = model; this.effort = effort;
     this.child = null; this.ready = null; this.pending = new Map(); this.nextId = 1;
+    this.mcpHome = mcpHome;
   }
 
   start() {
@@ -16,8 +18,6 @@ export class Codex extends EventEmitter {
     const args = ['app-server', '--listen', 'stdio://', '-c', `model=${JSON.stringify(this.model)}`, '-c', 'project_doc_max_bytes=0', '-c', 'web_search="disabled"', '-c', `developer_instructions=${JSON.stringify(agentModeInstructions)}`];
     if (this.effort && this.effort !== 'default') args.push('-c',`model_reasoning_effort=${JSON.stringify(this.effort)}`);
     for (const feature of ['shell_tool','unified_exec','apps','plugins','multi_agent','code_mode','view_image','skill_search','skill_mcp_dependency_install','shell_snapshot','sleep_tool','send_message_to_user_async','default_mode_request_user_input']) args.push('-c', `features.${feature}=false`);
-    // Also suppress MCP servers when an explicitly supplied home has existing integrations.
-    try { for (const name of Object.keys(Bun.TOML.parse(readFileSync(join(this.home, 'config.toml'), 'utf8')).mcp_servers || {})) args.push('-c', `mcp_servers.${name}.enabled=false`); } catch {}
     const child = spawn(this.command, args, { cwd: this.workspace, env: { ...process.env, CODEX_HOME: this.home }, stdio: ['pipe','pipe','pipe'] });
     this.child = child;
     let buffer = '';
@@ -50,7 +50,18 @@ export class Codex extends EventEmitter {
     });
   }
 
-  async request(method, params = {}) { await this.start(); return this.call(method, params); }
+  async request(method, { mcpEnabled = true, ...params } = {}) {
+    await this.start();
+    if (['thread/start','thread/resume'].includes(method)) {
+      const servers = Object.create(null);
+      for (const home of new Set([this.mcpHome, this.home])) {
+        try { Object.assign(servers, Bun.TOML.parse(readFileSync(join(home, 'config.toml'), 'utf8')).mcp_servers || {}); }
+        catch (error) { if (error.code !== 'ENOENT') throw new Error('Cannot read Codex MCP configuration. Check config.toml.'); }
+      }
+      params.config = { ...params.config, mcp_servers: Object.fromEntries(Object.entries(servers).map(([name, server]) => [name, mcpEnabled ? server : {...server, enabled:false}])) };
+    }
+    return this.call(method, params);
+  }
   write(message) { if (!this.child?.stdin.writable) throw new Error('Codex is disconnected.'); this.child.stdin.write(JSON.stringify(message) + '\n'); }
   respond(id, result) { this.write({ id, result }); }
   reject(id, message) { this.write({ id, error: { code: -32601, message } }); }

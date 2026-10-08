@@ -9,7 +9,7 @@ const blocks={
   output:{label:'Output',symbol:'folder',detail:'Show a result in the conversation.'},
 };
 const browserActions=['read','navigate','click','fill','type','press','scroll','select','tab','new_tab','close_tab','back','wait','screenshot','save_screenshot','upload','dialog'];
-const toolNames=['browser','terminal','search','ask','send_file','remember','schedule'];
+const toolNames=['browser','terminal','search','ask','send_file','remember','schedule','mcp'];
 const text=value=>typeof value==='string' ? value:JSON.stringify(value,null,2);
 const options=(items,value)=>items.map(([id,label])=>`<option value="${esc(id)}" ${id===value ? 'selected':''}>${esc(label)}</option>`).join('');
 const field=(label,name,value='',kind='input',extra='')=>`<label>${esc(label)}${kind==='textarea' ? `<textarea data-wf-field="${name}" rows="5" ${extra}>${esc(value)}</textarea>`:`<input data-wf-field="${name}" value="${esc(value)}" ${extra}>`}</label>`;

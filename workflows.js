@@ -13,6 +13,18 @@ const optionalText = (value, max=20000) => value == null || value === '' ? '' : 
 export function validateSkill(input) {
   return {id:input.id || randomUUID(),name:textInput(input.name,80),command:key(input.command),description:optionalText(input.description,500),instructions:textInput(input.instructions),updatedAt:new Date().toISOString()};
 }
+export function importSkill(source) {
+  // ponytail: imports SKILL.md instructions only; add folder imports for bundled scripts and resources.
+  if (typeof source !== 'string' || Buffer.byteLength(source,'utf8') > 30000) throw new Error('Choose a SKILL.md file under 30 KB.');
+  const match = source.replace(/^\uFEFF/,'').match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)([\s\S]*)$/);
+  if (!match) throw new Error('SKILL.md needs YAML frontmatter between --- lines and Markdown instructions.');
+  let metadata;
+  try { metadata = Bun.YAML.parse(match[1]); }
+  catch { throw new Error('Skill frontmatter contains invalid YAML.'); }
+  if (!metadata || typeof metadata.name !== 'string' || !metadata.name.trim()) throw new Error('Skill frontmatter needs a name.');
+  const command = metadata.command ?? metadata.name.toLowerCase().replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,60);
+  return validateSkill({name:metadata.name,command,description:metadata.description,instructions:match[2]});
+}
 export function validateWorkflow(input,state) {
   const command = key(input.command), id = input.id || randomUUID();
   if (state.workflows?.some(w=>w.command===command && w.id!==id) || state.skills?.some(s=>s.command===command)) throw new Error('Command already exists.');
@@ -23,7 +35,7 @@ export function validateWorkflow(input,state) {
     if (!stepTypes.includes(step.type)) throw new Error('Choose a supported step type.');
     if (step.agentId && !state.agents.some(a=>a.id===step.agentId)) throw new Error('Step agent not found.');
     if (!Array.isArray(step.skills || []) || (step.skills || []).length>30 || new Set(step.skills || []).size!==(step.skills || []).length || (step.skills || []).some(id=>!state.skills?.some(s=>s.id===id))) throw new Error('Step skill not found.');
-    if (!Array.isArray(step.tools || []) || new Set(step.tools || []).size!==(step.tools || []).length || (step.tools || []).some(t=>!['browser','terminal','search','ask','send_file','remember','schedule'].includes(t))) throw new Error('Choose supported tools.');
+    if (!Array.isArray(step.tools || []) || new Set(step.tools || []).size!==(step.tools || []).length || (step.tools || []).some(t=>!['browser','terminal','search','ask','send_file','remember','schedule','mcp'].includes(t))) throw new Error('Choose supported tools.');
     const next = step.next === undefined ? input.steps[index+1]?.id || null : step.next;
     const retries = step.retries ?? 0;
     if (!Number.isInteger(retries) || retries<0 || retries>5) throw new Error('Retries must be between 0 and 5.');

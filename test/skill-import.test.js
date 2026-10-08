@@ -1,0 +1,54 @@
+import { test, expect } from 'bun:test';
+import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { chromium } from 'playwright';
+import { createApp } from '../server.js';
+import { defaults } from '../public/profile.js';
+import { validateSkill } from '../workflows.js';
+
+test('Import skill previews SKILL.md, handles command collisions, saves a new skill and rejects invalid files', async () => {
+  const directory = mkdtempSync(join(tmpdir(),'odwyn-skill-import-'));
+  let app;
+  const server = Bun.serve({hostname:'127.0.0.1',port:0,fetch:req=>app.fetch(req)});
+  const provider = Object.assign(new EventEmitter(),{stop(){},request:async()=>({account:{type:'chatgpt'}})});
+  app = createApp({directory,user:'owner',password:'test-password-long-enough',origin:server.url.origin,codex:provider,browser:{close:async()=>{}}});
+  app.runtime.state.customization = defaults;
+  app.runtime.state.globalProvider.configured = true;
+  app.runtime.state.agents[0].provider.configured = true;
+  const existing = validateSkill({name:'Old review',command:'review-code',instructions:'Original instructions.'});
+  app.runtime.state.skills.push(existing); await app.runtime.refreshAccount(); app.runtime.changed();
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage({httpCredentials:{username:'owner',password:'test-password-long-enough'}});
+    await page.goto(server.url.href); await page.locator('.welcome').waitFor();
+    await page.locator('[data-view=workflows]').click();
+    await page.locator('[data-skill-edit]').click(); await page.locator('[data-skill-close]').click();
+    const chooser = page.waitForEvent('filechooser');
+    await page.getByRole('button',{name:'Import skill',exact:true}).click();
+    const body = '# Review\n\nCheck bugs.\n\n<script>throw new Error("must remain text")</script>';
+    await (await chooser).setFiles({name:'SKILL.md',mimeType:'text/markdown',buffer:Buffer.from(`---\nname: Review Code\ndescription: >-\n  Find bugs and\n  cite evidence.\n---\n${body}`)});
+    await page.locator('#skill-editor[open]').waitFor();
+    expect(await page.locator('#skill-form [name=name]').inputValue()).toBe('Review Code');
+    expect(await page.locator('#skill-form [name=description]').inputValue()).toBe('Find bugs and cite evidence.');
+    expect(await page.locator('#skill-form [name=instructions]').inputValue()).toBe(body);
+    expect(app.runtime.state.skills).toHaveLength(1);
+    await page.getByRole('button',{name:'Save skill',exact:true}).click();
+    await page.locator('#skill-error').filter({hasText:'Command already exists'}).waitFor();
+    expect(app.runtime.state.skills).toHaveLength(1);
+    await page.locator('#skill-form [name=command]').fill('imported-review');
+    await page.getByRole('button',{name:'Save skill',exact:true}).click();
+    await page.locator('#skill-editor').waitFor({state:'hidden'});
+    expect(app.runtime.state.skills).toHaveLength(2);
+    expect(app.runtime.state.skills.find(skill=>skill.id===existing.id).instructions).toBe('Original instructions.');
+    expect(app.runtime.state.skills.find(skill=>skill.command==='imported-review').instructions).toBe(body);
+    await page.reload(); await page.locator('[data-view=workflows]').click();
+    await page.getByRole('heading',{name:'Review Code',exact:true}).waitFor();
+    await page.locator('#skill-import-file').setInputFiles({name:'SKILL.md',mimeType:'text/markdown',buffer:Buffer.from('No frontmatter')});
+    await page.locator('#toast').filter({hasText:'needs YAML frontmatter'}).waitFor();
+    expect(app.runtime.state.skills).toHaveLength(2);
+    await page.locator('#skill-import-file').setInputFiles({name:'SKILL.md',mimeType:'text/markdown',buffer:Buffer.alloc(30001,120)});
+    await page.locator('#toast').filter({hasText:'under 30 KB'}).waitFor();
+  } finally {await browser.close(); server.stop(true); await app.close(); rmSync(directory,{recursive:true,force:true});}
+}, 20_000);

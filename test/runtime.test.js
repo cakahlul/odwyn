@@ -21,6 +21,38 @@ class FakeCodex extends EventEmitter {
   reject() {}
 }
 
+test('MCP questions, validated forms, URL refusals and cancellation use owner input', async () => {
+  const dir = mkdtempSync(join(tmpdir(),'odwyn-mcp-input-')), store = openStore(dir), codex = new FakeCodex();
+  const runtime = new Runtime({store,codex,browser:{},workspace:dir});
+  try {
+    await runtime.refreshAccount();
+    const job = runtime.submit({prompt:'Use configured MCP'}); await runtime.drain();
+    expect(codex.calls.find(call=>call.method==='thread/start').params.mcpEnabled).toBe(true);
+    codex.emit('notification',{method:'item/started',params:{threadId:job.threadId,turnId:job.turnId,item:{type:'mcpToolCall',server:'fixture',tool:'echo'}}});
+    expect(job.events.at(-1).detail).toBe('fixture.echo');
+    const invoke = (method, params) => runtime.handleRequest({id:'mcp-input',method,params:{threadId:job.threadId,turnId:job.turnId,...params}});
+    const question = invoke('tool/requestUserInput',{questions:[{id:'approve',header:'MCP approval',question:'Allow this MCP action?',options:[{label:'Accept',description:'Run this action'},{label:'Decline',description:'Refuse'}]}]});
+    await Bun.sleep(1);
+    expect(job.pending.type).toBe('question');
+    runtime.answer(job.id,{requestId:job.pending.id,selected:['0']}); await question;
+    expect(codex.replies.at(-1).result).toEqual({answers:{approve:{answers:['Accept']}}});
+    const params = {serverName:'fixture',mode:'form',message:'Choose count',requestedSchema:{type:'object',properties:{count:{type:'integer',minimum:1}},required:['count'],additionalProperties:false}};
+    const form = invoke('mcpServer/elicitation/request',params); await Bun.sleep(1);
+    const requestId = job.pending.id;
+    expect(()=>runtime.answer(job.id,{requestId,answer:'{"count":"wrong"}'})).toThrow('schema');
+    expect(job.pending.id).toBe(requestId);
+    runtime.answer(job.id,{requestId,answer:'{"count":2}'}); await form;
+    expect(codex.replies.at(-1).result).toEqual({action:'accept',content:{count:2}});
+    const url = invoke('mcpServer/elicitation/request',{serverName:'fixture',mode:'url',message:'Sign in',url:'https://login.example/'}); await Bun.sleep(1);
+    runtime.answer(job.id,{requestId:job.pending.id,answer:'decline'}); await url;
+    expect(codex.replies.at(-1).result.action).toBe('decline');
+    const cancelled = invoke('mcpServer/elicitation/request',params); await Bun.sleep(1);
+    await runtime.cancel(job.id); await cancelled;
+    expect(codex.replies.at(-1).result.action).toBe('cancel');
+    expect(job.pending).toBeNull();
+  } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('Stop interrupts browser work before waiting for provider acknowledgement', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'odwyn-stop-browser-')), store = openStore(dir), codex = new FakeCodex();
   let interrupted = false, release;
