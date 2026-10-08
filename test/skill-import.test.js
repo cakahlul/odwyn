@@ -22,7 +22,7 @@ test('Import skill previews SKILL.md, handles command collisions, saves a new sk
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage({httpCredentials:{username:'owner',password:'test-password-long-enough'}});
-    await page.goto(server.url.href); await page.locator('.welcome').waitFor();
+    await page.goto(server.url.href+'#chat'); await page.locator('.welcome').waitFor();
     await page.locator('[data-view=workflows]').click();
     await page.locator('[data-skill-edit]').click(); await page.locator('[data-skill-close]').click();
     const chooser = page.waitForEvent('filechooser');

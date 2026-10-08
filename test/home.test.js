@@ -1,0 +1,72 @@
+import {test,expect} from 'bun:test';
+import {EventEmitter} from 'node:events';
+import {mkdtempSync,rmSync,mkdirSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {chromium} from 'playwright';
+import {createApp} from '../server.js';
+import {defaults} from '../public/profile.js';
+
+test('Home prioritizes work across agents, updates live, preserves drafts and respects chat links',async()=>{
+  const directory=mkdtempSync(join(tmpdir(),'odwyn-home-'));let app;
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
+  app=createApp({directory,origin:server.url.origin,user:'owner',password:'test-password-long-enough',codex:Object.assign(new EventEmitter(),{request:async()=>({account:null}),stop(){}}),browser:{close:async()=>{}}});
+  app.runtime.state.customization={...defaults};app.runtime.state.globalProvider.configured=true;app.runtime.state.agents[0].provider.configured=true;
+  const first=app.runtime.state.agents[0].id,second='second-agent',at=new Date().toISOString();
+  app.runtime.state.agents.push({id:second,customization:{...defaults,name:'Rei'},provider:{...app.runtime.state.provider,configured:false}});
+  const conversation=(id,title,agentId=first)=>({id,title,agentId,createdAt:at,messages:[]});
+  const job=(id,conversationId,status,agentId=first)=>({id,conversationId,status,agentId,prompt:'Task',createdAt:at,events:[],files:[]});
+  app.runtime.state.conversations=[conversation('waiting','Review weekend plans',second),conversation('running','Compare desk prices'),conversation('ready','Trip itinerary'),conversation('recent','A previous conversation')];
+  app.runtime.state.conversations[2].messages.push({id:'result',jobId:'ready-job',role:'assistant',text:'The itinerary is ready.',agentId:first,at});
+  app.runtime.state.jobs=[{...job('waiting-job','waiting','waiting',second),pending:{id:'question',type:'question',title:'Which dates work for you?',detail:'Choose travel dates.'}},job('running-job','running','running'),job('ready-job','ready','completed')];
+  app.runtime.changed();
+  const browser=await chromium.launch(),page=await browser.newPage({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:1000}});
+  page.setDefaultTimeout(5000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  const artifacts=join(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});
+  try {
+    await page.goto(server.url.href);await page.locator('.home').waitFor();
+    expect(await page.locator('#page-title').textContent()).toBe('Home');expect(await page.locator('#composer-area').isVisible()).toBe(false);
+    expect(await page.locator('.conversation-controls').isVisible()).toBe(false);
+    expect(await page.locator('.home-section h2').allTextContents()).toEqual(['Needs you','In progress','Recent results','Recent conversations']);
+    expect(await page.locator('.home-section').first().textContent()).toContain('Which dates work for you?');
+    expect(await page.locator('.home [data-conversation="waiting"]').count()).toBe(1);
+    await page.locator('.home [data-conversation="waiting"]').click();await page.locator('.approval-card').waitFor();
+    expect(await page.locator('#agent-name').textContent()).toBe('Rei');
+    await page.waitForFunction(()=>!document.querySelector('#agent-workspace').inert);
+    await page.locator('#prompt').fill('Keep these details for the trip');
+    expect(await page.locator('#prompt').inputValue()).toBe('Keep these details for the trip');
+    await page.locator('.navigation [data-view=home]').click();await page.locator('.home').waitFor();
+    expect(await page.locator('#prompt').inputValue()).toBe('Keep these details for the trip');
+    expect(await page.locator('.home-actions .primary-button').textContent()).toBe('Continue your draft');
+    await page.getByRole('button',{name:'Continue your draft',exact:true}).click();await page.locator('.approval-card').waitFor();
+    expect(await page.locator('#prompt').inputValue()).toBe('Keep these details for the trip');expect(page.url()).toContain('#chat/waiting');
+    await page.locator('#prompt').fill('');await page.locator('.navigation [data-view=home]').click();
+    await page.locator('.home [data-conversation="ready"]').focus();
+    app.runtime.state.jobs[0].pending.title='What is your budget?';app.runtime.changed();
+    await page.locator('.home').filter({hasText:'What is your budget?'}).waitFor();
+    expect(await page.locator('.home [data-conversation="ready"]').evaluate(node=>document.activeElement===node)).toBe(true);
+    await page.screenshot({path:join(artifacts,'home-desktop.png')});
+    for(const width of [320,768,1024,1440]) {
+      await page.setViewportSize({width,height:1000});
+      await page.waitForFunction(()=>innerWidth>760 || document.querySelector('.sidebar').getBoundingClientRect().right<=0);
+      expect(await page.locator('.home').evaluate(node=>node.getBoundingClientRect().right<=innerWidth && node.scrollWidth<=node.clientWidth)).toBe(true);
+      if(width===320) await page.screenshot({path:join(artifacts,'home-mobile.png')});
+    }
+    await page.getByRole('button',{name:'Find a conversation',exact:true}).click();await page.locator('#search-dialog[open]').waitFor();await page.keyboard.press('Escape');
+    await page.locator('.home [data-conversation="ready"]').click();await page.locator('.message-assistant').waitFor();
+    expect(await page.locator('.message-assistant').textContent()).toContain('The itinerary is ready.');
+    await page.reload();await page.locator('.message-assistant').waitFor();expect(await page.locator('.home').count()).toBe(0);
+    await page.goto(server.url.href);await page.locator('.home').waitFor();
+    await page.locator(`[data-select-agent="${first}"]`).click();await page.locator('#composer-area').waitFor();
+    expect(await page.locator('.home').count()).toBe(0);
+    await page.locator('.navigation [data-view=home]').click();await page.locator('.home').waitFor();
+    await page.getByRole('button',{name:'Start a conversation',exact:true}).click();await page.locator('.welcome').waitFor();expect(await page.locator('#prompt').isVisible()).toBe(true);
+    app.runtime.state.jobs=[];app.runtime.state.conversations=[];app.runtime.changed();
+    await page.goto(server.url.href);await page.getByRole('heading',{name:'What would you like to get done?'}).waitFor();
+    expect(await page.locator('.home-section').count()).toBe(0);
+    await page.evaluate(()=>localStorage.setItem('odwyn-agent','minimized'));await page.reload();await page.locator('.home').waitFor();
+    expect(await page.locator('.navigation [data-view=home]').isDisabled()).toBe(false);
+    await page.getByRole('button',{name:'Start a conversation',exact:true}).click();await page.locator('.welcome').waitFor();
+    expect(errors).toEqual([]);
+  } finally {await browser.close();await app.close();await server.stop(true);rmSync(directory,{recursive:true,force:true});}
+},25_000);

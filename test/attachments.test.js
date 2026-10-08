@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
@@ -86,10 +86,35 @@ test('image picker and paste show removable previews; image-only sends persist i
   const browser = await chromium.launch(), page = await browser.newPage({httpCredentials:{username:'owner',password:'test-password-long-enough'}});
   page.setDefaultTimeout(5000); const errors=[];page.on('pageerror',error=>errors.push(error.message));
   try {
-    await page.goto(server.url.href);await page.locator('#prompt').waitFor();
+    await page.goto(server.url.href+'#chat');await page.locator('#prompt').waitFor();
     await page.locator('#file-input').setInputFiles([{name:'photo.png',mimeType:'image/png',buffer:png},{name:'notes.txt',mimeType:'text/plain',buffer:Buffer.from('Notes')}]);
     await page.waitForFunction(()=>document.querySelectorAll('.attachment-chip').length===2 && !document.querySelector('#send-button').disabled);
     expect(await page.locator('.attachment-chip img').evaluate(img=>img.complete && img.naturalWidth===1)).toBe(true);
+    const photoPreview = page.locator('.attachment-preview[aria-label="Preview photo.png"]');
+    await photoPreview.focus();await page.keyboard.press('Enter');
+    await page.locator('#image-preview[open]').waitFor();
+    expect(await page.locator('#image-preview-title').textContent()).toBe('photo.png');
+    await page.waitForFunction(()=>document.querySelector('#image-preview-image').complete && document.querySelector('#image-preview-image').naturalWidth===1);
+    expect(await page.locator('#image-preview [download]').count()).toBe(0);
+    await page.keyboard.press('Escape');expect(await page.locator('#image-preview').evaluate(dialog=>dialog.open)).toBe(false);
+    expect(await photoPreview.evaluate(node=>document.activeElement===node)).toBe(true);
+    await photoPreview.click();await page.locator('[aria-label="Close image preview"]').click();
+    const artifacts = join(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});
+    for (const width of [320,768,1024,1440]) {
+      await page.setViewportSize({width,height:900});
+      await page.locator('#menu-button').evaluate(button=>{if(document.body.classList.contains('nav-open'))button.click();});
+      await page.waitForFunction(()=>innerWidth>760 || document.querySelector('.sidebar').getBoundingClientRect().right<=0);
+      expect(await page.locator('.attachment-chip').evaluateAll(nodes=>nodes.every(node=>node.getBoundingClientRect().right<=innerWidth))).toBe(true);
+      await photoPreview.click();
+      expect(await page.locator('#image-preview').evaluate(node=>node.getBoundingClientRect().width<=innerWidth)).toBe(true);
+      await page.keyboard.press('Escape');
+    }
+    await page.screenshot({path:join(artifacts,'attachments-desktop.png')});
+    await page.setViewportSize({width:320,height:900});
+    await page.locator('#menu-button').evaluate(button=>{if(document.body.classList.contains('nav-open'))button.click();});
+    await page.waitForFunction(()=>innerWidth>760 || document.querySelector('.sidebar').getBoundingClientRect().right<=0);
+    await page.screenshot({path:join(artifacts,'attachments-mobile.png')});
+    await page.setViewportSize({width:1440,height:900});
     let releaseUpload, uploadContinued;
     const continued = new Promise(resolve=>{uploadContinued=resolve;});
     await page.route('**/api/files',async route=>{ await new Promise(resolve=>{releaseUpload=resolve;}); await route.continue();uploadContinued(); });
@@ -139,6 +164,15 @@ test('image picker and paste show removable previews; image-only sends persist i
     app.runtime.state.files.push(agentFile);job.files.push(agentFile.id);
     app.runtime.conversation(job).messages.push({id:crypto.randomUUID(),role:'assistant',text:'Result attached.',agentId:job.agentId,jobId:job.id,at:agentFile.createdAt});app.runtime.changed();
     await page.reload();await page.locator('.message-user .answer-file img').waitFor();
+    await page.locator('.message-user [data-preview-file]').click();
+    await page.locator('#image-preview[open]').waitFor();
+    expect(await page.locator('#image-preview-title').textContent()).toBe('pasted.png');
+    await page.keyboard.press('Escape');
+    await page.route('**/api/files/*/preview',route=>route.fulfill({status:404,body:'Missing'}));
+    await page.locator('.message-user [data-preview-file]').click();
+    await page.waitForFunction(()=>document.querySelector('#image-preview-status').textContent==='Image preview unavailable.');
+    expect(await page.locator('#image-preview-image').isVisible()).toBe(false);
+    await page.keyboard.press('Escape');await page.unroute('**/api/files/*/preview');
     await page.locator('.message-assistant .file-chip[download]').waitFor();
     expect(await page.locator('.message-user [download]').count()).toBe(0);
     expect(await page.locator('.message-assistant .file-chip[download]').getAttribute('download')).toBe('agent-result.txt');

@@ -47,7 +47,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     provider.emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:job.turnId,status:'completed'}}});
   };
   try {
-    await page.goto(server.url.href); await page.getByRole('heading',{name:'Message Pip',exact:true}).waitFor();
+    await page.goto(server.url.href+'#chat'); await page.getByRole('heading',{name:'Message Pip',exact:true}).waitFor();
     await page.locator('#new-room').click(); await page.locator('#room-name').fill('Weekend council');
     await page.locator('#room-save').click(); expect(await page.locator('#room-status').textContent()).toContain('at least two');
     await page.locator(`#room-agent-options input[value="${scout.id}"]`).check();

@@ -1,6 +1,6 @@
 import { renderWorkflows, setupWorkflows } from './workflows-ui.js';
 import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date } from './ui.js';
-import { renderChat, insertMessages, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
+import { renderHome, renderChat, insertMessages, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
 import { setupBrowser, updateBrowser } from './browser-ui.js';
 import { setupCustomization, applyProfile, openCustomization, fillWorkspaceAppearance, readWorkspaceAppearance } from './customize.js';
 import { defaults, agentColor, choices, ownerPreferenceKeys, avatarSvg, currencies, effortLevels } from './profile.js';
@@ -16,7 +16,7 @@ for (const [storage, keys] of [[localStorage, ['agent','closed-agents','bubble-p
 
 for (const key of ['language','detail']) $(`#global-${key}`).innerHTML = Object.entries(choices[key]).map(([value,label])=>`<option value="${value}">${label}</option>`).join('');
 
-let state = null, conversationId = null, view = 'chat', filter = 'all', signature = '', busy = false, attachments = [], pendingAttachments = [], providerAgentId = null, providerGlobal = false, providerAdding = false;
+let state = null, conversationId = null, view = 'home', filter = 'all', signature = '', busy = false, attachments = [], pendingAttachments = [], providerAgentId = null, providerGlobal = false, providerAdding = false;
 let workspace = null, agentId = localStorage.getItem('odwyn-agent'), switching = false, dockSignature = '';
 const drafts = new Map(JSON.parse(sessionStorage.getItem('odwyn-drafts') || '[]'));
 const closedAgents = new Set(JSON.parse(localStorage.getItem('odwyn-closed-agents') || '[]'));
@@ -67,9 +67,10 @@ function renderDock() {
   }
   $('#agent-dock').hidden = !!room && !!agentId;
   positionBubbles();
+  document.querySelectorAll('[data-view]').forEach(button=>button.disabled = switching || !agentId && button.dataset.view !== 'home');
   $('#minimize-agent').disabled = !agentId || busy || switching;
   $('#reply-agent').disabled = $('#close-conversation').disabled = busy || switching;
-  $('.conversation-controls').hidden = !agentId;
+  $('.conversation-controls').hidden = !agentId || view === 'home';
   $('#add-agent').disabled = workspace.agents.length >= 5 || busy || switching;
   $('#agent-count').textContent = `${workspace.agents.length} of 5`;
   $('#add-agent').title = workspace.agents.length >= 5 ? 'Maximum 5 agents reached' : `Add agent (${workspace.agents.length}/5)`;
@@ -233,7 +234,7 @@ async function switchAgent(nextId, { closing = false, sharedChat = null, keepDra
     selectState(); const draft = restoreDraft();
     signature = ''; render(); setNavigation(false);
     $('#view').scrollTo({top:draft?.scroll || 0,behavior:'instant'}); panel.scrollTo({top:draft?.mainScroll || 0,behavior:'instant'});
-    history.replaceState(null,'',conversationId ? `#chat/${conversationId}` : `#${view}`);
+    history.replaceState(null,'',view === 'home' ? '#home' : conversationId ? `#chat/${conversationId}` : `#${view}`);
     await animateAgent(agentId,true);
     $('#agent-announcement').textContent = agentId ? `${state.customization?.name || 'Odwyn'} restored` : closing ? 'Conversation closed. Available in history.' : 'All agents minimized';
   } finally { switching = false; transitionAgentId = null; panel.inert = false; renderDock(); renderRooms(); }
@@ -259,7 +260,14 @@ function restoreDraft() {
 
 function renderAttachments() {
   $('#attachments').setAttribute('aria-busy',String(pendingAttachments.length > 0));
-  $('#attachments').innerHTML = [...attachments,...pendingAttachments].map(f => `<span class="attachment-chip">${f.uploading ? `<span class="attachment-loading" role="status" aria-label="Uploading ${esc(f.name)}">Uploading…</span>` : f.mimeType?.startsWith('image/') ? `<img src="/api/files/${esc(f.id)}/preview" alt="Preview of ${esc(f.name)}">` : icon('paperclip')}${esc(f.name)}${f.uploading ? '' : `<button type="button" data-remove-attachment="${esc(f.id)}" aria-label="Remove ${esc(f.name)}">${icon('close')}</button>`}</span>`).join('');
+  $('#attachments').innerHTML = [...attachments,...pendingAttachments].map(file => {
+    const image = file.mimeType?.startsWith('image/');
+    const type = file.name.includes('.') ? file.name.split('.').at(-1).toUpperCase() : image ? file.mimeType.split('/')[1].toUpperCase() : 'FILE';
+    const size = file.size ? (file.size < 1024 * 1024 ? `${Math.ceil(file.size / 1024)} KB` : `${(file.size / (1024 * 1024)).toFixed(1)} MB`) : '';
+    const thumbnail = file.uploading ? `<span class="attachment-loading" role="status" aria-label="Uploading ${esc(file.name)}">Uploading…</span>` : image ? `<img src="/api/files/${esc(file.id)}/preview" alt="Preview of ${esc(file.name)}">` : `<span class="attachment-file-icon">${icon('paperclip')}</span>`;
+    const content = `${thumbnail}<span class="attachment-info"><strong title="${esc(file.name)}">${esc(file.name)}</strong><small>${file.uploading ? 'Uploading' : esc([type,size].filter(Boolean).join(' · '))}</small></span>`;
+    return `<div class="attachment-chip">${image && !file.uploading ? `<button type="button" class="attachment-preview" data-preview-file="${esc(file.id)}" aria-label="Preview ${esc(file.name)}">${content}</button>` : `<div class="attachment-preview">${content}</div>`}${file.uploading ? '' : `<button type="button" class="attachment-remove" data-remove-attachment="${esc(file.id)}" aria-label="Remove ${esc(file.name)}">${icon('close')}</button>`}</div>`;
+  }).join('');
 }
 const mobile = matchMedia('(max-width: 760px)');
 function setNavigation(open) {
@@ -284,13 +292,15 @@ mobile.addEventListener('change', () => setNavigation(false)); setNavigation(fal
 
 function navigate(next = 'chat', id = null) {
   if (switching) return;
+  if (next === 'home') id = conversationId;
   const chat = workspace.conversations.find(c => c.id === id), owner = chat?.lastAgentId || chat?.agentId;
-  if (owner && id !== conversationId && owner !== agentId || !agentId) { void switchAgent(owner || workspace.agents[0].id,{sharedChat:id}).then(() => { if (agentId) navigate(next,id); }); return; }
+  if (next !== 'home' && (owner && id !== conversationId && owner !== agentId || !agentId)) { void switchAgent(owner || workspace.agents[0].id,{sharedChat:id}).then(() => { if (agentId) navigate(next,id); }); return; }
   view = next; conversationId = id; signature = ''; render();
   $('#agent-workspace').scrollTop = 0;
   setNavigation(false);
   if (view === 'chat') $('#prompt').focus();
-  history.replaceState(null, '', id ? `#chat/${id}` : `#${view}`);
+  history.replaceState(null, '', view === 'home' ? '#home' : id ? `#chat/${id}` : `#${view}`);
+  if (view === 'home') $('#view').scrollTop = 0;
 }
 
 function render() {
@@ -306,8 +316,7 @@ function render() {
   $('#connection-button').title = globalRuntime.connectionError || `${providerName} · ${workspace.globalProvider.model}`;
 
   $('#new-chat').disabled = !agentId;
-  document.querySelectorAll('[data-view]').forEach(button => button.disabled = !agentId);
-  if (!agentId) {
+  if (!agentId && view !== 'home') {
     $('#agent-workspace').classList.remove('chat-start'); $('#main').classList.remove('chat-start'); $('#composer-area').hidden = true;
     $('#page-title').textContent = 'No conversation open';
     if (signature !== 'minimized') $('#view').innerHTML = `<div class="agents-empty"><h1>${workspace.agents.every(a => closedAgents.has(a.id)) ? 'No conversation open' : 'Your agents are minimized'}</h1><p>Choose an agent in the sidebar or restore a floating bubble. Your conversations stay in history.</p></div>`;
@@ -321,7 +330,8 @@ function render() {
   $('#prompt').placeholder = conversation?.kind === 'room' ? 'Message the room, or @mention an agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#agent-workspace').classList.toggle('chat-start', view === 'chat' && !conversation);
-  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { runs:'Task runs', routines:'Routines', files:'Files & results', workflows:'Workflows & skills' }[view];
+  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { home:'Home', runs:'Task runs', routines:'Routines', files:'Files & results', workflows:'Workflows & skills' }[view];
+  if (view === 'home') $('#agent-name').textContent = 'Odwyn';
   $('#page-title').disabled = view !== 'chat' || !conversation;
   $('#page-title').title = conversation && view === 'chat' ? 'Rename conversation' : '';
   $('#page-title').setAttribute('aria-label',conversation && view === 'chat' ? `Rename conversation: ${conversation.title}` : $('#page-title').textContent);
@@ -336,13 +346,15 @@ function render() {
   $('#routine-note').textContent = nextRoutine?.prompt || '';
   $('#routine-note-detail').textContent = nextRoutine ? `Next: ${date(nextRoutine.nextAt)}` : '';
   $('#composer-area').hidden = view !== 'chat';
-  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : view === 'workflows' ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
+  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'home' ? [workspace.conversations,workspace.jobs,$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : view === 'workflows' ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
+    const homeFocus = view === 'home' && $('#view').contains(document.activeElement) ? document.activeElement.dataset.conversation : null;
     const pendingCard = $('#view .approval-card');
     const pendingFocus = pendingCard?.contains(document.activeElement) ? document.activeElement : null;
-    $('#view').innerHTML = view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state) : view === 'workflows' ? renderWorkflows(state) : renderFiles(state);
+    $('#view').innerHTML = view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state) : view === 'workflows' ? renderWorkflows(state) : renderFiles(state);
+    if (homeFocus) $('#view').querySelector(`[data-conversation="${CSS.escape(homeFocus)}"]`)?.focus({preventScroll:true});
     const nextPendingCard = $('#view .approval-card');
     if (pendingCard && nextPendingCard?.dataset.request === pendingCard.dataset.request) {
       nextPendingCard.replaceWith(pendingCard);
@@ -350,7 +362,7 @@ function render() {
     }
     if (view === 'chat') insertMessages(state,conversationId);
     updateBrowser(state);
-    $('#view').scrollTop = nearBottom ? $('#view').scrollHeight : previousScroll;
+    $('#view').scrollTop = view !== 'home' && nearBottom ? $('#view').scrollHeight : previousScroll;
     signature = nextSignature;
   } else updateBrowser(state);
   renderActivity(state,conversationId);
@@ -602,13 +614,16 @@ $('#menu-button').onclick = () => setNavigation(!document.body.classList.contain
 $('#nav-scrim').onclick = () => { setNavigation(false); $('#menu-button').focus(); };
 $('#search-open').onclick = () => { $('#search-dialog').showModal(); $('#search-input').focus(); search(); };
 $('#search-input').oninput = search;
+$('#image-preview-image').onload = () => { $('#image-preview-status').textContent = ''; };
+$('#image-preview-image').onerror = () => { $('#image-preview-image').hidden = true; $('#image-preview-status').textContent = 'Image preview unavailable.'; };
+$('#image-preview').onclick = event => { if (event.target === $('#image-preview')) $('#image-preview').close(); };
 $('#attach-button').onclick = () => $('#file-input').click();
 async function attachFiles(files) {
   if (busy || !files.length) return;
   busy = true; render();
   await perform(async () => {
     if (attachments.length + files.length > 20) throw new Error('Choose up to 20 uploaded files.');
-    pendingAttachments = files.map(file=>({name:file.name,uploading:true})); renderAttachments();
+    pendingAttachments = files.map(file=>({name:file.name,mimeType:file.type,size:file.size,uploading:true})); renderAttachments();
     for (const file of files) {
       const form = new FormData(); form.append('file',file);
       const saved = await api('/api/files',form); attachments.push(saved); pendingAttachments.shift(); renderAttachments();
@@ -691,6 +706,16 @@ $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(a
 document.addEventListener('click', event => {
   document.querySelectorAll('.agent-menu[open]').forEach(menu => { if (!menu.contains(event.target)) menu.open = false; });
   const target = event.target.closest('button,a,[data-mention-link]'); if (!target) return;
+  if (target.dataset.previewFile) {
+    event.preventDefault();
+    const file = attachments.find(file=>file.id===target.dataset.previewFile) || state.files.find(file=>file.id===target.dataset.previewFile); if (!file) return;
+    $('#image-preview-title').textContent = file.name;
+    $('#image-preview-image').alt = `Preview of ${file.name}`;
+    $('#image-preview-image').hidden = false;
+    $('#image-preview-status').textContent = 'Loading image…';
+    $('#image-preview-image').src = `/api/files/${encodeURIComponent(file.id)}/preview`;
+    $('#image-preview').showModal(); return;
+  }
   if (target.dataset.mentionCommand) { navigate('workflows');return; }
   if (target.dataset.agentAction) {
     if (busy || switching) return;
@@ -708,15 +733,16 @@ document.addEventListener('click', event => {
     return;
   }
   if (target.dataset.roomAgent) { $('#room-header').close(); const room = currentRoom(); void switchAgent(target.dataset.roomAgent,{sharedChat:room.id,keepDraft:true}).then(()=>openAgentProvider()); return; }
-  if (target.dataset.selectAgent) { void switchAgent(target.dataset.selectAgent); return; }
+  if (target.dataset.selectAgent) { void switchAgent(target.dataset.selectAgent).then(()=>{ if (view === 'home') navigate('chat',conversationId); }); return; }
   if (target.dataset.closeAgent) { closeAgent(target.dataset.closeAgent); return; }
-  if (target.dataset.agent) { void switchAgent(target.dataset.agent); return; }
+  if (target.dataset.agent) { void switchAgent(target.dataset.agent).then(()=>{ if (view === 'home') navigate('chat',conversationId); }); return; }
   if (target.hasAttribute('data-mascot-toggle')) {
     const paused = document.body.classList.toggle('mascot-paused');
     target.setAttribute('aria-pressed',String(!paused));
     target.title = `${paused ? 'Resume' : 'Pause'} avatar animation`;
   }
-  if (target.dataset.view) navigate(target.dataset.view);
+  if (target.hasAttribute('data-home-search')) { $('#search-open').click(); return; }
+  if (target.dataset.view) { event.preventDefault(); navigate(target.dataset.view); }
   if (target.dataset.conversation) { $('#search-dialog').close(); navigate('chat',target.dataset.conversation); }
   if (target.hasAttribute('data-new-chat')) navigate();
   if (target.dataset.prompt) { $('#prompt').value = target.dataset.prompt; $('#prompt').focus(); $('#prompt').dispatchEvent(new Event('input')); }
@@ -759,7 +785,8 @@ $('#view').innerHTML = '<div class="loading-state" role="status"><img src="/mark
 await refresh();
 if (state && agentId) { restoreDraft(); signature = ''; render(); }
 const initial = location.hash.slice(1).split('/');
-if (agentId && ['chat','runs','routines','files','workflows'].includes(initial[0])) { view = initial[0]; conversationId = initial[1] || null; signature = ''; render(); }
+if (['home','chat','runs','routines','files','workflows'].includes(initial[0]) && (agentId || initial[0] === 'home')) { view = initial[0]; conversationId = initial[0] === 'home' ? conversationId : initial[1] || null; signature = ''; render(); }
+if (!initial[0] && state) { view = 'home'; signature = ''; render(); }
 if (state && agentId && !state.customization) openSettings(true);
 else if (state && agentId && !workspace.globalProvider.configured) openSettings();
 setInterval(() => { if (!document.hidden) void refresh(); }, 1000);

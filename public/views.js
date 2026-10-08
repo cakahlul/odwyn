@@ -16,6 +16,22 @@ export function recentConversations(state) {
   return state.conversations.map(c=>({...c,activityAt:new Date(activity.get(c.id)).toISOString()})).sort((a,b)=>b.activityAt.localeCompare(a.activityAt));
 }
 
+export function renderHome(state, draft = {}) {
+  const conversations = recentConversations(state).map(conversation=>({...conversation,job:state.jobs.find(job=>job.conversationId===conversation.id)}));
+  const needs = conversations.filter(c=>c.job?.pending || ['waiting','takeover','failed','interrupted'].includes(c.job?.status));
+  const working = conversations.filter(c=>activeStatuses.includes(c.job?.status) && !needs.includes(c));
+  const results = conversations.filter(c=>c.job?.status==='completed' && (c.messages.some(m=>m.role==='assistant') || c.job.files?.length)).slice(0,3);
+  const featured = new Set([...needs,...working,...results].map(c=>c.id));
+  const recent = conversations.filter(c=>!featured.has(c.id)).slice(0,4);
+  const rows = (items,action) => items.map(conversation=> {
+    const job = conversation.job, agent = state.agents.find(a=>a.id===(job?.agentId || conversation.agentId));
+    const detail = job?.pending?.title || job?.error || (activeStatuses.includes(job?.status) ? job.events?.at(-1)?.detail : '') || (conversation.kind === 'room' ? `${conversation.memberIds.length} agents in this room` : agent?.customization?.name || defaults.name);
+    return `<button class="home-item" data-conversation="${esc(conversation.id)}"><span class="home-item-icon">${icon(conversation.kind === 'room' ? 'chat' : action==='Review' ? 'shield' : action==='Open result' ? 'check' : 'history')}</span><span class="home-item-copy"><strong>${esc(conversation.title)}</strong><small>${esc(detail)}</small><time datetime="${esc(conversation.activityAt)}">${esc(date(conversation.activityAt))}</time></span><span class="home-item-action">${action}</span>${icon('arrow-up-right')}</button>`;
+  }).join('');
+  const section = (title,items,action) => items.length ? `<section class="home-section" aria-label="${title}"><h2>${title}</h2>${rows(items,action)}</section>` : '';
+  return `<div class="home"><header class="home-heading"><span class="eyebrow">YOUR WORKSPACE</span><h1>${conversations.length ? 'Pick up where you left off.' : 'What would you like to get done?'}</h1><p>${needs.length ? 'Review what needs you, or start something new.' : working.length ? 'Your agents are working. Check in whenever you need.' : 'Start a conversation, or bring an idea to work through.'}</p><div class="home-actions"><button class="primary-button" ${draft.hasDraft && draft.conversationId ? `data-conversation="${esc(draft.conversationId)}"` : 'data-new-chat'}>${draft.hasDraft ? 'Continue your draft' : 'Start a conversation'}${icon('arrow-up-right')}</button><button class="text-button" data-home-search>${icon('search')}Find a conversation</button></div></header>${section('Needs you',needs,'Review')}${section('In progress',working,'Continue')}${section('Recent results',results,'Open result')}${section('Recent conversations',recent,'Continue')}${!conversations.length ? `<section class="home-first-step"><span>${icon('chat')}</span><div><h2>Begin with what you need.</h2><p>Ask a question, share a file, or describe a task. You can choose an agent when you start.</p></div></section>` : ''}</div>`;
+}
+
 export function renderChat(state, conversationId) {
   const profile = resolveProfile(state.customization,state.appearance,state.owner);
   const conversation = state.conversations.find(c => c.id === conversationId);
@@ -118,7 +134,7 @@ function renderAttachments(state, ids) {
   if (!files.length) return '';
   return `<div class="result-files" aria-label="Attached files">${files.map(file=> {
     const image = file.mimeType ? file.mimeType.startsWith('image/') : file.kind === 'screenshot' || /\.(png|jpe?g|gif|webp|avif|svg)$/i.test(file.name);
-    return `<div class="answer-file">${image ? `<a href="/api/files/${esc(file.id)}/preview" target="_blank" rel="noopener" aria-label="Preview ${esc(file.name)}"><img src="/api/files/${esc(file.id)}/preview" alt="Preview of ${esc(file.name)}" loading="lazy"></a>` : ''}${file.kind === 'upload' ? `<span class="file-chip">${icon('paperclip')}<span>${esc(file.name)}</span></span>` : `<a href="/api/files/${esc(file.id)}" class="file-chip" download="${esc(file.name)}">${icon('download')}<span>${esc(file.name)}</span></a>`}</div>`;
+    return `<div class="answer-file">${image ? `<a href="/api/files/${esc(file.id)}/preview" data-preview-file="${esc(file.id)}" aria-label="Preview ${esc(file.name)}"><img src="/api/files/${esc(file.id)}/preview" alt="Preview of ${esc(file.name)}" loading="lazy"></a>` : ''}${file.kind === 'upload' ? `<span class="file-chip">${icon('paperclip')}<span>${esc(file.name)}</span></span>` : `<a href="/api/files/${esc(file.id)}" class="file-chip" download="${esc(file.name)}">${icon('download')}<span>${esc(file.name)}</span></a>`}</div>`;
   }).join('')}</div>`;
 }
 

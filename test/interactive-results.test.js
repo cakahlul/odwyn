@@ -19,7 +19,7 @@ test('workflow result cards configure, select, send a follow-up, and persist aft
   const artifacts=resolve(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});
   const data={type:'pr_review',prUrl:'https://example.com/pull/1676',commit:'f3a60313bba05fe23fceb78787d3a9616c622cb9',summary:'Probe guard looks correct. Included auth changes need QA evidence.',feedback:[{id:'F1',severity:'major',location:'PR description',comment:'Link confirmation and production-like QR login QA results.',sourceUrl:'https://example.com/issue/14217'},{id:'F2',severity:'minor',location:'Login tests',comment:'Add coverage for the fallback login route.'}]};
   try {
-    await page.goto(server.url.href);await page.locator('.welcome').waitFor();
+    await page.goto(server.url.href+'#chat');await page.locator('.welcome').waitFor();
     await page.evaluate(async data=>{
       const {api}=await import('/ui.js');
       await api('/api/workflows',{name:'PR review',command:'pr-review',steps:[{id:'review',name:'Review result',type:'output',prompt:JSON.stringify(data)}]});

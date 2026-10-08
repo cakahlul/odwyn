@@ -20,7 +20,7 @@ test('minimized agents float as staggered circles, preserve dragging, and respec
   const browser=await chromium.launch(), context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}});
   const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
   try {
-    await page.goto(server.url.href);
+    await page.goto(server.url.href+'#chat');
     expect(await page.locator('.sidebar-agent .agent-avatar').first().evaluate(node=>getComputedStyle(node).animationName)).toBe('agent-breathe');
     await page.locator('[data-mascot-toggle]').click();
     expect(await page.locator('.sidebar-agent .agent-avatar').first().evaluate(node=>getComputedStyle(node).animationPlayState)).toBe('paused');

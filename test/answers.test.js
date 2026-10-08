@@ -32,7 +32,7 @@ test('assistant cards cover shopping outcomes, preserve fallback content, and fi
     { name: 'Custom walnut desk', detail: 'Made to order. Price not listed.' },
   ] };
   try {
-    await page.goto(server.url.href); await page.locator('.welcome').waitFor();
+    await page.goto(server.url.href+'#chat'); await page.locator('.welcome').waitFor();
     const review={type:'pr_review',prUrl:'https://example.com/pull/12',commit:'abc123',summary:'Two findings need review.',feedback:[{id:'F1',severity:'major',location:'PR description',comment:'Include QA evidence.',sourceUrl:'https://example.com/evidence'},{id:'F2',severity:'minor',comment:'Clarify the title.'}]};
     for(const reply of [JSON.stringify(review,null,2),'```json\n'+JSON.stringify(review)+'\n```',block(review)]){
       await render(reply);
