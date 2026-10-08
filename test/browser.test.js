@@ -5,6 +5,48 @@ import { join } from 'node:path';
 import { browserActionRisk } from '../security.js';
 import { Browser } from '../browser.js';
 
+test('stalled page reads time out or stop, close the context, and release queued work', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'odwyn-browser-stall-'));
+  const browser = new Browser({directory});
+  try {
+    for (const stop of [false, true]) {
+      await browser.action({action:'read'});
+      const context = browser.context, page = browser.page;
+      let started;
+      const ready = new Promise(resolve => { started = resolve; });
+      const evaluate = page.evaluate.bind(page);
+      page.evaluate = () => { started(); return evaluate(() => new Promise(() => {})); };
+      const read = browser.serial(() => browser.snapshot(), stop ? 5000 : 100);
+      const outcome = read.catch(error => error);
+      await ready;
+      const next = browser.action({action:'read'});
+      if (stop) await browser.interrupt();
+      expect((await outcome).message).toContain(stop ? 'interrupted' : 'timed out');
+      expect(page.isClosed()).toBe(true);
+      expect((await next).url).toBe('about:blank');
+      expect(browser.context).not.toBe(context);
+    }
+  } finally { await browser.close(); rmSync(directory, {recursive:true, force:true}); }
+}, 15_000);
+
+test('interrupted startup cannot execute a late browser action', async () => {
+  const browser = new Browser({directory:tmpdir()});
+  let release, entered, reads = 0;
+  const ready = new Promise(resolve => { entered = resolve; });
+  browser.start = () => { entered(); return new Promise(resolve => { release = resolve; }); };
+  browser.page = {isClosed:()=>false};
+  browser.snapshot = async () => { reads++; return {}; };
+  const action = browser.action({action:'read'});
+  const outcome = action.catch(error => error);
+  await ready;
+  await browser.interrupt();
+  expect((await outcome).message).toContain('interrupted');
+  release();
+  await Bun.sleep(0);
+  expect(reads).toBe(0);
+  await browser.close();
+});
+
 test('browser reset closes all tabs and proxy, clears snapshots, and reopens with saved sign-ins', async () => {
   const directory = mkdtempSync(join(tmpdir(),'odwyn-browser-reset-'));
   const browser = new Browser({directory});

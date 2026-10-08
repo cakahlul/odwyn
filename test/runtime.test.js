@@ -21,6 +21,31 @@ class FakeCodex extends EventEmitter {
   reject() {}
 }
 
+test('Stop interrupts browser work before waiting for provider acknowledgement', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'odwyn-stop-browser-')), store = openStore(dir), codex = new FakeCodex();
+  let interrupted = false, release;
+  const runtime = new Runtime({store, codex, browser:{interrupt:()=>{interrupted=true;}}, workspace:dir});
+  try {
+    await runtime.refreshAccount();
+    const job = runtime.submit({prompt:'Browse'}); await runtime.drain();
+    const request = codex.request.bind(codex);
+    codex.request = (method, params) => method === 'turn/interrupt'
+      ? new Promise(resolve => { release = resolve; }) : request(method, params);
+    const stopped = runtime.cancel(job.id);
+    expect(interrupted).toBe(true);
+    await Bun.sleep(0);
+    expect(job.status).toBe('stopping');
+    release(); await stopped;
+    expect(job.status).toBe('cancelled');
+    codex.request = request;
+    interrupted = false;
+    const controlled = runtime.submit({prompt:'Owner takes control'}); await runtime.drain();
+    await runtime.setTakeover(true);
+    await runtime.cancel(controlled.id);
+    expect(interrupted).toBe(false);
+  } finally {release?.(); runtime.close(); store.close(); rmSync(dir, {recursive:true, force:true});}
+});
+
 test('task cleanup blocks the next task, skips queued cancellations and owner takeover, and preserves room handoffs', async () => {
   const dir = mkdtempSync(join(tmpdir(),'odwyn-task-cleanup-')), store = openStore(dir), codex = new FakeCodex();
   let resets = 0, release;

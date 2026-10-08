@@ -9,29 +9,57 @@ export class Browser {
   constructor({ directory, onFile = () => {}, findFile = () => null, executablePath, headless = true }) {
     this.directory = directory; this.onFile = onFile; this.findFile = findFile;
     this.executablePath = executablePath; this.headless = headless;
-    this.context = null; this.page = null; this.proxy = null; this.tail = Promise.resolve(); this.owner = null; this.dialog = null;
+    this.context = null; this.page = null; this.proxy = null; this.tail = Promise.resolve(); this.owner = null; this.dialog = null; this.generation = 0;
   }
 
-  serial(fn) { const next = this.tail.then(() => { if (this.stopping) throw new Error('Browser is stopping.'); return fn(); }); this.tail = next.catch(() => {}); return next; }
+  serial(fn, timeout = 45_000) {
+    const next = this.tail.then(async () => {
+      if (this.stopping) throw new Error('Browser is stopping.');
+      let timer, interrupted = false;
+      const cancelled = new Promise((_, reject) => {
+        this.abort = error => { interrupted = true; this.generation++; reject(error); };
+        timer = setTimeout(() => this.abort(new Error('Browser operation timed out. Retry with a fresh page.')), timeout);
+      });
+      try { return await Promise.race([fn(), cancelled]); }
+      catch (error) {
+        // Close before releasing the queue so interrupted work cannot change the next task's browser.
+        if (interrupted) {
+          const context = this.context || await this.launching?.catch(() => null);
+          await context?.close().catch(() => {});
+        }
+        throw error;
+      } finally { clearTimeout(timer); this.abort = null; }
+    });
+    this.tail = next.catch(() => {}); return next;
+  }
+
+  interrupt() { this.abort?.(new Error('Browser operation interrupted.')); return this.tail; }
 
   async start() {
     if (this.context) return;
     mkdirSync(join(this.directory, 'browser'), { recursive: true, mode: 0o700 });
     mkdirSync(join(this.directory, 'files'), { recursive: true, mode: 0o700 });
-    this.proxy = await startProxy();
+    const generation = this.generation, proxy = await startProxy();
+    if (generation !== this.generation) { proxy.close(); throw new Error('Browser operation interrupted.'); }
+    this.proxy = proxy;
     try {
-      this.context = await chromium.launchPersistentContext(join(this.directory, 'browser'), {
+      const launching = chromium.launchPersistentContext(join(this.directory, 'browser'), {
         headless: this.headless, executablePath: this.executablePath, viewport: { width: 1280, height: 800 },
-        acceptDownloads: true, serviceWorkers: 'block', proxy: { server: this.proxy.url },
+        acceptDownloads: true, serviceWorkers: 'block', proxy: { server: proxy.url },
         args: ['--proxy-bypass-list=<-loopback>', '--disable-quic', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'],
       });
+      this.launching = launching;
+      const context = await launching;
+      if (generation !== this.generation) { await context.close(); throw new Error('Browser operation interrupted.'); }
+      this.context = context;
       this.context.setDefaultTimeout(12_000);
       this.context.setDefaultNavigationTimeout(30_000);
       this.context.on('page', page => { this.attach(page); this.page = page; });
-      this.context.on('close', () => { this.context = null; this.page = null; this.dialog = null; this.last = null; this.proxy?.close(); this.proxy = null; });
+      this.context.on('close', () => { if (this.context !== context) return; this.context = null; this.page = null; this.dialog = null; this.last = null; proxy.close(); this.proxy = null; });
       for (const page of this.context.pages()) this.attach(page);
       this.page = this.context.pages()[0] || await this.context.newPage();
-    } catch (error) { this.proxy.close(); this.proxy = null; throw error; }
+    } catch (error) { proxy.close(); if (this.proxy === proxy) this.proxy = null; throw error; }
+    finally { this.launching = null; }
   }
 
   attach(page) {
@@ -103,14 +131,16 @@ export class Browser {
   action(input, allowed = () => true) {
     const command = validateAction(input);
     return this.serial(async () => {
+      const generation = this.generation;
       if (!allowed()) throw new Error('Browser control changed.');
       await this.start();
-      if (!allowed()) throw new Error('Browser control changed.');
+      if (generation !== this.generation || !allowed()) throw new Error('Browser control changed.');
       if (!this.page || this.page.isClosed()) this.page = await this.context.newPage();
       if (this.dialog && command.action !== 'dialog') return this.snapshot();
       const page = this.page;
       const element = command.ref !== undefined ? page.locator(`[data-odwyn-ref="${command.ref}"]`) : null;
       if (['navigate','new_tab'].includes(command.action)) await resolvePublic(command.url);
+      if (generation !== this.generation || !allowed()) throw new Error('Browser control changed.');
       const execute = async () => { switch (command.action) {
         case 'navigate': await page.goto(command.url, { waitUntil: 'domcontentloaded' }); break;
         case 'new_tab': this.page = await this.context.newPage(); await this.page.goto(command.url, { waitUntil: 'domcontentloaded' }); break;
@@ -155,5 +185,5 @@ export class Browser {
     });
   }
 
-  async close() { this.stopping = true; await this.context?.close(); this.proxy?.close(); await this.tail; }
+  async close() { this.stopping = true; await this.interrupt(); await this.context?.close(); this.proxy?.close(); }
 }

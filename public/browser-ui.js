@@ -31,7 +31,7 @@ export async function refreshFrame() {
   if (frameBusy || document.hidden || (document.body.classList.contains('browser-closed') && !$('#conversation-browser')?.open)) return;
   frameBusy = true;
   try {
-    const response = await fetch('/api/browser/frame');
+    const response = await fetch('/api/browser/frame', { signal: AbortSignal.timeout(50_000) });
     if (!response.ok) throw new Error('Browser preview unavailable');
     frame = await response.json();
     updateConversationFrame();

@@ -601,6 +601,7 @@ export class Runtime {
       for (const [requestId, pending] of this.requests) if (pending.job === job) { pending.reject(new Error('Owner stopped the task.')); this.requests.delete(requestId); }
       job.stopResult = { status: error ? 'interrupted' : 'cancelled', error };
       job.status = 'stopping'; this.changed();
+      if (!this.takeover) void this.browser.interrupt?.();
       await this.starting;
       try { if (job.threadId && job.turnId) await this.codex.request('turn/interrupt', { threadId: job.threadId, turnId: job.turnId }); }
       catch { this.codex.stop?.(); }
