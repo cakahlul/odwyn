@@ -21,6 +21,55 @@ class FakeCodex extends EventEmitter {
   reject() {}
 }
 
+test('skill commands stay visible while the provider receives snapshotted instructions', async () => {
+  const dir=mkdtempSync(join(tmpdir(),'odwyn-skill-chat-')),store=openStore(dir),codex=new FakeCodex();
+  const runtime=new Runtime({store,codex,browser:{},workspace:dir});
+  try {
+    store.state.skills.push({id:randomUUID(),name:'Report',command:'report',instructions:'Fetch the full report.'});
+    await runtime.refreshAccount();
+    const job=runtime.submit({prompt:'/report SLS'});await runtime.drain();
+    const conversation=runtime.conversation(job);
+    expect(conversation.messages.at(-1).text).toBe('/report SLS');
+    expect(conversation.title).toBe('/report SLS');
+    expect(codex.calls.find(c=>c.method==='turn/start').params.input[0].text).toContain('Fetch the full report.\n\nOwner request: SLS');
+    store.state.skills[0].instructions='Changed';
+    expect(job.prompt).toContain('Fetch the full report.');
+  } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('MCP tool approvals follow chat permissions and use approval buttons', async () => {
+  for (const mode of ['confirm','safe','allow']) {
+    const dir=mkdtempSync(join(tmpdir(),'odwyn-mcp-approval-')),store=openStore(dir),codex=new FakeCodex();
+    const runtime=new Runtime({store,codex,browser:{},workspace:dir});
+    try {
+      await runtime.refreshAccount();
+      const job=runtime.submit({prompt:'Use MCP',interactionMode:mode});await runtime.drain();
+      expect(codex.calls.find(c=>c.method==='thread/start').params.mcpApprovalMode).toBe(mode==='safe' ? 'writes':'prompt');
+      const params={threadId:job.threadId,turnId:job.turnId,serverName:'fixture',mode:'form',message:'Allow tool?',requestedSchema:{type:'object',properties:{}},_meta:{codex_approval_kind:'mcp_tool_call'}};
+      let request=runtime.handleRequest({id:'approval',method:'mcpServer/elicitation/request',params});await Bun.sleep(1);
+      if(mode!=='allow') {
+        expect(job.pending.type).toBe('mcp');
+        runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'});await request;
+        expect(codex.replies.at(-1).result.action).toBe('decline');
+        request=runtime.handleRequest({id:'approval2',method:'mcpServer/elicitation/request',params});await Bun.sleep(1);
+        runtime.setInteractionMode(job.id,'allow');
+      }
+      await request;
+      expect(job.pending ?? null).toBeNull();
+      expect(codex.replies.at(-1).result).toEqual({action:'accept',content:{}});
+      request=runtime.handleRequest({id:'real-input',method:'mcpServer/elicitation/request',params:{...params,_meta:undefined}});await Bun.sleep(1);
+      expect(job.pending.type).toBe('question');
+      runtime.answer(job.id,{requestId:job.pending.id,answer:'{}'});await request;
+      request=runtime.handleRequest({id:'sensitive',method:'mcpServer/elicitation/request',params:{...params,_meta:{...params._meta,codex_sensitive_action:true}}});await Bun.sleep(1);
+      expect(job.pending.risk).toBe('payment');
+      runtime.setInteractionMode(job.id,'allow');
+      expect(job.pending.type).toBe('mcp');
+      expect(()=>runtime.answer(job.id,{requestId:job.pending.id,decision:'allow-run'})).toThrow('for this action only');
+      runtime.answer(job.id,{requestId:job.pending.id,decision:'allow'});await request;
+    } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+  }
+});
+
 test('MCP questions, validated forms, URL refusals and cancellation use owner input', async () => {
   const dir = mkdtempSync(join(tmpdir(),'odwyn-mcp-input-')), store = openStore(dir), codex = new FakeCodex();
   const runtime = new Runtime({store,codex,browser:{},workspace:dir});

@@ -50,7 +50,7 @@ export class Codex extends EventEmitter {
     });
   }
 
-  async request(method, { mcpEnabled = true, ...params } = {}) {
+  async request(method, { mcpEnabled = true, mcpApprovalMode, ...params } = {}) {
     await this.start();
     if (['thread/start','thread/resume'].includes(method)) {
       const servers = Object.create(null);
@@ -58,7 +58,10 @@ export class Codex extends EventEmitter {
         try { Object.assign(servers, Bun.TOML.parse(readFileSync(join(home, 'config.toml'), 'utf8')).mcp_servers || {}); }
         catch (error) { if (error.code !== 'ENOENT') throw new Error('Cannot read Codex MCP configuration. Check config.toml.'); }
       }
-      params.config = { ...params.config, mcp_servers: Object.fromEntries(Object.entries(servers).map(([name, server]) => [name, mcpEnabled ? server : {...server, enabled:false}])) };
+      params.config = { ...params.config, mcp_servers: Object.fromEntries(Object.entries(servers).map(([name, server]) => [name, {
+        ...server, ...(!mcpEnabled ? {enabled:false} : {}),
+        ...(mcpApprovalMode ? {default_tools_approval_mode:mcpApprovalMode, tools:Object.fromEntries(Object.entries(server.tools || {}).map(([tool, config])=>[tool,{...config,approval_mode:mcpApprovalMode}]))} : {})
+      }])) };
     }
     return this.call(method, params);
   }

@@ -19,6 +19,14 @@ test('Codex merges MCP definitions without importing unrelated config, and disab
     expect(enabled.config.mcp_servers.off.enabled).toBe(false);
     expect(enabled.config.model).toBeUndefined();
     expect(enabled.mcpEnabled).toBeUndefined();
+    writeFileSync(join(home, 'config.toml'), '[mcp_servers.docs]\nurl="https://override.example/mcp"\n[mcp_servers.docs.tools.read]\napproval_mode="approve"\noutput_token_limit=1000\n');
+    for (const mode of ['prompt','writes']) {
+      const configured = await codex.request('thread/resume',{mcpApprovalMode:mode});
+      expect(configured.config.mcp_servers.docs.default_tools_approval_mode).toBe(mode);
+      expect(configured.config.mcp_servers.docs.tools.read.approval_mode).toBe(mode);
+      expect(configured.config.mcp_servers.docs.tools.read.output_token_limit).toBe(1000);
+      expect(configured.mcpApprovalMode).toBeUndefined();
+    }
     const disabled = await codex.request('thread/resume', {mcpEnabled:false});
     expect(Object.values(disabled.config.mcp_servers).every(server=>server.enabled===false)).toBe(true);
     writeFileSync(join(mcpHome, 'config.toml'), '[mcp_servers.fixture]\nurl = [');
@@ -44,11 +52,11 @@ await server.connect(new StdioServerTransport());
   const codex = new Codex({home,mcpHome,workspace:directory});
   codex.on('request', message=>codex.respond(message.id,{action:'decline',content:null}));
   try {
-    const {thread} = await codex.request('thread/start',{mcpEnabled:true,ephemeral:false});
+    const {thread} = await codex.request('thread/start',{mcpEnabled:true,mcpApprovalMode:'prompt',ephemeral:false});
     const call = await codex.request('mcpServer/tool/call',{threadId:thread.id,server:'fixture',tool:'echo',arguments:{text:'MCP works'}});
     expect(JSON.stringify(call)).toContain('MCP works');
     codex.stop();
-    const continued = await codex.request('thread/resume',{threadId:thread.id,history:[{type:'message',role:'user',content:[{type:'input_text',text:'Local MCP test'}]}],mcpEnabled:true});
+    const continued = await codex.request('thread/resume',{threadId:thread.id,history:[{type:'message',role:'user',content:[{type:'input_text',text:'Local MCP test'}]}],mcpEnabled:true,mcpApprovalMode:'writes'});
     const resumed = await codex.request('mcpServer/tool/call',{threadId:continued.thread.id,server:'fixture',tool:'echo',arguments:{text:'Resume works'}});
     expect(JSON.stringify(resumed)).toContain('Resume works');
     const disabled = await codex.request('thread/start',{mcpEnabled:false});
