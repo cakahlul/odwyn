@@ -19,12 +19,12 @@ function updateConversationFrame() {
   if (!preview) return;
   const current = frame?.jobId === preview.dataset.job || frame?.jobId === undefined && getState()?.runtime.activeJobId === preview.dataset.job ? frame : null;
   const image = $('#conversation-browser-image'), status = $('#conversation-browser-status');
-  image.hidden = !current?.image;
+  image.hidden = !current?.image || !!current?.loading;
   if (current?.image) image.src = `data:image/jpeg;base64,${current.image}`;
   else image.removeAttribute('src');
-  status.hidden = !!current?.image;
-  status.textContent = current?.dialog ? `Website confirmation: ${current.dialog}. Open browser controls to respond.` : 'Waiting for the browser preview…';
-  $('#conversation-browser-url').textContent = current?.url === 'about:blank' ? 'Ready for a website' : current?.url || '';
+  status.hidden = !!current?.image && !current?.loading;
+  status.textContent = current?.dialog ? `Website confirmation: ${current.dialog}. Open browser controls to respond.` : current?.loading ? 'Waiting for the popup website to open…' : 'Waiting for the browser preview…';
+  $('#conversation-browser-url').textContent = current?.loading ? 'Waiting for popup website…' : current?.url === 'about:blank' ? 'Ready for a website' : current?.url || '';
 }
 
 export async function refreshFrame() {
@@ -46,7 +46,7 @@ export async function refreshFrame() {
       if (!image) { current.innerHTML = '<img id="browser-image" alt="Live preview of the assistant browser. Take control to interact." draggable="false">'; image = $('#browser-image'); }
       image.src = `data:image/jpeg;base64,${frame.image}`;
     }
-    $('#browser-url').textContent = frame.url === 'about:blank' ? 'Ready for a website' : frame.url;
+    $('#browser-url').textContent = frame.loading ? 'Waiting for popup website…' : frame.url === 'about:blank' ? 'Ready for a website' : frame.url;
     $('#browser-url').title = frame.url;
     const tabs = frame.tabs || [];
     let select = $('#browser-tabs');

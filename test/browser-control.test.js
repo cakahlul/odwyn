@@ -13,8 +13,8 @@ test('browser takeover explains queued work, Open browser preserves control, Han
   codex.stop = () => {};
   codex.request = async method => method === 'account/read' ? { account: { type: 'chatgpt' } }
     : method.startsWith('thread/') ? { thread: { id: 'thread-test' } } : { turn: { id: 'turn-test' } };
-  let starts = 0;
-  const assistantBrowser = { context: null, frame: async () => null, close: async () => {},
+  let starts = 0, preview = null;
+  const assistantBrowser = { context: null, frame: async () => preview, close: async () => {},
     serial: async fn => fn(), start: async () => { starts++; assistantBrowser.context = {}; } };
   let app;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => app.fetch(request) });
@@ -43,6 +43,14 @@ test('browser takeover explains queued work, Open browser preserves control, Han
     expect(app.runtime.takeover).toBe(false);
     expect(job.status).toBe('running');
     expect(job.turnId).toBe('turn-test');
+    job.browserUsed = true;
+    preview = {jobId:job.id,url:'about:blank',loading:true,image:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=',tabs:[]};
+    app.runtime.changed();
+    await page.locator('#conversation-browser-status').filter({hasText:'Waiting for the popup website to open'}).waitFor();
+    expect(await page.locator('#conversation-browser-image').evaluate(image=>image.hidden)).toBe(true);
+    preview = {...preview,loading:false,url:'https://login.example.test/'};
+    await page.waitForFunction(() => !document.querySelector('#conversation-browser-image').hidden);
+    expect(await page.locator('#conversation-browser-status').evaluate(status=>status.hidden)).toBe(true);
   } finally {
     await browser.close(); server.stop(true); await app.close(); rmSync(directory, { recursive: true, force: true });
   }

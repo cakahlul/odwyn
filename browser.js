@@ -10,6 +10,7 @@ export class Browser {
     this.directory = directory; this.onFile = onFile; this.findFile = findFile;
     this.executablePath = executablePath; this.headless = headless;
     this.context = null; this.page = null; this.proxy = null; this.tail = Promise.resolve(); this.owner = null; this.dialog = null; this.generation = 0;
+    this.openers = new WeakMap();
   }
 
   serial(fn, timeout = 45_000) {
@@ -63,6 +64,7 @@ export class Browser {
   }
 
   attach(page) {
+    page.on('popup', popup => this.openers.set(popup, page));
     page.on('dialog', dialog => { this.dialog = dialog; this.page = page; });
     page.on('download', async download => {
       const owner = this.owner;
@@ -73,44 +75,75 @@ export class Browser {
         this.onFile({ id, name, kind: 'download', jobId: owner, createdAt: new Date().toISOString() });
       } catch { /* Failed downloads are not reported as saved files. */ }
     });
-    page.on('close', () => { if (this.page === page) this.page = this.context?.pages()[0] || null; });
+    page.on('close', () => {
+      if (this.page !== page) return;
+      const opener = this.openers.get(page);
+      this.page = opener && !opener.isClosed() ? opener : this.context?.pages().find(other => other !== page && !other.isClosed()) || null;
+      this.dialog = null; this.last = null;
+    });
+  }
+
+  async readyPage() {
+    const page = this.page, context = this.context;
+    if (!page || this.dialog || !this.openers.has(page)) return page;
+    try {
+      if (page.url() === 'about:blank') {
+        try { await page.waitForURL(url => url.href !== 'about:blank', {waitUntil:'domcontentloaded', timeout:2000}); }
+        catch (error) { if (error.name !== 'TimeoutError' || page.isClosed() || page.url() !== 'about:blank') throw error; }
+      }
+      if (page.url() !== 'about:blank') await page.waitForLoadState('domcontentloaded', {timeout:12_000});
+      return page;
+    } catch (error) {
+      if (page.isClosed() && this.context === context && this.page && this.page !== page) return this.readyPage();
+      throw error;
+    }
   }
 
   async snapshot(includeImage = false) {
+    const page = await this.readyPage();
     if (this.dialog) return { url: this.page.url(), text: `Browser dialog: ${this.dialog.message()}. Use dialog action to accept or dismiss.`, elements: [], tabs: [] };
-    const page = this.page;
-    const result = await page.evaluate(() => {
-      const controls = [...document.querySelectorAll('a[href],button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"]')]
-        .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden').slice(0, 240);
-      document.querySelectorAll('[data-odwyn-ref]').forEach(el => el.removeAttribute('data-odwyn-ref'));
-      const images = [...document.images].filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden')
-        .map(el => ({ url:el.currentSrc || el.src, alt:(el.alt || el.title || '').slice(0,180) }));
-      for (const meta of document.querySelectorAll('meta[property="og:image"],meta[name="twitter:image"]')) {
-        try { images.push({url:new URL(meta.content,location.href).href,alt:document.title}); } catch { /* Invalid page metadata. */ }
-      }
-      return {
-        text: (document.body?.innerText || '').slice(0, 16_000),
-        images:images.filter((image,index) => /^https?:\/\//i.test(image.url) && images.findIndex(other=>other.url===image.url) === index).slice(0,24),
-        elements: controls.map((el, i) => {
-          el.setAttribute('data-odwyn-ref', String(i));
-          const label = el.getAttribute('aria-label') || el.labels?.[0]?.innerText || el.getAttribute('placeholder') || el.innerText || el.getAttribute('title') || el.getAttribute('name') || el.tagName.toLowerCase();
-          return { ref: String(i), tag: el.tagName.toLowerCase(), type: el.getAttribute('type') || null, label: label.trim().slice(0, 180), href: el.tagName === 'A' ? el.href : undefined, options: el.tagName === 'SELECT' ? [...el.options].map(o => ({ value: o.value, label: o.text })) : undefined };
-        }),
-      };
-    });
-    result.url = page.url(); result.title = await page.title();
-    result.tabs = await Promise.all(this.context.pages().map(async (p, index) => ({ index, url: p.url(), title: await p.title().catch(() => ''), active: p === page })));
-    result.viewport = { width: 1280, height: 800 };
-    this.last = result;
-    if (includeImage) result.image = (await page.screenshot({ type: 'jpeg', quality: 70 })).toString('base64');
-    return result;
+    const context = this.context;
+    try {
+      const result = await page.evaluate(() => {
+        const controls = [...document.querySelectorAll('a[href],button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"]')]
+          .filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden').slice(0, 240);
+        document.querySelectorAll('[data-odwyn-ref]').forEach(el => el.removeAttribute('data-odwyn-ref'));
+        const images = [...document.images].filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden')
+          .map(el => ({ url:el.currentSrc || el.src, alt:(el.alt || el.title || '').slice(0,180) }));
+        for (const meta of document.querySelectorAll('meta[property="og:image"],meta[name="twitter:image"]')) {
+          try { images.push({url:new URL(meta.content,location.href).href,alt:document.title}); } catch { /* Invalid page metadata. */ }
+        }
+        return {
+          text: (document.body?.innerText || '').slice(0, 16_000),
+          images:images.filter((image,index) => /^https?:\/\//i.test(image.url) && images.findIndex(other=>other.url===image.url) === index).slice(0,24),
+          elements: controls.map((el, i) => {
+            el.setAttribute('data-odwyn-ref', String(i));
+            const label = el.getAttribute('aria-label') || el.labels?.[0]?.innerText || el.getAttribute('placeholder') || el.innerText || el.getAttribute('title') || el.getAttribute('name') || el.tagName.toLowerCase();
+            return { ref: String(i), tag: el.tagName.toLowerCase(), type: el.getAttribute('type') || null, label: label.trim().slice(0, 180), href: el.tagName === 'A' ? el.href : undefined, options: el.tagName === 'SELECT' ? [...el.options].map(o => ({ value: o.value, label: o.text })) : undefined };
+          }),
+        };
+      });
+      result.url = page.url(); result.title = await page.title();
+      result.loading = this.openers.has(page) && result.url === 'about:blank';
+      if (result.loading) result.text = 'Popup is waiting for its website to open. Read again after navigation; if it stays blank, ask the owner to take browser control.';
+      // Reading a background popup's title can block on its navigation or dialog.
+      result.tabs = this.context.pages().map((p, index) => ({ index, url: p.url(), title: p === page ? result.title : this.last?.tabs?.find(tab => tab.url === p.url())?.title || '', active: p === page }));
+      result.viewport = { width: 1280, height: 800 };
+      this.last = result;
+      if (includeImage) result.image = (await page.screenshot({ type: 'jpeg', quality: 70 })).toString('base64');
+      return result;
+    } catch (error) {
+      if (page.isClosed() && this.context === context && this.page && this.page !== page) return this.snapshot(includeImage);
+      throw error;
+    }
   }
 
   inspectAction(action) {
     return this.serial(async () => {
       if (!this.page || this.page.isClosed()) return {};
+      const page = await this.readyPage();
       if (this.dialog) return {url:this.page.url(),dialog:{type:this.dialog.type(),message:this.dialog.message()}};
-      return this.page.evaluate(({ref,keyboard,x,y}) => {
+      return page.evaluate(({ref,keyboard,x,y}) => {
         const hit = Number.isFinite(x) && Number.isFinite(y) ? document.elementFromPoint(x,y) : null;
         const el = ref !== null ? document.querySelector(`[data-odwyn-ref="${ref}"]`) : keyboard ? document.activeElement : hit?.closest('button,a,input,select,textarea,label,[role="button"],[role="option"],[role="link"],[onclick]') || hit;
         return { url:location.href, hasPaymentFields:[...document.querySelectorAll('[autocomplete^="cc-"]')].some(field=>field.getClientRects().length && getComputedStyle(field).visibility !== 'hidden'), element:el && el !== document.body && el !== document.documentElement && el.tagName !== 'IFRAME' && !el.shadowRoot ? {
@@ -172,8 +205,9 @@ export class Browser {
   frame() {
     return this.serial(async () => {
       if (!this.context || !this.page || this.page.isClosed()) return null;
+      const page = await this.readyPage();
       if (this.dialog) return { jobId: this.owner, url: this.page.url(), dialog: this.dialog.message(), tabs: [] };
-      return { jobId: this.owner, url: this.page.url(), title: await this.page.title(), image: (await this.page.screenshot({ type: 'jpeg', quality: 65 })).toString('base64'), width: 1280, height: 800,
+      return { jobId: this.owner, url: page.url(), loading: this.openers.has(page) && page.url() === 'about:blank', title: await page.title(), image: (await page.screenshot({ type: 'jpeg', quality: 65 })).toString('base64'), width: 1280, height: 800,
         tabs: this.context.pages().map((page, index) => ({ index, url: page.url(), active: page === this.page })) };
     });
   }

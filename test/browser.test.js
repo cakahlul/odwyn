@@ -5,6 +5,58 @@ import { join } from 'node:path';
 import { browserActionRisk } from '../security.js';
 import { Browser } from '../browser.js';
 
+test('login popups wait for delayed navigation, return to their opener, and preserve background selection', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'odwyn-browser-popup-'));
+  const browser = new Browser({directory});
+  try {
+    await browser.action({action:'read'});
+    const unrelated = browser.page;
+    await unrelated.setContent('<h1>Unrelated tab</h1>');
+    const title = unrelated.title.bind(unrelated);
+    let backgroundTitleReads = 0;
+    unrelated.title = () => { backgroundTitleReads++; return new Promise(() => {}); };
+    const opener = await browser.context.newPage();
+    await browser.context.route('https://login.example.test/**', route => route.fulfill({contentType:'text/html',body:'<title>Sign in</title><h1>Login ready</h1><button onclick="window.close()">Finish login</button>'}));
+    await opener.setContent(`<h1>Report</h1><button onclick="const login=window.open('about:blank','login');setTimeout(()=>login.location='https://login.example.test/',150)">Login</button>`);
+    await browser.action({action:'read'});
+    const opened = opener.waitForEvent('popup');
+    const result = await browser.action({action:'click',ref:'0'});
+    const popup = await opened;
+    expect(result.url).toBe('https://login.example.test/');
+    expect(result.text).toContain('Login ready');
+    expect(backgroundTitleReads).toBe(0);
+    unrelated.title = title;
+    expect(browser.page).toBe(popup);
+    const closed = await browser.action({action:'click',ref:result.elements.find(el=>el.tag==='button').ref});
+    expect(browser.page).toBe(opener);
+    expect(closed.text).toContain('Report');
+    expect(unrelated.isClosed()).toBe(false);
+
+    const backgroundOpened = opener.waitForEvent('popup');
+    await opener.evaluate(() => window.open('about:blank', 'background'));
+    const background = await backgroundOpened;
+    await browser.action({action:'tab',index:0});
+    await background.close();
+    expect(browser.page).toBe(unrelated);
+  } finally { await browser.close(); rmSync(directory,{recursive:true,force:true}); }
+}, 15_000);
+
+test('blank popups report pending navigation instead of returning empty results', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'odwyn-browser-blank-popup-'));
+  const browser = new Browser({directory});
+  try {
+    await browser.action({action:'read'});
+    await browser.page.setContent(`<button onclick="window.open('about:blank','login')">Login</button>`);
+    await browser.action({action:'read'});
+    const snapshot = await browser.action({action:'click',ref:'0'});
+    expect(snapshot.loading).toBe(true);
+    expect(snapshot.text).toContain('Popup is waiting');
+    expect((await browser.frame()).loading).toBe(true);
+    const closed = await browser.action({action:'close_tab'});
+    expect(closed.text).toContain('Login');
+  } finally { await browser.close(); rmSync(directory,{recursive:true,force:true}); }
+}, 15_000);
+
 test('stalled page reads time out or stop, close the context, and release queued work', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'odwyn-browser-stall-'));
   const browser = new Browser({directory});
