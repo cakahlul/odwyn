@@ -395,16 +395,31 @@ function updateAccount() {
   const account = connection.account;
   const type = (providerGlobal ? workspace.globalProvider : state.provider).type;
   $('#account-title').textContent = providers[type][0];
-  $('#account-description').textContent = connection.connectionError || (type === 'claude' ? (account ? `Signed in${account.email ? ` as ${account.email}` : ''}.` : 'Run claude auth login on the server, then refresh.') : type === 'openai' ? 'Requests use your configured API URL and model. Provider API billing applies.' : account?.email || 'Connect your ChatGPT account to start working.');
-  $('#connect-account').textContent = account || type !== 'codex' ? 'Refresh' : 'Connect';
+  $('#account-description').textContent = connection.connectionError || (type === 'claude' ? (account ? `Signed in${account.email ? ` as ${account.email}` : ''}.` : 'Connect your Claude account to start working.') : type === 'openai' ? 'Requests use your configured API URL and model. Provider API billing applies.' : account?.email || 'Connect your ChatGPT account to start working.');
+  $('#connect-account').textContent = account || type === 'openai' ? 'Refresh' : 'Connect';
   const login = connection.login;
   $('#login-instructions').hidden = !login || $('#provider-account-box').hidden;
   if (login?.verificationUrl) {
-    const node = $('#login-instructions'); node.replaceChildren();
-    const p = document.createElement('p'); p.textContent = 'Open the sign-in page and enter this one-time code:';
-    const code = document.createElement('code'); code.textContent = login.userCode;
-    const link = document.createElement('a'); link.textContent = 'Open ChatGPT sign-in ↗'; link.href = login.verificationUrl; link.target = '_blank'; link.rel = 'noopener noreferrer'; node.append(p,code,link);
-  } else if (login?.error) $('#login-instructions').textContent = login.error;
+    const node = $('#login-instructions');
+    if (node.dataset.loginId === login.loginId) return;
+    node.dataset.loginId = login.loginId; node.replaceChildren();
+    const p = document.createElement('p'); p.textContent = login.manual ? 'Open Claude sign-in, then paste the code shown after authorization.' : 'Open the sign-in page and enter this one-time code:';
+    const link = document.createElement('a'); link.textContent = `Open ${login.manual ? 'Claude' : 'ChatGPT'} sign-in ↗`; link.href = login.verificationUrl; link.target = '_blank'; link.rel = 'noopener noreferrer'; node.append(p,link);
+    if (login.manual) {
+      const label = document.createElement('label'); label.htmlFor = 'provider-login-code'; label.textContent = 'Sign-in code';
+      const input = document.createElement('input'); input.id = 'provider-login-code'; input.type = 'password'; input.autocomplete = 'off'; input.maxLength = 4000;
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'secondary-button'; button.textContent = 'Complete sign-in';
+      input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); button.click(); } };
+      const status = document.createElement('p'); status.setAttribute('role','status');
+      button.onclick = async () => {
+        button.disabled = true; status.textContent = 'Connecting…';
+        try { await api(`/api/account/login/complete?${providerGlobal ? 'scope=global' : `agentId=${providerAgentId}`}`,{code:input.value}); input.value = ''; await refresh(); }
+        catch (error) { status.textContent = error.message; }
+        finally { button.disabled = false; }
+      };
+      node.append(label,input,button,status);
+    } else { const code = document.createElement('code'); code.textContent = login.userCode; node.insertBefore(code,link); }
+  } else { delete $('#login-instructions').dataset.loginId; if (login?.error) $('#login-instructions').textContent = login.error; }
 }
 function providerFields() {
   const type = $('#provider-type').value, isAPI = type === 'openai';
@@ -417,9 +432,13 @@ function providerFields() {
   $('#provider-api-fields').hidden = !isAPI;
   $('#provider-base-url').disabled = $('#provider-api-key').disabled = !isAPI;
   $('#provider-base-url').required = isAPI;
-  $('#provider-hint').textContent = type === 'claude' ? 'Uses Claude Code on this server. Sign in with claude auth login, then refresh below.' : isAPI ? 'Use a base URL such as https://api.openai.com/v1. Model must support tool calling; screenshots need vision.' : 'Uses Codex App Server with your ChatGPT subscription. Connect below after saving.';
+  $('#provider-hint').textContent = type === 'claude' ? 'Uses Claude Code on this server with your Claude account. Connect below after saving.' : isAPI ? 'Use a base URL such as https://api.openai.com/v1. Model must support tool calling; screenshots need vision.' : 'Uses Codex App Server with your ChatGPT subscription. Connect below after saving.';
 }
-function openSettings() {
+let workspaceSetup = false;
+function openSettings(onboarding = false) {
+  workspaceSetup = onboarding === true;
+  $('#settings-title').textContent = workspaceSetup ? 'Set up your workspace' : 'Odwyn settings';
+  $('#preferences-form button.primary-button').innerHTML = workspaceSetup ? `Continue to first agent${icon('arrow-up-right')}` : `Save changes${icon('check')}`;
   providerGlobal = true; providerAdding = false;
   $('#settings-provider-editor').append($('#provider-editor'));
   $('#provider-editor').hidden = false;
@@ -439,8 +458,34 @@ function fillProvider(config) {
   $('#provider-type').value = config.type; $('#provider-model').value = config.model;
   $('#provider-base-url').value = config.baseUrl; $('#provider-api-key').value = '';
   $('#provider-api-key').placeholder = config.hasApiKey ? 'Saved key — leave blank to keep' : 'Optional for local models';
-  providerFields(); $('#provider-effort').value = config.effort || 'default'; updateAccount();
+  providerFields(); $('#provider-effort').value = config.effort || 'default'; updateAccount(); void loadProviderModels();
 }
+let modelRequest = 0;
+async function loadProviderModels() {
+  const request = ++modelRequest, input = providerInput(), list = $('#provider-model-list');
+  list.hidden = true; list.replaceChildren(); $('#provider-model').hidden = false;
+  $('#provider-model-label').htmlFor = 'provider-model';
+  $('#provider-model-hint').textContent = 'Loading available models…';
+  try {
+    const {models} = await api(`/api/provider/models?${providerGlobal ? 'scope=global' : `agentId=${providerAgentId || state.agentId}`}`,input);
+    if (request !== modelRequest) return;
+    if (!models.length) throw new Error('No models returned.');
+    list.innerHTML = models.map(model => `<option value="${esc(model.id)}">${esc(model.name)}</option>`).join('') + '<option value="">Enter model manually…</option>';
+    list.value = models.some(model => model.id === $('#provider-model').value) ? $('#provider-model').value : '';
+    list.hidden = false; $('#provider-model').hidden = !!list.value;
+    $('#provider-model-label').htmlFor = 'provider-model-list';
+    $('#provider-model-hint').textContent = 'Choose a model, or enter one manually.';
+  } catch {
+    if (request === modelRequest) $('#provider-model-hint').textContent = 'Model list unavailable. Enter a model name manually.';
+  }
+}
+$('#provider-model-list').onchange = () => {
+  const value = $('#provider-model-list').value;
+  $('#provider-model').hidden = !!value;
+  if (value) $('#provider-model').value = value;
+  else $('#provider-model').focus();
+};
+$('#provider-base-url').onchange = $('#provider-api-key').onchange = () => { void loadProviderModels(); };
 function providerSource() {
   const inherited = $('#provider-source').value === 'global';
   $('#provider-editor').hidden = inherited;
@@ -464,6 +509,7 @@ $('#provider-type').onchange = () => {
   const config = providerGlobal ? workspace.globalProvider : state.provider, type = $('#provider-type').value;
   $('#provider-model').value = type === config.type ? config.model : providers[type][1];
   providerFields(); $('#provider-effort').value = type === config.type ? config.effort || 'default' : 'default';
+  void loadProviderModels();
 };
 const providerInput = () => ({type:$('#provider-type').value,model:$('#provider-model').value,effort:$('#provider-effort').value,baseUrl:$('#provider-base-url').value,apiKey:$('#provider-api-key').value});
 function search() {
@@ -599,11 +645,22 @@ $('#room-mentions').onclick = event => {
   prompt.setRangeText(`@${/^[\p{L}\p{N}_-]+$/u.test(name) ? name : JSON.stringify(name)} `,start,end,'end');
   prompt.focus(); prompt.dispatchEvent(new Event('input'));
 };
-$('#preferences-form').onsubmit = event => { event.preventDefault(); void perform(async () => { await api('/api/preferences',{ ...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$(`#global-${key}`).value])), provider:providerInput(), text:$('#preferences').value, currency:$('#preferred-currency').value, appearance:readWorkspaceAppearance() },'PUT'); $('#provider-api-key').value = ''; $('#settings-dialog').close(); toast('Settings saved. Applies to your next task.'); }); };
+$('#preferences-form').onsubmit = async event => {
+  event.preventDefault();
+  const continueSetup = workspaceSetup, button = $('#preferences-form button.primary-button');
+  button.disabled = true; $('#settings-status').textContent = 'Saving…';
+  try {
+    await api('/api/preferences',{ ...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$(`#global-${key}`).value])), provider:providerInput(), text:$('#preferences').value, currency:$('#preferred-currency').value, appearance:readWorkspaceAppearance() },'PUT');
+    await refresh(); $('#provider-api-key').value = ''; $('#settings-dialog').close();
+    if (continueSetup) openCustomization(true);
+    else toast('Settings saved. Applies to your next task.');
+  } catch (error) { $('#settings-status').textContent = error.message; }
+  finally { button.disabled = false; }
+};
 $('#connect-account').onclick = () => perform(async () => {
   const connection = providerGlobal ? workspace.globalRuntime : state.runtime, config = providerGlobal ? workspace.globalProvider : state.provider;
   $('#connect-account').disabled = true;
-  try { await api(`${connection.account || config.type !== 'codex' ? '/api/account/refresh' : '/api/account/login'}?${providerGlobal ? 'scope=global' : `agentId=${providerAgentId}`}`,{}); }
+  try { await api(`${connection.account || config.type === 'openai' ? '/api/account/refresh' : '/api/account/login'}?${providerGlobal ? 'scope=global' : `agentId=${providerAgentId}`}`,{}); }
   finally { $('#connect-account').disabled = false; }
 });
 $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(async () => {
@@ -685,7 +742,7 @@ await refresh();
 if (state && agentId) { restoreDraft(); signature = ''; render(); }
 const initial = location.hash.slice(1).split('/');
 if (agentId && ['chat','runs','routines','files','workflows'].includes(initial[0])) { view = initial[0]; conversationId = initial[1] || null; signature = ''; render(); }
-if (state && agentId && !state.customization) openCustomization(true,false,true);
+if (state && agentId && !state.customization) openSettings(true);
 else if (state && agentId && !workspace.globalProvider.configured) openSettings();
 setInterval(() => { if (!document.hidden) void refresh(); }, 1000);
 

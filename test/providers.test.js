@@ -18,6 +18,47 @@ const wait = async condition => {
 };
 const fakeCodex = () => Object.assign(new EventEmitter(), { request: async () => ({ account: null }), stop() {} });
 
+test('Claude login uses SDK OAuth, checks state, hides exchange errors, and closes login sessions',async()=>{
+  let closed=0,callback,fail=false;const events=[];
+  const provider=new AIProvider({config:{type:'claude',model:'sonnet'},workspace:tmpdir(),codex:fakeCodex(),query:({prompt,options})=>{
+    expect(options.tools).toEqual([]);expect(options.strictMcpConfig).toBe(true);
+    return {claudeAuthenticate:async subscription=>{expect(subscription).toBe(true);expect((await prompt.next()).done).toBe(true);return {manualUrl:'https://claude.com/cai/oauth/authorize?state=expected'};},claudeOAuthCallback:async(code,state)=>{callback={code,state};if(fail)throw new Error('secret-token');return {account:{email:'test@example.com'}};},close(){closed++;}};
+  }});
+  provider.on('notification',event=>events.push(event));
+  try {
+    const login=await provider.request('account/login/start');expect(login.manual).toBe(true);expect(login.verificationUrl).toContain('https://claude.com/');
+    await expect(provider.request('account/login/complete',{loginId:login.loginId,code:'code#wrong'})).rejects.toThrow('Paste the sign-in code');expect(callback).toBeUndefined();
+    fail=true;await expect(provider.request('account/login/complete',{loginId:login.loginId,code:'code#expected'})).rejects.toThrow('Claude sign-in failed. Check the code or connect again.');
+    expect(provider.login).not.toBeNull();fail=false;
+    await provider.request('account/login/complete',{loginId:login.loginId,code:'code#expected'});expect(callback).toEqual({code:'code',state:'expected'});expect(provider.login).toBeNull();expect(closed).toBe(1);
+    expect(events.at(-1)).toMatchObject({method:'account/login/completed',params:{success:true}});
+    await expect(provider.request('account/login/complete',{loginId:login.loginId,code:'code'})).rejects.toThrow('expired');
+    await provider.request('account/login/start');await provider.request('account/login/cancel');expect(closed).toBe(2);
+    await provider.request('account/login/start');provider.stop();expect(closed).toBe(3);
+    provider.query=()=>({claudeAuthenticate:async()=>{throw new Error('secret-token');},close(){closed++;}});
+    await expect(provider.request('account/login/start')).rejects.toThrow('Claude sign-in could not start.');expect(provider.login).toBeNull();expect(closed).toBe(4);
+  } finally {provider.stop();}
+});
+
+test('model discovery uses provider catalogs, paginates Codex, and closes Claude without inference', async () => {
+  const calls = []; let closed = false;
+  const provider = new AIProvider({config:{type:'codex',model:'saved'},workspace:tmpdir(),codex:Object.assign(new EventEmitter(),{
+    request:async(method,params)=>{calls.push({method,params});return params.cursor ? {data:[{model:'second',displayName:'Second'}],nextCursor:null} : {data:[{model:'first',displayName:'First'}],nextCursor:'next'};},stop(){},
+  }),query:({prompt})=>({supportedModels:async()=>{expect((await prompt.next()).done).toBe(true);return [{value:'sonnet',displayName:'Sonnet'}];},close(){closed=true;}}),fetch:async(url,options)=>{
+    expect(url).toBe('https://models.example/v1/models');expect(options.headers.authorization).toBe('Bearer saved-key');expect(options.redirect).toBe('error');
+    return Response.json({data:[{id:'api-model'}]});
+  }});
+  expect(await provider.listModels()).toEqual([{id:'first',name:'First'},{id:'second',name:'Second'}]);
+  expect(calls.map(call=>call.method)).toEqual(['model/list','model/list']);expect(calls[1].params.cursor).toBe('next');
+  expect(await provider.listModels({type:'claude'})).toEqual([{id:'sonnet',name:'Sonnet'}]);expect(closed).toBe(true);
+  expect(await provider.listModels({type:'openai',baseUrl:'https://models.example/v1',apiKey:'saved-key'})).toEqual([{id:'api-model',name:'api-model'}]);
+  expect(provider.config).toEqual({type:'codex',model:'saved'});
+  closed=false;provider.query=()=>({supportedModels:async()=>{throw new Error('Unavailable');},close(){closed=true;}});
+  await expect(provider.listModels({type:'claude'})).rejects.toThrow('Unavailable');expect(closed).toBe(true);
+  provider.fetch=async()=>new Response('',{status:401});
+  await expect(provider.listModels({type:'openai',baseUrl:'https://models.example/v1'})).rejects.toThrow('HTTP 401');
+});
+
 test('provider settings validate, persist, protect keys, and preserve chats and knowledge', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'odwyn-provider-api-'));
   const browser = { close: async () => {} };
@@ -46,7 +87,7 @@ test('provider settings validate, persist, protect keys, and preserve chats and 
     app.runtime.active = null;
     expect((await request('/api/provider', 'PUT', { type: 'claude', model: 'sonnet', effort:'high' })).status).toBe(200);
     expect(app.runtime.account.type).toBe('claude');
-    expect((await request('/api/account/login', 'POST', {})).status).toBe(400);
+    expect((await request('/api/account/login/complete', 'POST', {code:'expired'})).status).toBe(400);
     expect(app.runtime.state.conversations).toHaveLength(1); expect(app.runtime.state.preferences).toBe('Use Jakarta time.');
     await app.close(); app = createApp({ ...options, codex: fakeCodex() });
     expect(app.runtime.state.provider.type).toBe('claude');

@@ -248,6 +248,13 @@ export function createApp(options = {}) {
           if (appearance !== undefined) store.state.appearance = appearance;
           runtime.changed(); await Promise.all(changedAgents.map(agent => runtime.refreshAccount(agent.id))); return response({ ok: true });
         }
+        if (pathname === '/api/provider/models' && req.method === 'POST') {
+          const input = await json(req), global = url.searchParams.get('scope') === 'global';
+          const agent = global ? globalConnection(true) : findAgent(store.state,url.searchParams.get('agentId') ?? undefined);
+          const config = validateProvider({...input, model:input.model || providerModels[input.type] || 'discovery'}, global ? store.state.globalProvider : agent.provider);
+          const models = await runtime.providers.get(agent.id).listModels(config);
+          return response({models:models.filter(model => typeof model.id === 'string' && model.id.trim() && model.id.length <= 200 && !/[\x00-\x1f\x7f]/.test(model.id))});
+        }
         if (pathname === '/api/provider' && req.method === 'PUT') {
           const input = await json(req), global = url.searchParams.get('scope') === 'global';
           if (input.inherit !== undefined && typeof input.inherit !== 'boolean') throw new Error('Choose a provider source.');
@@ -262,11 +269,20 @@ export function createApp(options = {}) {
         if (pathname === '/api/account/login' && req.method === 'POST') {
           const agent = url.searchParams.get('scope') === 'global' ? globalConnection(true) : findAgent(store.state, url.searchParams.get('agentId') ?? undefined);
           const provider = runtime.providers.get(agent.id); let login = logins.get(agent.id);
-          if (agent.provider.type !== 'codex') throw new Error('Use your provider’s sign-in instructions in Settings.');
-          if (runtime.active) throw new Error('Stop the active task before changing your Codex sign-in.');
+          if (!['codex','claude'].includes(agent.provider.type)) throw new Error('Enter an API key in provider settings.');
+          if (runtime.active) throw new Error('Stop the active task before changing your provider sign-in.');
           if (login?.loginId) await provider.request('account/login/cancel', { loginId: login.loginId }).catch(() => {});
           login = await provider.request('account/login/start', { type: 'chatgptDeviceCode' }); logins.set(agent.id, login); runtime.changed();
           return response(login);
+        }
+        if (pathname === '/api/account/login/complete' && req.method === 'POST') {
+          const agent = url.searchParams.get('scope') === 'global' ? globalConnection(true) : findAgent(store.state,url.searchParams.get('agentId') ?? undefined);
+          if (agent.provider.type !== 'claude') throw new Error('Code submission is only available for Claude Code.');
+          if (runtime.active) throw new Error('Stop the active task before changing your provider sign-in.');
+          const login = logins.get(agent.id);
+          if (!login?.loginId) throw new Error('Sign-in expired. Connect again.');
+          await runtime.providers.get(agent.id).request('account/login/complete',{loginId:login.loginId,code:textInput((await json(req)).code,4000)});
+          logins.delete(agent.id); await runtime.refreshAccount(agent.id); return response({ok:true});
         }
         if (pathname === '/api/browser/frame' && req.method === 'GET') return response(await browser.frame());
         if (pathname === '/api/browser/takeover' && req.method === 'POST') {

@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Codex } from './codex.js';
 import { effortLevels } from './public/profile.js';
+import { textInput } from './security.js';
 
 export const providerModels = { codex: 'gpt-6.1-sol', claude: 'sonnet', openai: '' };
 export const providerNames = { codex: 'Codex', claude: 'Claude Code', openai: 'OpenAI-compatible API' };
@@ -39,14 +40,80 @@ export class AIProvider extends EventEmitter {
   get child() { return this.config.type === 'codex' ? this.codex.child : this.token; }
   configure(config) { this.stop(); this.config = config; this.codex.model = config.model; this.codex.effort = config.effort; this.thread = null; }
 
+  async listModels(config = this.config) {
+    if (config.type === 'codex') {
+      const models = []; let cursor = null;
+      do {
+        const page = await this.codex.request('model/list', { limit:100, cursor, includeHidden:false });
+        models.push(...page.data.map(model => ({id:model.model, name:model.displayName || model.model})));
+        cursor = page.nextCursor;
+      } while (cursor);
+      return models;
+    }
+    if (config.type === 'claude') {
+      const { query } = await import('@anthropic-ai/claude-agent-sdk');
+      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15_000);
+      let stream;
+      try {
+        stream = (this.query || query)({prompt:(async function* () {})(), options:{
+          cwd:this.workspace, pathToClaudeCodeExecutable:Bun.which(this.claudeCommand) || this.claudeCommand,
+          abortController:controller, tools:[], settingSources:[], mcpServers:{}, strictMcpConfig:true,
+          settings:{disableAllHooks:true}, env:{...process.env, CLAUDECODE:undefined},
+        }});
+        return (await stream.supportedModels()).map(model => ({id:model.value, name:model.displayName || model.value}));
+      } finally { clearTimeout(timer); stream?.close(); }
+    }
+    const response = await this.fetch(`${config.baseUrl}/models`, {
+      redirect:'error', signal:AbortSignal.timeout(15_000),
+      headers:config.apiKey ? {authorization:`Bearer ${config.apiKey}`} : {},
+    });
+    if (!response.ok) throw new Error(`Model list returned HTTP ${response.status}.`);
+    return (await response.json()).data.map(model => ({id:model.id, name:model.id}));
+  }
+
   async request(method, params = {}) {
     if (this.config.type === 'codex') return this.codex.request(method, params);
+    if (this.config.type === 'claude' && method === 'account/login/start') {
+      this.cancelLogin();
+      const { query } = await import('@anthropic-ai/claude-agent-sdk');
+      const controller = new AbortController(), login = {id:randomUUID(),controller};
+      this.login = login;
+      login.timer = setTimeout(() => {
+        if (this.login !== login) return;
+        this.cancelLogin(); this.emit('notification',{method:'account/login/completed',params:{success:false,error:'Sign-in expired. Connect again.'}});
+      }, 5 * 60_000);
+      try {
+        login.stream = (this.query || query)({prompt:(async function* () {})(),options:{
+          cwd:this.workspace, pathToClaudeCodeExecutable:Bun.which(this.claudeCommand) || this.claudeCommand,
+          abortController:controller, tools:[], settingSources:[], mcpServers:{}, strictMcpConfig:true,
+          settings:{disableAllHooks:true}, env:{...process.env,CLAUDECODE:undefined},
+        }});
+        // ponytail: OAuth controls exist in the pinned SDK runtime; check them when upgrading the SDK.
+        const result = await login.stream.claudeAuthenticate(true), url = new URL(result.manualUrl);
+        if (this.login !== login) throw new Error('Sign-in cancelled.');
+        if (url.protocol !== 'https:' || !['claude.ai','claude.com','console.anthropic.com','platform.claude.com'].includes(url.hostname)) throw new Error('Invalid Claude sign-in URL.');
+        login.state = url.searchParams.get('state');
+        return {loginId:login.id,verificationUrl:url.href,manual:true};
+      } catch { if (this.login === login) this.cancelLogin(); throw new Error('Claude sign-in could not start. Check Claude Code installation and try again.'); }
+    }
+    if (this.config.type === 'claude' && method === 'account/login/cancel') { this.cancelLogin(); return {}; }
+    if (this.config.type === 'claude' && method === 'account/login/complete') {
+      const login = this.login;
+      if (!login || login.id !== params.loginId) throw new Error('Sign-in expired. Connect again.');
+      const [code,state] = textInput(params.code,4000).split('#');
+      if (!code || /\s/.test(code) || state && state !== login.state) throw new Error('Paste the sign-in code from Claude.');
+      try { await login.stream.claudeOAuthCallback(code,login.state); }
+      catch { throw new Error('Claude sign-in failed. Check the code or connect again.'); }
+      if (this.login !== login) throw new Error('Sign-in expired. Connect again.');
+      this.cancelLogin(); this.emit('notification',{method:'account/login/completed',params:{success:true}});
+      return {};
+    }
     if (method === 'account/read') {
       if (this.config.type === 'openai') return { account: { type: 'openai', planType: 'API' } };
       try {
         const status = this.claudeAuth ? await this.claudeAuth() : JSON.parse((await promisify(execFile)(this.claudeCommand, ['auth', 'status', '--json'], { cwd: this.workspace, timeout: 15_000, maxBuffer: 100_000 })).stdout);
         return { account: status.loggedIn ? { type: 'claude', planType: 'Claude Code', email: status.email } : null };
-      } catch { throw new Error('Claude Code is unavailable or signed out. Run claude auth login on the server, then refresh.'); }
+      } catch { throw new Error('Claude Code sign-in status is unavailable. Check installation, then connect again.'); }
     }
     if (method.startsWith('account/login')) throw new Error('Use your provider’s sign-in instructions in Settings.');
     if (method === 'thread/start' || method === 'thread/resume') {
@@ -177,9 +244,15 @@ export class AIProvider extends EventEmitter {
   }
 
   stop() {
+    this.cancelLogin();
     this.codex.stop();
     const run = this.run; this.run = null; run?.controller.abort(); run?.stream?.close?.();
     for (const pending of this.pending.values()) pending.reject(new Error('Task stopped.'));
     this.pending.clear(); this.token = {};
+  }
+
+  cancelLogin() {
+    const login = this.login; this.login = null;
+    if (login) { clearTimeout(login.timer); login.controller.abort(); login.stream?.close(); }
   }
 }
