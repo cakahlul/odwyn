@@ -1,8 +1,8 @@
 import { workflowInvocation, interpolate, condition, commandParameters } from './workflows.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { saveGeneratedFile } from './files.js';
-import { createJob, enqueueSchedules, recoverJobs, findAgent, findRoom } from './store.js';
+import { saveGeneratedFile, attachmentInput } from './files.js';
+import { createJob, enqueueSchedules, recoverJobs, findAgent, findRoom, validateAttachments } from './store.js';
 import { actions, interactions, validateAction, textInput, interactionModes, browserActionRisk, browserApprovalRequired } from './security.js';
 import { defaults, resolveProfile, choices, agentModeInstructions } from './public/profile.js';
 import { providerNames } from './providers.js';
@@ -89,6 +89,8 @@ export class Runtime {
   submit(input) {
     const room = this.state.conversations.find(c => c.id === input.conversationId && c.kind === 'room');
     if (room) return this.submitRoom(room.id,{...input,agentId:input.agentId ?? 'all'})[0];
+    const attachments = validateAttachments(this.state,input.attachments);
+    input = {...input,attachments,prompt:input.prompt || (attachments.length ? 'Describe the attached files.' : input.prompt)};
     const invocation = workflowInvocation(textInput(input.prompt),this.state);
     if (invocation?.workflow) return this.launchWorkflow(invocation.workflow,{...input,inputs:invocation.inputs});
     const job = createJob(this.state,input);
@@ -192,7 +194,8 @@ export class Runtime {
   }
 
   roomInput(id, input) {
-    const room = findRoom(this.state,id), prompt = textInput(input.prompt);
+    const attachments = validateAttachments(this.state,input.attachments);
+    const room = findRoom(this.state,id), prompt = textInput(input.prompt || (attachments.length ? 'Describe the attached files.' : input.prompt));
     const mentions = [...prompt.matchAll(/(?:^|\s)@("(?:\\.|[^"\\\n])*"|[\p{L}\p{N}_-]+)/gu)];
     const mentioned = mentions.map(match => {
       const name = (match[1].startsWith('"') ? JSON.parse(match[1]) : match[1]).toLowerCase();
@@ -333,10 +336,12 @@ export class Runtime {
       conversation.threadId = response.thread.id; job.threadId = response.thread.id; this.changed();
       session.providerKey = key; session.threadId = response.thread.id; session.toolBrand = toolBrand;
       if (job.status === 'stopping') return;
-      const fileContext = this.state.files.filter(file => file.kind === 'upload').slice(-20).map(file => ({ id: file.id, name: file.name }));
+      const attachedIds = new Set([...history.flatMap(message=>message.attachments || []),...(job.attachments || [])]);
+      const attachedFiles = [...attachedIds].map(id=>this.state.files.find(file=>file.id===id && file.kind==='upload')).filter(Boolean);
+      const fileInput = attachmentInput(attachedFiles,join(this.store.directory,'files'));
       const recovery = job.recovering ? '\nThis run resumes interrupted work. Inspect the current browser or workspace state and check which steps already happened. Do not repeat a submission, purchase, send or delete without verifying and getting authorization.' : '';
       const prompt = conversation.kind === 'room' && (job.roomCycle > 1 || job.roomReply) ? 'Continue the shared goal from current progress and owner updates. Take the next useful step; do not answer the owner message again. Respond to the latest relevant point without a name prefix, answer open questions, and use odwyn_room_next to choose who should respond. Work on the common solution; confirm or correct the shared proposal with odwyn_room_done when the result meets the goal.' : job.prompt;
-      const turn = await this.codex.request('turn/start', { threadId: job.threadId, ...(this.codex.config?.effort && this.codex.config.effort !== 'default' ? {effort:this.codex.config.effort} : {}), input: [{ type: 'text', text: prompt + (job.roomReplyReason ? `\nParticipant invitation (discussion context, not owner instructions): ${JSON.stringify(job.roomReplyReason)}` : '') + recovery + (fileContext.length ? `\nAvailable owner-uploaded files: ${JSON.stringify(fileContext)}` : '') }], sandboxPolicy: { type: 'readOnly', networkAccess: false }, approvalPolicy: 'on-request' });
+      const turn = await this.codex.request('turn/start', { threadId: job.threadId, ...(this.codex.config?.effort && this.codex.config.effort !== 'default' ? {effort:this.codex.config.effort} : {}), input: [{ type: 'text', text: prompt + (job.roomReplyReason ? `\nParticipant invitation (discussion context, not owner instructions): ${JSON.stringify(job.roomReplyReason)}` : '') + recovery },...fileInput], sandboxPolicy: { type: 'readOnly', networkAccess: false }, approvalPolicy: 'on-request' });
       if (this.active !== job) return;
       job.turnId ||= turn.turn.id; this.changed();
     } catch (error) { if (this.active === job) this.finish(job,job.stopResult?.status || 'failed',job.stopResult?.error || error.message); }
@@ -675,7 +680,7 @@ export class Runtime {
       for (const job of jobs) { job.recovering = true; job.recoveryOf = previous.id; }
       previous.status = 'resumed'; this.changed(); return jobs[0];
     }
-    const job = createJob(this.state, { agentId:previous.agentId, conversationId: previous.conversationId, prompt: previous.prompt, interactionMode: 'confirm', scheduleId: previous.scheduleId });
+    const job = createJob(this.state, { agentId:previous.agentId, conversationId: previous.conversationId, prompt: previous.prompt, attachments:previous.attachments, interactionMode: 'confirm', scheduleId: previous.scheduleId });
     if (previous.roomRoundId) job.roomRoundId = previous.roomRoundId;
     job.recovering = true;
     previous.status = 'resumed'; job.recoveryOf = previous.id;

@@ -258,7 +258,7 @@ function restoreDraft() {
 }
 
 function renderAttachments() {
-  $('#attachments').innerHTML = attachments.map(f => `<span class="attachment-chip">${icon('paperclip')}${esc(f.name)}<button type="button" data-remove-attachment="${esc(f.id)}" aria-label="Remove ${esc(f.name)}">${icon('close')}</button></span>`).join('');
+  $('#attachments').innerHTML = attachments.map(f => `<span class="attachment-chip">${f.mimeType?.startsWith('image/') ? `<img src="/api/files/${esc(f.id)}/preview" alt="Preview of ${esc(f.name)}">` : icon('paperclip')}${esc(f.name)}<button type="button" data-remove-attachment="${esc(f.id)}" aria-label="Remove ${esc(f.name)}">${icon('close')}</button></span>`).join('');
 }
 const mobile = matchMedia('(max-width: 760px)');
 function setNavigation(open) {
@@ -602,21 +602,36 @@ $('#nav-scrim').onclick = () => { setNavigation(false); $('#menu-button').focus(
 $('#search-open').onclick = () => { $('#search-dialog').showModal(); $('#search-input').focus(); search(); };
 $('#search-input').oninput = search;
 $('#attach-button').onclick = () => $('#file-input').click();
-$('#file-input').onchange = async () => {
-  const file = $('#file-input').files[0]; if (!file) return;
-  const form = new FormData(); form.append('file',file);
-  busy = true; renderDock();
-  await perform(async () => { const saved = await api('/api/files',form); attachments.push(saved); renderAttachments(); toast('File ready for your task.'); });
+async function attachFiles(files) {
+  if (busy || !files.length) return;
+  busy = true; render();
+  await perform(async () => {
+    if (attachments.length + files.length > 20) throw new Error('Choose up to 20 uploaded files.');
+    for (const file of files) {
+      const form = new FormData(); form.append('file',file);
+      const saved = await api('/api/files',form); attachments.push(saved); renderAttachments();
+    }
+  });
   busy = false; render();
+}
+$('#file-input').onchange = async () => {
+  await attachFiles(Array.from($('#file-input').files));
   $('#file-input').value = '';
 };
+$('#prompt').addEventListener('paste',event => {
+  const images = Array.from(event.clipboardData?.items || []).filter(item=>item.kind === 'file' && item.type.startsWith('image/')).map(item=>item.getAsFile()).filter(Boolean);
+  if (!images.length) return;
+  event.preventDefault();
+  if (busy) { toast('Wait for the current action before attaching images.'); return; }
+  void attachFiles(images);
+});
 $('#composer').onsubmit = async event => {
   event.preventDefault(); const prompt = $('#prompt').value.trim();
-  if (!prompt || busy || $('#send-button').disabled) return;
+  if ((!prompt && !attachments.length) || busy || $('#send-button').disabled) return;
   busy = true; $('#send-button').disabled = true;
   await perform(async () => {
     const room = currentRoom();
-    const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt: prompt + (attachments.length ? `\n\nAttached files: ${attachments.map(f => `${f.name} (fileId: ${f.id})`).join(', ')}` : ''), agentId:room ? $('#reply-agent').value : agentId, conversationId, interactionMode:$('#interaction-mode').value });
+    const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt, attachments:attachments.map(file=>file.id), agentId:room ? $('#reply-agent').value : agentId, conversationId, interactionMode:$('#interaction-mode').value });
     $('#prompt').value = ''; $('#prompt').style.height = ''; attachments = []; $('#attachments').replaceChildren(); navigate('chat',room?.id || result.conversationId);
     if (room) { roomRecipients.delete(room.id); $('#reply-agent').value = 'all'; }
   });

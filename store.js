@@ -125,8 +125,14 @@ export function updateRoom(state, id, input) {
   return room;
 }
 
+export function validateAttachments(state, ids = []) {
+  if (!Array.isArray(ids) || ids.length > 20 || ids.some(id => typeof id !== 'string' || !state.files.some(file => file.id === id && file.kind === 'upload'))) throw new Error('Choose up to 20 uploaded files.');
+  return [...new Set(ids)];
+}
+
 export function createJob(state, input, recordMessage = true) {
-  const prompt = textInput(input.prompt);
+  const attachments = validateAttachments(state,input.attachments);
+  const prompt = textInput(input.prompt || (attachments.length ? 'Describe the attached files.' : input.prompt));
   const interactionMode = input.interactionMode || 'confirm';
   if (!interactionModes.includes(interactionMode)) throw new Error('Choose an interaction mode.');
   let conversation = input.conversationId && state.conversations.find(c => c.id === input.conversationId);
@@ -138,9 +144,9 @@ export function createJob(state, input, recordMessage = true) {
     conversation = { id: randomUUID(), agentId: agent.id, title: prompt.slice(0, 70), threadId: null, createdAt: now, messages: [] };
     state.conversations.unshift(conversation);
   }
-  const job = { id: randomUUID(), agentId: agent.id, conversationId: conversation.id, prompt, interactionMode, status: 'queued', createdAt: now, events: [], toolCount: 0, files: [], scheduleId: input.scheduleId || null };
+  const job = { id: randomUUID(), agentId: agent.id, conversationId: conversation.id, prompt, attachments, interactionMode, status: 'queued', createdAt: now, events: [], toolCount: 0, files: [], scheduleId: input.scheduleId || null };
   conversation.lastAgentId = agent.id;
-  if (recordMessage) conversation.messages.push({ id: randomUUID(), agentId:agent.id, role: 'user', text: prompt, at: now, jobId: job.id });
+  if (recordMessage) conversation.messages.push({ id: randomUUID(), agentId:agent.id, role: 'user', text: prompt, attachments, at: now, jobId: job.id });
   state.jobs.unshift(job);
   return job;
 }

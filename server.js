@@ -302,8 +302,9 @@ export function createApp(options = {}) {
           if (!(file instanceof File) || !file.size || file.size > 20 * 1024 * 1024) throw new Error('Choose a file up to 20 MB.');
           const id = randomUUID(); const name = file.name.replace(/[\x00-\x1f\/\\]/g, '_').slice(0, 180) || 'upload';
           mkdirSync(join(directory, 'files'), { recursive: true, mode: 0o700 });
-          writeFileSync(join(directory, 'files', id), Buffer.from(await file.arrayBuffer()), { mode: 0o600 });
-          const saved = { id, name, kind: 'upload', createdAt: new Date().toISOString() }; store.state.files.push(saved); runtime.changed(); return response(saved, 201);
+          const bytes = Buffer.from(await file.arrayBuffer());
+          writeFileSync(join(directory, 'files', id), bytes, { mode: 0o600 });
+          const saved = { id, name, kind: 'upload', mimeType:imageMime(bytes) || 'application/octet-stream', size:bytes.length, createdAt: new Date().toISOString() }; store.state.files.push(saved); runtime.changed(); return response(saved, 201);
         }
         const fileMatch = pathname.match(/^\/api\/files\/([a-f0-9-]{36})(\/preview)?$/);
         if (fileMatch && req.method === 'GET') {

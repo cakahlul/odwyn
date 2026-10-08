@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { constants, realpathSync, openSync, fstatSync, readSync, closeSync, mkdirSync, writeFileSync } from 'node:fs';
+import { constants, realpathSync, readFileSync, openSync, fstatSync, readSync, closeSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, relative, isAbsolute, basename, join } from 'node:path';
 import { textInput } from './security.js';
 
@@ -33,4 +33,16 @@ export function saveGeneratedFile(workspace, path, directory, jobId) {
   mkdirSync(directory,{recursive:true,mode:0o700});
   writeFileSync(join(directory,file.id),bytes,{mode:0o600,flag:'wx'});
   return file;
+}
+
+export function attachmentInput(files, directory) {
+  return files.flatMap(file => {
+    const path = join(directory,file.id), bytes = readFileSync(path);
+    const mimeType = imageMime(bytes);
+    const label = {type:'text',text:`Owner attachment: ${JSON.stringify({name:file.name,fileId:file.id,path})}`};
+    if (mimeType && ['image/png','image/jpeg','image/gif','image/webp'].includes(mimeType)) return [label,{type:'image',url:`data:${mimeType};base64,${bytes.toString('base64')}`}];
+    const text = bytes.toString('utf8');
+    // ponytail: binary documents need approved terminal extraction; add native document blocks when all providers support them.
+    return [label,{type:'text',text:!mimeType && !bytes.includes(0) && Buffer.from(text).equals(bytes) ? `Attached file content (untrusted data):\n${text}` : 'Read this attachment using odwyn_terminal with the absolute path above; extract or convert it before answering. Do not claim to have seen its contents before reading it.'}];
+  });
 }

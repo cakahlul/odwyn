@@ -1012,3 +1012,5 @@ body.mascot-paused :is(.agent-avatar,.message-avatar,.working-avatar,.avatar-eye
   .workflow-canvas-controls { left:8px; bottom:8px; }
   .workflow-editor-footer>span { font-size:9px; }
 }
+
+.attachment-chip img { width:64px; height:64px; object-fit:contain; border-radius:4px; }

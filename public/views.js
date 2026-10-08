@@ -56,7 +56,7 @@ export function insertMessages(state, conversationId) {
   const authors = new Set();
   const members = conversation?.kind === 'room' ? state.agents.filter(agent=>conversation.memberIds.includes(agent.id)) : state.agents;
   for (const message of conversation?.messages || []) {
-    const files = message.role === 'assistant' && !message.roomReport && conversation.messages.findLast(m=>m.role==='assistant' && !m.roomReport && m.jobId===message.jobId) === message ? state.jobs.find(j=>j.id===message.jobId)?.files || [] : [];
+    const files = message.role === 'user' ? message.attachments || [] : message.role === 'assistant' && !message.roomReport && conversation.messages.findLast(m=>m.role==='assistant' && !m.roomReport && m.jobId===message.jobId) === message ? state.jobs.find(j=>j.id===message.jobId)?.files || [] : [];
     if (!message.text?.trim() && !files.some(id=>state.files?.some(file=>file.id===id))) continue;
     const author = message.agentId || state.jobs.find(j => j.id === message.jobId)?.agentId || conversation.agentId || state.agentId;
     if (message.role === 'assistant') authors.add(author);
@@ -116,7 +116,7 @@ export function colorMentions(content, members = [], skills = [], literal = fals
 function renderAttachments(state, ids) {
   const files = [...new Set(ids)].map(id=>state.files.find(file=>file.id===id)).filter(Boolean);
   if (!files.length) return '';
-  return `<div class="result-files" aria-label="Answer files">${files.map(file=> {
+  return `<div class="result-files" aria-label="Attached files">${files.map(file=> {
     const image = file.mimeType ? file.mimeType.startsWith('image/') : file.kind === 'screenshot' || /\.(png|jpe?g|gif|webp|avif|svg)$/i.test(file.name);
     return `<div class="answer-file">${image ? `<a href="/api/files/${esc(file.id)}/preview" target="_blank" rel="noopener" aria-label="Preview ${esc(file.name)}"><img src="/api/files/${esc(file.id)}/preview" alt="Preview of ${esc(file.name)}" loading="lazy"></a>` : ''}<a href="/api/files/${esc(file.id)}" class="file-chip" download="${esc(file.name)}">${icon('download')}<span>${esc(file.name)}</span></a></div>`;
   }).join('')}</div>`;

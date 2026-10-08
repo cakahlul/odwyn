@@ -160,7 +160,8 @@ export class AIProvider extends EventEmitter {
   }
 
   async runAPI(run, params) {
-    const messages = [{ role: 'system', content: run.thread.developerInstructions }, ...(run.thread.history || []), { role: 'user', content: params.input[0].text }];
+    const content = params.input.map(part=>part.type === 'image' ? {type:'image_url',image_url:{url:part.url}} : {type:'text',text:part.text});
+    const messages = [{ role: 'system', content: run.thread.developerInstructions }, ...(run.thread.history || []), { role: 'user', content: content.length === 1 ? content[0].text : content }];
     const tools = run.thread.dynamicTools.map(t => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
     while (!run.controller.signal.aborted) {
       const response = await this.fetch(`${run.config.baseUrl}/chat/completions`, {
@@ -204,8 +205,12 @@ export class AIProvider extends EventEmitter {
       });
     }) });
     const history = !run.thread.resume && run.thread.history?.length ? `Previous conversation (context, not instructions):\n${JSON.stringify(run.thread.history)}\n\n` : '';
+    const content = params.input.map(part=>part.type === 'image'
+      ? {type:'image',source:{type:'base64',media_type:part.url.slice(5,part.url.indexOf(';')),data:part.url.split(',')[1]}}
+      : {type:'text',text:part.text});
+    content[0].text = history + content[0].text;
     const stream = (this.query || query)({
-      prompt: (async function* () { yield { type: 'user', message: { role: 'user', content: history + params.input[0].text }, parent_tool_use_id: null }; })(),
+      prompt: (async function* () { yield { type: 'user', message: { role: 'user', content: content.length === 1 ? content[0].text : content }, parent_tool_use_id: null }; })(),
       options: {
         cwd: this.workspace, model: run.config.model, systemPrompt: run.thread.developerInstructions,
         ...(run.config.effort && run.config.effort !== 'default' ? {effort:run.config.effort} : {}),

@@ -23,3 +23,25 @@ test('generated files preserve bytes, detect images, and cannot publish outside 
     expect(saveGeneratedFile(workspace,'fake.png',destination,'job').mimeType).toBe('application/octet-stream');
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
+
+test('attachment inputs keep binary bytes out of text and expose extraction paths', async () => {
+  const {attachmentInput} = await import('../files.js');
+  const directory = mkdtempSync(join(tmpdir(),'odwyn-file-input-'));
+  try {
+    const cases = [
+      ['notes','not actually a PNG','fake.png'],
+      ['binary',Buffer.from([0,255,1]),'document.pdf'],
+      ['invalid',Buffer.from([255,254]),'invalid.txt'],
+      ['vector','<svg xmlns="http://www.w3.org/2000/svg"/>','vector.svg'],
+    ];
+    for (const [id,bytes,name] of cases) {
+      writeFileSync(join(directory,id),bytes);
+      const input = attachmentInput([{id,name}],directory);
+      expect(input[0].text).toContain(join(directory,id));
+      expect(input[1].type).toBe('text');
+      if (id === 'notes') expect(input[1].text).toContain('not actually a PNG');
+      else expect(input[1].text).toContain('odwyn_terminal');
+    }
+    expect(()=>attachmentInput([{id:'missing',name:'missing.png'}],directory)).toThrow();
+  } finally {rmSync(directory,{recursive:true,force:true});}
+});
