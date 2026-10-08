@@ -1014,3 +1014,9 @@ body.mascot-paused :is(.agent-avatar,.message-avatar,.working-avatar,.avatar-eye
 }
 
 .attachment-chip img { width:64px; height:64px; object-fit:contain; border-radius:4px; }
+
+.attachment-loading { width:64px; height:64px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; border-radius:4px; background:var(--surface); color:var(--muted); }
+.attachment-loading::before { content:''; width:14px; height:14px; border:2px solid var(--line); border-top-color:var(--muted); border-radius:50%; animation:attachment-spin .8s linear infinite; }
+@keyframes attachment-spin { to { transform:rotate(360deg); } }
+@media (prefers-reduced-motion:reduce) { .attachment-loading::before { animation:none; } }
+:root[data-motion=reduced] .attachment-loading::before { animation:none; }

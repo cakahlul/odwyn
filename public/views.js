@@ -118,7 +118,7 @@ function renderAttachments(state, ids) {
   if (!files.length) return '';
   return `<div class="result-files" aria-label="Attached files">${files.map(file=> {
     const image = file.mimeType ? file.mimeType.startsWith('image/') : file.kind === 'screenshot' || /\.(png|jpe?g|gif|webp|avif|svg)$/i.test(file.name);
-    return `<div class="answer-file">${image ? `<a href="/api/files/${esc(file.id)}/preview" target="_blank" rel="noopener" aria-label="Preview ${esc(file.name)}"><img src="/api/files/${esc(file.id)}/preview" alt="Preview of ${esc(file.name)}" loading="lazy"></a>` : ''}<a href="/api/files/${esc(file.id)}" class="file-chip" download="${esc(file.name)}">${icon('download')}<span>${esc(file.name)}</span></a></div>`;
+    return `<div class="answer-file">${image ? `<a href="/api/files/${esc(file.id)}/preview" target="_blank" rel="noopener" aria-label="Preview ${esc(file.name)}"><img src="/api/files/${esc(file.id)}/preview" alt="Preview of ${esc(file.name)}" loading="lazy"></a>` : ''}${file.kind === 'upload' ? `<span class="file-chip">${icon('paperclip')}<span>${esc(file.name)}</span></span>` : `<a href="/api/files/${esc(file.id)}" class="file-chip" download="${esc(file.name)}">${icon('download')}<span>${esc(file.name)}</span></a>`}</div>`;
   }).join('')}</div>`;
 }
 
@@ -132,7 +132,7 @@ export function renderRoutines(state) {
 }
 
 export function renderFiles(state) {
-  return `<section class="collection"><div class="collection-heading"><h1>Files & results</h1><p>Downloads, screenshots, and files you’ve shared.</p></div><div class="collection-toolbar"><span>${state.files.length} files</span><button class="primary-button" data-upload>Share a file ${icon('paperclip')}</button></div>${state.files.length ? `<div class="file-list">${[...state.files].reverse().map(file => `<a class="file-row" href="/api/files/${esc(file.id)}" download><span class="file-symbol">${icon(file.kind === 'screenshot' ? 'globe' : 'folder')}</span><span><strong>${esc(file.name)}</strong><small>${esc(file.kind)} · ${esc(date(file.createdAt))}</small></span>${icon('download')}</a>`).join('')}</div>` : empty('folder', 'No files yet', 'Ask for a screenshot or download. Or share a file for a task.', 'Share a file', 'data-upload')}</section>`;
+  return `<section class="collection"><div class="collection-heading"><h1>Files & results</h1><p>Downloads, screenshots, and files you’ve shared.</p></div><div class="collection-toolbar"><span>${state.files.length} files</span><button class="primary-button" data-upload>Share a file ${icon('paperclip')}</button></div>${state.files.length ? `<div class="file-list">${[...state.files].reverse().map(file => `<${file.kind === 'upload' ? 'div class="file-row"' : `a class="file-row" href="/api/files/${esc(file.id)}" download`}><span class="file-symbol">${icon(file.kind === 'screenshot' ? 'globe' : 'folder')}</span><span><strong>${esc(file.name)}</strong><small>${esc(file.kind)} · ${esc(date(file.createdAt))}</small></span>${file.kind === 'upload' ? '' : icon('download')}</${file.kind === 'upload' ? 'div' : 'a'}>`).join('')}</div>` : empty('folder', 'No files yet', 'Ask for a screenshot or download. Or share a file for a task.', 'Share a file', 'data-upload')}</section>`;
 }
 
 function empty(symbol, title, description, button, attribute) { return `<div class="collection-empty"><span class="empty-symbol">${icon(symbol)}</span><h2>${title}</h2><p>${description}</p><button class="secondary-button" ${attribute}>${button}${icon('arrow-up-right')}</button></div>`; }

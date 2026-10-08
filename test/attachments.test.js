@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
@@ -90,12 +90,29 @@ test('image picker and paste show removable previews; image-only sends persist i
     await page.locator('#file-input').setInputFiles([{name:'photo.png',mimeType:'image/png',buffer:png},{name:'notes.txt',mimeType:'text/plain',buffer:Buffer.from('Notes')}]);
     await page.waitForFunction(()=>document.querySelectorAll('.attachment-chip').length===2 && !document.querySelector('#send-button').disabled);
     expect(await page.locator('.attachment-chip img').evaluate(img=>img.complete && img.naturalWidth===1)).toBe(true);
+    let releaseUpload, uploadContinued;
+    const continued = new Promise(resolve=>{uploadContinued=resolve;});
+    await page.route('**/api/files',async route=>{ await new Promise(resolve=>{releaseUpload=resolve;}); await route.continue();uploadContinued(); });
     await page.locator('#prompt').evaluate((node,data)=>{
       const clipboard = new DataTransfer();clipboard.items.add(new File([Uint8Array.from(atob(data),c=>c.charCodeAt(0))],'pasted.png',{type:'image/png'}));
       node.dispatchEvent(new ClipboardEvent('paste',{clipboardData:clipboard,bubbles:true,cancelable:true}));
     },png.toString('base64'));
+    await page.locator('.attachment-loading[aria-label="Uploading pasted.png"]').waitFor();
+    expect(await page.locator('#attachments').getAttribute('aria-busy')).toBe('true');
+    expect(await page.locator('#send-button').isDisabled()).toBe(true);
+    expect(await page.locator('.attachment-chip').count()).toBe(3);
+    await wait(()=>!!releaseUpload);releaseUpload();await continued;await page.unroute('**/api/files');
     await page.waitForFunction(()=>document.querySelectorAll('.attachment-chip').length===3 && !document.querySelector('#send-button').disabled);
     expect(await page.locator('.attachment-chip img').count()).toBe(2);
+    expect(await page.locator('.attachment-loading').count()).toBe(0);
+    expect(await page.locator('#attachments').getAttribute('aria-busy')).toBe('false');
+    await page.route('**/api/files',route=>route.fulfill({status:400,json:{error:'Upload failed.'}}));
+    const failedUpload = page.waitForResponse(response=>new URL(response.url()).pathname==='/api/files' && response.status()===400);
+    await page.locator('#file-input').setInputFiles({name:'failed.png',mimeType:'image/png',buffer:png});
+    await failedUpload;await page.waitForFunction(()=>!document.querySelector('#send-button').disabled);
+    expect(await page.locator('.attachment-loading').count()).toBe(0);
+    expect(await page.locator('.attachment-chip').count()).toBe(3);
+    await page.unroute('**/api/files');
     expect(await page.locator('#prompt').evaluate(node=>{
       const clipboard = new DataTransfer();clipboard.setData('text/plain','normal text');
       return node.dispatchEvent(new ClipboardEvent('paste',{clipboardData:clipboard,bubbles:true,cancelable:true}));
@@ -114,7 +131,21 @@ test('image picker and paste show removable previews; image-only sends persist i
     await page.locator('.message-user .answer-file img').waitFor();
     expect(await page.locator('.message-user .answer-file img').evaluate(img=>img.complete && img.naturalWidth===1)).toBe(true);
     expect(await page.locator('.attachment-chip').count()).toBe(0);
+    expect(await page.locator('.message-user [download]').count()).toBe(0);
+    expect(await page.locator('.message-user .file-chip').allTextContents()).toEqual(['notes.txt','pasted.png']);
+    const job = app.runtime.state.jobs[0];await wait(()=>job.status==='completed');
+    const agentFile = {id:crypto.randomUUID(),name:'agent-result.txt',kind:'generated',jobId:job.id,mimeType:'application/octet-stream',createdAt:new Date().toISOString()};
+    writeFileSync(join(directory,'files',agentFile.id),'Agent result');
+    app.runtime.state.files.push(agentFile);job.files.push(agentFile.id);
+    app.runtime.conversation(job).messages.push({id:crypto.randomUUID(),role:'assistant',text:'Result attached.',agentId:job.agentId,jobId:job.id,at:agentFile.createdAt});app.runtime.changed();
     await page.reload();await page.locator('.message-user .answer-file img').waitFor();
+    await page.locator('.message-assistant .file-chip[download]').waitFor();
+    expect(await page.locator('.message-user [download]').count()).toBe(0);
+    expect(await page.locator('.message-assistant .file-chip[download]').getAttribute('download')).toBe('agent-result.txt');
+    await page.locator('[data-view="files"]').first().click();
+    await page.locator('.file-list').waitFor();
+    expect(await page.locator('a.file-row[download]').count()).toBe(1);
+    expect(await page.locator('a.file-row[download]').textContent()).toContain('agent-result.txt');
     expect(inputs[0].find(p=>p.type==='image').url).toBe(imageUrl);expect(errors).toEqual([]);
   } finally {await browser.close();await app.close();await server.stop(true);rmSync(directory,{recursive:true,force:true});}
 },20_000);

@@ -16,7 +16,7 @@ for (const [storage, keys] of [[localStorage, ['agent','closed-agents','bubble-p
 
 for (const key of ['language','detail']) $(`#global-${key}`).innerHTML = Object.entries(choices[key]).map(([value,label])=>`<option value="${value}">${label}</option>`).join('');
 
-let state = null, conversationId = null, view = 'chat', filter = 'all', signature = '', busy = false, attachments = [], providerAgentId = null, providerGlobal = false, providerAdding = false;
+let state = null, conversationId = null, view = 'chat', filter = 'all', signature = '', busy = false, attachments = [], pendingAttachments = [], providerAgentId = null, providerGlobal = false, providerAdding = false;
 let workspace = null, agentId = localStorage.getItem('odwyn-agent'), switching = false, dockSignature = '';
 const drafts = new Map(JSON.parse(sessionStorage.getItem('odwyn-drafts') || '[]'));
 const closedAgents = new Set(JSON.parse(localStorage.getItem('odwyn-closed-agents') || '[]'));
@@ -258,7 +258,8 @@ function restoreDraft() {
 }
 
 function renderAttachments() {
-  $('#attachments').innerHTML = attachments.map(f => `<span class="attachment-chip">${f.mimeType?.startsWith('image/') ? `<img src="/api/files/${esc(f.id)}/preview" alt="Preview of ${esc(f.name)}">` : icon('paperclip')}${esc(f.name)}<button type="button" data-remove-attachment="${esc(f.id)}" aria-label="Remove ${esc(f.name)}">${icon('close')}</button></span>`).join('');
+  $('#attachments').setAttribute('aria-busy',String(pendingAttachments.length > 0));
+  $('#attachments').innerHTML = [...attachments,...pendingAttachments].map(f => `<span class="attachment-chip">${f.uploading ? `<span class="attachment-loading" role="status" aria-label="Uploading ${esc(f.name)}">Uploading…</span>` : f.mimeType?.startsWith('image/') ? `<img src="/api/files/${esc(f.id)}/preview" alt="Preview of ${esc(f.name)}">` : icon('paperclip')}${esc(f.name)}${f.uploading ? '' : `<button type="button" data-remove-attachment="${esc(f.id)}" aria-label="Remove ${esc(f.name)}">${icon('close')}</button>`}</span>`).join('');
 }
 const mobile = matchMedia('(max-width: 760px)');
 function setNavigation(open) {
@@ -607,11 +608,13 @@ async function attachFiles(files) {
   busy = true; render();
   await perform(async () => {
     if (attachments.length + files.length > 20) throw new Error('Choose up to 20 uploaded files.');
+    pendingAttachments = files.map(file=>({name:file.name,uploading:true})); renderAttachments();
     for (const file of files) {
       const form = new FormData(); form.append('file',file);
-      const saved = await api('/api/files',form); attachments.push(saved); renderAttachments();
+      const saved = await api('/api/files',form); attachments.push(saved); pendingAttachments.shift(); renderAttachments();
     }
   });
+  pendingAttachments = []; renderAttachments();
   busy = false; render();
 }
 $('#file-input').onchange = async () => {
