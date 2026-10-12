@@ -403,6 +403,15 @@ function updateScheduleCall() {
   $('#schedule-inputs').innerHTML=workflow ? workflow.inputs.map(f=>`<label>${esc(f.label || f.name)}<input name="${esc(f.name)}" value="${esc(f.default ?? '')}" ${f.required ? 'required':''}></label>`).join('') : '';
 }
 $('#schedule-call').onchange=updateScheduleCall;
+function updateScheduleRepeat() {
+  const custom=$('#schedule-interval').value === 'custom', count=$('#schedule-repeat-count'), unit=Number($('#schedule-repeat-unit').value);
+  $('#schedule-custom-repeat').hidden=!custom;
+  count.disabled=!custom;
+  count.min=Math.ceil(15/unit);
+  count.max=Math.floor(525600/unit);
+}
+$('#schedule-interval').onchange=updateScheduleRepeat;
+$('#schedule-repeat-unit').onchange=updateScheduleRepeat;
 function updateAccount() {
   const connection = providerGlobal ? workspace.globalRuntime : state.runtime;
   const account = connection.account;
@@ -410,6 +419,17 @@ function updateAccount() {
   $('#account-title').textContent = providers[type][0];
   $('#account-description').textContent = connection.connectionError || (type === 'claude' ? (account ? `Signed in${account.email ? ` as ${account.email}` : ''}.` : 'Connect your Claude account to start working.') : type === 'openai' ? 'Requests use your configured API URL and model. Provider API billing applies.' : account?.email || 'Connect your ChatGPT account to start working.');
   $('#connect-account').textContent = account || type === 'openai' ? 'Refresh' : 'Connect';
+  const usage=connection.usage, usagePanel=$('#provider-usage');
+  usagePanel.hidden=type === 'openai';
+  const limits=(usage?.limits || []).map(limit=>{
+    const minutes=limit.windowMinutes, window=minutes ? (minutes%1440 === 0 ? `${minutes/1440}-day` : minutes%60 === 0 ? `${minutes/60}-hour` : `${minutes}-minute`) : '';
+    const label=[limit.name,window].filter(Boolean).join(' · '), percent=Number.isFinite(limit.usedPercent) ? limit.usedPercent : null;
+    const status={allowed:'Available',allowed_warning:'Near limit',rejected:'Limit reached'}[limit.status] || '';
+    const reset=Number.isFinite(limit.resetsAt) ? ` · Resets ${date(new Date(limit.resetsAt*1000).toISOString())}` : '';
+    return `<p><strong>${esc(label)}</strong><br>${percent === null ? 'Usage percentage unavailable' : `${esc(Math.round(percent*10)/10)}% used`}${status ? ` · ${esc(status)}` : ''}${esc(reset)}</p>${percent === null ? '' : `<meter min="0" max="100" value="${Math.max(0,Math.min(100,percent))}" aria-label="${esc(label)} usage"></meter>`}`;
+  }).join('');
+  const lastRun=usage?.lastRun;
+  usagePanel.innerHTML=`<strong>Usage & limits</strong>${account ? `${limits || `<p>${type === 'claude' ? 'No limits reported yet. Updates arrive during tasks.' : 'Usage limits unavailable from this provider.'}</p>`}${lastRun && Number.isFinite(lastRun.inputTokens) && Number.isFinite(lastRun.outputTokens) ? `<p>Last task: ${esc(lastRun.inputTokens.toLocaleString())} input · ${esc(lastRun.outputTokens.toLocaleString())} output tokens</p>` : ''}${connection.usageError ? `<p>${esc(connection.usageError)}</p>` : ''}${usage?.updatedAt ? `<p>Last reported: ${esc(date(usage.updatedAt))}</p>` : ''}` : '<p>Connect to view usage.</p>'}`;
   const login = connection.login;
   $('#login-instructions').hidden = !login || $('#provider-account-box').hidden;
   if (login?.verificationUrl) {
@@ -699,7 +719,8 @@ $('#connect-account').onclick = () => perform(async () => {
 $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(async () => {
   const selectedAgent=$('#schedule-agent').value || agentId, command=$('#schedule-call').value;
   const argumentsText=workspace.workflows.some(w=>w.command===command) ? JSON.stringify(Object.fromEntries([...$('#schedule-inputs').querySelectorAll('input')].map(input=>[input.name,input.value]))) : $('#schedule-prompt').value.trim();
-  await api('/api/schedules',{ agentId:selectedAgent, prompt:command ? `/${command}${argumentsText ? ' '+argumentsText : ''}` : $('#schedule-prompt').value, at:new Date($('#schedule-at').value).toISOString(), intervalMinutes:Number($('#schedule-interval').value), interactionMode:'confirm' });
+  const intervalMinutes=$('#schedule-interval').value === 'custom' ? Number($('#schedule-repeat-count').value)*Number($('#schedule-repeat-unit').value) : Number($('#schedule-interval').value);
+  await api('/api/schedules',{ agentId:selectedAgent, prompt:command ? `/${command}${argumentsText ? ' '+argumentsText : ''}` : $('#schedule-prompt').value, at:new Date($('#schedule-at').value).toISOString(), intervalMinutes, interactionMode:'confirm' });
   $('#schedule-dialog').close(); await refresh(); await switchAgent(selectedAgent); navigate('routines'); toast('Routine scheduled.');
 }); };
 

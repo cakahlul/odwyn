@@ -51,6 +51,11 @@ export class Runtime {
     this.providers.set(agentId, codex);
     this.accounts.set(agentId, { account:null, connectionError:null });
     codex.on('notification', message => {
+      if (this.providers.get(agentId) !== codex) return;
+      if (message.method === 'odwyn/usage/updated') {
+        this.accounts.set(agentId,{...this.accounts.get(agentId),usage:message.params.usage,usageError:null});
+        this.changed(); return;
+      }
       if (['account/updated','account/login/completed'].includes(message.method)) { void this.refreshAccount(agentId); return; }
       if (this.codex === codex) this.notification(message);
     });
@@ -80,7 +85,13 @@ export class Runtime {
       account = ['chatgpt','claude','openai'].includes(result.account?.type) ? result.account : null;
       connectionError = result.account && !account ? 'Codex requires ChatGPT subscription sign-in.' : null;
     } catch (error) { if (token !== provider.token || this.closed || this.providers.get(agentId) !== provider) return; connectionError = error.message; }
-    this.accounts.set(agentId, { account, connectionError });
+    let usage=null, usageError=null;
+    if (account && provider.readUsage) {
+      try { usage=await provider.readUsage(); }
+      catch { usage=this.accounts.get(agentId)?.usage || null; usageError='Usage refresh failed. Showing last reported data when available.'; }
+    }
+    if (token !== provider.token || this.closed || this.providers.get(agentId) !== provider) return;
+    this.accounts.set(agentId, { account, connectionError, usage, usageError });
     if (agentId === this.state.agents[0].id) { this.account = account; this.connectionError = connectionError; }
     this.changed(); void this.drain();
     return account;

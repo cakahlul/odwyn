@@ -28,17 +28,42 @@ export function validateProvider(input, previous = {}) {
 
 export const publicProvider = config => ({ type: config.type, model: config.model, effort:config.effort || 'default', baseUrl: config.baseUrl, hasApiKey: !!config.apiKey, configured: !!config.configured });
 
+function codexLimits(data) {
+  const limits=Object.values(data.rateLimitsByLimitId || (data.rateLimits ? {[data.rateLimits.limitId || 'codex']:data.rateLimits} : {}));
+  return limits.flatMap(limit=>['primary','secondary'].filter(key=>limit[key]).map(key=>({
+    id:`${limit.limitId || 'codex'}-${key}`, name:limit.limitName || limit.limitId || 'Codex',
+    windowMinutes:limit[key].windowDurationMins, usedPercent:limit[key].usedPercent, resetsAt:limit[key].resetsAt,
+  })));
+}
+
 // Adapt the two additional providers to the existing task/tool protocol.
 export class AIProvider extends EventEmitter {
   constructor({ config, home, workspace, codex, fetch = globalThis.fetch, query, claudeCommand = (process.env.ODWYN_CLAUDE_COMMAND ?? process.env.SIDEKICK_CLAUDE_COMMAND) || 'claude', claudeAuth }) {
     super(); this.config = config; this.workspace = workspace; this.fetch = fetch; this.query = query; this.claudeCommand = claudeCommand; this.claudeAuth = claudeAuth;
     this.codex = codex || new Codex({ home, workspace, model: config.model, effort:config.effort });
     this.pending = new Map(); this.token = {}; this.thread = null; this.run = null;
-    for (const event of ['notification', 'request', 'disconnect', 'protocolError']) this.codex.on(event, (...args) => { if (this.config.type === 'codex') this.emit(event, ...args); });
+    for (const event of ['notification', 'request', 'disconnect', 'protocolError']) this.codex.on(event, (...args) => {
+      if (this.config.type !== 'codex') return;
+      if (event === 'notification' && args[0].method === 'account/rateLimits/updated') this.updateUsage({limits:codexLimits(args[0].params)});
+      this.emit(event, ...args);
+    });
   }
   get key() { return JSON.stringify([this.config.type, this.config.model, this.config.type === 'openai' ? this.config.baseUrl : '']); }
   get child() { return this.config.type === 'codex' ? this.codex.child : this.token; }
-  configure(config) { this.stop(); this.config = config; this.codex.model = config.model; this.codex.effort = config.effort; this.thread = null; }
+  configure(config) { this.stop(); this.config = config; this.codex.model = config.model; this.codex.effort = config.effort; this.thread = null; this.usage = null; }
+
+  updateUsage(data) {
+    this.usage={...this.usage,...data,updatedAt:new Date().toISOString()};
+    this.emit('notification',{method:'odwyn/usage/updated',params:{usage:this.usage}});
+  }
+
+  async readUsage() {
+    if (this.config.type === 'codex') {
+      const token=this.token, data=await this.codex.request('account/rateLimits/read',{});
+      if (token === this.token) this.updateUsage({limits:codexLimits(data)});
+    }
+    return this.usage || null;
+  }
 
   async listModels(config = this.config) {
     if (config.type === 'codex') {
@@ -227,6 +252,12 @@ export class AIProvider extends EventEmitter {
     run.stream = stream; let itemId = randomUUID(), text = '', resultSeen = false;
     try {
       for await (const message of stream) {
+        if (message.type === 'rate_limit_event' && this.run === run) {
+          const info=message.rate_limit_info, id=info.rateLimitType || 'subscription';
+          const names={five_hour:'5-hour limit',seven_day:'Weekly limit',seven_day_opus:'Weekly Opus limit',seven_day_sonnet:'Weekly Sonnet limit',overage:'Extra usage',subscription:'Subscription'};
+          const limit={id,name:names[id] || id,status:info.status,resetsAt:info.resetsAt,usedPercent:Number.isFinite(info.utilization) ? info.utilization*100 : null};
+          this.updateUsage({limits:[...(this.usage?.limits || []).filter(item=>item.id !== id),limit]});
+        }
         if (message.type === 'stream_event') {
           if (message.event.type === 'message_start') { itemId = randomUUID(); text = ''; }
           if (message.event.delta?.type === 'text_delta') {
@@ -240,6 +271,7 @@ export class AIProvider extends EventEmitter {
         }
         if (message.type === 'result') {
           resultSeen = true;
+          if (this.run === run && message.usage) this.updateUsage({lastRun:{inputTokens:message.usage.input_tokens+(message.usage.cache_read_input_tokens || 0)+(message.usage.cache_creation_input_tokens || 0),outputTokens:message.usage.output_tokens}});
           if (message.subtype !== 'success' || message.is_error) throw new Error(message.errors?.join('\n') || 'Claude Code failed. Check sign-in, model access, and quota.');
           if (!text && message.result) this.message(run, itemId, message.result);
         }

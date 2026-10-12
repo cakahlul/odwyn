@@ -176,7 +176,9 @@ test('Claude SDK uses restricted tools, streams output, waits for owner input, a
       yield { type: 'stream_event', event: { type: 'message_start' } };
       yield { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Understood.' } } };
       yield { type: 'assistant', message: { content: [{ type: 'text', text: 'Understood.' }] } };
-      yield { type: 'result', subtype: 'success', result: 'Understood.' };
+      yield {type:'rate_limit_event',rate_limit_info:{status:'allowed_warning',rateLimitType:'five_hour',utilization:0.8,resetsAt:1900000000}};
+      yield {type:'rate_limit_event',rate_limit_info:{status:'allowed',rateLimitType:'seven_day',resetsAt:1900100000}};
+      yield { type: 'result', subtype: 'success', result: 'Understood.', usage:{input_tokens:123,cache_read_input_tokens:10,cache_creation_input_tokens:20,output_tokens:45} };
     } finally { await client.close(); }
   })() });
   const runtime = new Runtime({ store, codex: provider, browser: {}, workspace: directory, model: 'sonnet' });
@@ -186,6 +188,11 @@ test('Claude SDK uses restricted tools, streams output, waits for owner input, a
     await wait(() => job.pending?.type === 'terminal'); runtime.answer(job.id, { requestId: job.pending.id, decision: 'allow' });
     await wait(() => job.status === 'completed');
     expect(runtime.conversation(job).messages.filter(m => m.role === 'assistant').map(m => m.text)).toEqual(['Understood.']);
+    const usage=runtime.accounts.get(store.state.agents[0].id).usage;
+    expect(usage.limits[0]).toMatchObject({name:'5-hour limit',usedPercent:80,status:'allowed_warning',resetsAt:1900000000});
+    expect(usage.limits[1]).toMatchObject({name:'Weekly limit',usedPercent:null,status:'allowed'});
+    expect(usage.lastRun).toEqual({inputTokens:153,outputTokens:45});
+    await runtime.refreshAccount();expect(runtime.accounts.get(store.state.agents[0].id).usage).toEqual(usage);
     const follow = runtime.submit({ conversationId: job.conversationId, prompt: 'Ask again' });
     await wait(() => follow.status === 'waiting'); runtime.answer(follow.id, { requestId: follow.pending.id, answer: 'Morning' });
     await wait(() => follow.pending?.type === 'terminal'); runtime.answer(follow.id, { requestId: follow.pending.id, decision: 'allow' });

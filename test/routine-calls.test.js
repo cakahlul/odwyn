@@ -24,14 +24,38 @@ test('routines select agents and execute skill or workflow calls with inputs',as
     await page.goto(server.url.href+'#routines');await page.getByRole('button',{name:'New routine',exact:true}).click();
     expect(await page.locator('#schedule-agent option').count()).toBe(2);
     await page.locator('#schedule-agent').selectOption('rei');await page.locator('#schedule-call').selectOption('review-code');await page.locator('#schedule-prompt').fill('Check security');
+    expect(await page.locator('#schedule-custom-repeat').isVisible()).toBe(false);
+    await page.locator('#schedule-interval').selectOption('custom');
+    expect(await page.locator('#schedule-custom-repeat').isVisible()).toBe(true);
+    for (const [unit,min,max] of [['1','15','525600'],['60','1','8760'],['1440','1','365'],['10080','1','52']]) {
+      await page.locator('#schedule-repeat-unit').selectOption(unit);
+      for (const value of [String(Number(min)-1),String(Number(max)+1),'1.5']) {
+        await page.locator('#schedule-repeat-count').fill(value);
+        expect(await page.locator('#schedule-repeat-count').evaluate(el=>el.checkValidity())).toBe(false);
+      }
+      for (const value of [min,max]) {
+        await page.locator('#schedule-repeat-count').fill(value);
+        expect(await page.locator('#schedule-repeat-count').evaluate(el=>el.checkValidity())).toBe(true);
+      }
+    }
+    await page.locator('#schedule-repeat-unit').selectOption('1');await page.locator('#schedule-repeat-count').fill('14');
+    await page.locator('#schedule-form button').click();expect(state.schedules.length).toBe(0);
+    await page.locator('#schedule-repeat-count').fill('45');
     await page.locator('#schedule-form button').click();await page.waitForFunction(()=>location.hash==='#routines' && document.querySelector('#agent-name').textContent==='Rei' && !document.querySelector('#schedule-dialog').open);
     expect(state.schedules[0].agentId).toBe('rei');expect(state.schedules[0].prompt).toBe('/review-code Check security');
+    expect(state.schedules[0].intervalMinutes).toBe(45);
+    expect(await page.locator('.routine-frequency').textContent()).toBe('EVERY 45 MINUTES');
     await page.getByRole('button',{name:'New routine',exact:true}).click();await page.locator('#schedule-call').selectOption('pr-review');
+    await page.locator('#schedule-repeat-count').fill('1');await page.locator('#schedule-interval').selectOption('0');
+    expect(await page.locator('#schedule-custom-repeat').isVisible()).toBe(false);
+    expect(await page.locator('#schedule-repeat-count').isDisabled()).toBe(true);
     expect(await page.locator('#schedule-task-field').isVisible()).toBe(false);
     expect(await page.locator('#schedule-inputs [name=focus]').inputValue()).toBe('Frontend');
     await page.locator('#schedule-form button').click();expect(state.schedules.length).toBe(1);
+    await page.locator('#schedule-interval').selectOption('custom');await page.locator('#schedule-repeat-unit').selectOption('60');await page.locator('#schedule-repeat-count').fill('2');
     await page.locator('#schedule-inputs [name=url]').fill('https://example.com/pr/1');await page.locator('#schedule-form button').click();await page.waitForFunction(()=>!document.querySelector('#schedule-dialog').open);
     expect(state.schedules[0].prompt).toBe('/pr-review {"url":"https://example.com/pr/1","focus":"Frontend"}');
+    expect(state.schedules[0].intervalMinutes).toBe(120);
     expect(()=>app.runtime.schedule({agentId:'rei',prompt:'/missing',at:new Date(Date.now()+3600000).toISOString()})).toThrow('Unknown command');
     state.schedules.forEach(s=>s.nextAt='2020-01-01T00:00:00Z');
     enqueueSchedules(state,new Date(),input=>app.runtime.submit(input));

@@ -44,12 +44,12 @@ export const browserApprovalRequired = (mode, risk) => mode === 'allow' ? !['saf
 
 export function browserActionRisk(action, context = {}) {
   if (!interactions.has(action.action)) return 'safe';
+  if (action.action === 'press' && ['Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown','Home','End'].includes(action.text)) return 'safe';
   const el = context.element;
   // ponytail: payment detection uses DOM heuristics; it cannot prove arbitrary website effects.
   const payment = /\b(pay(?:ment)?|checkout|billing|credit card|card number|cvv|cvc|buy|purchase|place order|donat(?:e|ion)|transfer|subscribe|subscription|book now|confirm booking|bayar|pembayaran|beli)\b/i;
   if (context.hasPaymentFields || payment.test([context.url,el?.label,el?.context,el?.autocomplete,el?.href,context.dialog?.message,action.reason].join(' ')) || /^cc-/.test(el?.autocomplete || '')) return 'payment';
   if (action.action === 'dialog') return action.choice === 'dismiss' ? 'safe' : context.dialog?.type === 'prompt' ? 'credential' : ['alert','confirm'].includes(context.dialog?.type) ? 'interaction' : 'unknown';
-  if (action.action === 'press' && ['Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown','Home','End'].includes(action.text)) return 'safe';
   if (!el) return 'unknown';
   if (el.type === 'password' || /password|one-time-code/.test(el.autocomplete || '')) return 'credential';
   const safeField = /\b(search|filter|sort|check.?in|check.?out|destination|dates?|adults?|children|rooms?|guests?|city|location|departure|arrival|budget)\b/i;

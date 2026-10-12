@@ -123,6 +123,26 @@ test('Odwyn opens the previous database and renames only the default agent', () 
 });
 
 
+test('browser navigation keys stay safe around payment-related content', () => {
+  const contexts = [
+    {url:'https://us5.datadoghq.com/dashboard/cx8-i4c-b7i/ambis-dashboard',element:{tag:'div',label:'TRX Service Overall'}},
+    {url:'https://shop.test/checkout',hasPaymentFields:true,element:{tag:'input',autocomplete:'cc-number',label:'Card number',context:'Credit card payment'}},
+    {element:{tag:'input',type:'password',label:'Password'}},
+    {},
+  ];
+  for (const context of contexts) {
+    for (const text of ['Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown','Home','End']) {
+      const risk=browserActionRisk({action:'press',text,reason:'Read transfer row values skipped above'},context);
+      expect(risk).toBe('safe');
+      expect(browserApprovalRequired('safe',risk)).toBe(false);
+      expect(browserApprovalRequired('allow',risk)).toBe(false);
+      expect(browserApprovalRequired('confirm',risk)).toBe(true);
+    }
+  }
+  for (const text of ['Enter','Space','Shift+PageUp']) expect(browserActionRisk({action:'press',text},contexts[1])).toBe('payment');
+  expect(browserActionRisk({action:'type',text:'PageUp'},contexts[1])).toBe('payment');
+});
+
 test('browser risk checks fail closed for checkout, credentials, dialogs and unknown controls', () => {
   const target={tag:'button',label:'Search'};
   const click={action:'click',ref:'0'};
