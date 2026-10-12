@@ -1008,15 +1008,14 @@ button.attachment-preview:hover { background:var(--paper); }
 .topbar .product-mark { width:30px; height:30px; }
 .topbar .new-chat { margin:0; min-height:38px; gap:7px; box-shadow:none; }
 .agent-alert { display:grid; place-items:center; width:18px; height:18px; border-radius:50%; background:var(--orange-deep); color:var(--surface); font-size:10px; }
-:root[data-navigation=dock][data-dock-auto-hide=true] .main:has(.dock-region:is(:hover,:focus-within)) .agent-workspace { padding-bottom:calc(48px * var(--dock-scale,1) + 36px); }
 .dock-region { display:contents; }
 .dock-reveal-button { display:none; }
-:root[data-navigation=dock][data-dock-auto-hide=true] .dock-region { position:absolute; bottom:0; left:0; right:0; height:44px; z-index:4; display:flex; justify-content:center; }
-:root[data-navigation=dock][data-dock-auto-hide=true] .dock-reveal-button { display:grid; place-items:center; width:120px; height:44px; }
+:root[data-navigation=dock][data-dock-auto-hide=true] .dock-region { position:absolute; bottom:0; left:0; right:0; height:44px; z-index:4; display:flex; justify-content:center; pointer-events:none; }
+:root[data-navigation=dock][data-dock-auto-hide=true] .dock-reveal-button { display:grid; place-items:center; width:120px; height:44px; pointer-events:auto; }
 .dock-reveal-button span { width:40px; height:4px; border-radius:4px; background:var(--muted); }
-:root[data-navigation=dock][data-dock-auto-hide=true] .workspace-dock { position:absolute; bottom:0; transform:translateY(calc(100% + 24px)); transition:transform .18s ease; }
+:root[data-navigation=dock][data-dock-auto-hide=true] .workspace-dock { position:absolute; bottom:0; transform:translateY(calc(100% + 24px)); transition:transform .18s ease; pointer-events:auto; background:var(--surface-sheen),color-mix(in srgb,var(--surface) 35%,transparent); }
 :root[data-navigation=dock][data-dock-auto-hide=true] .dock-region:is(:hover,:focus-within) .workspace-dock { transform:translateY(0); }
-:root[data-navigation=dock][data-dock-auto-hide=true] .dock-region:is(:hover,:focus-within) .dock-reveal-button { opacity:0; pointer-events:none; }
+:root[data-navigation=dock][data-dock-auto-hide=true] .dock-region:is(:hover,:focus-within) .dock-reveal-button { opacity:0; }
 .dock-preferences { margin-bottom:20px; }
 .dock-preferences label:first-child { display:grid; grid-template-columns:1fr auto; gap:8px; }
 .dock-preferences input[type=range] { grid-column:1 / -1; margin:0 0 12px; }
@@ -1113,7 +1112,6 @@ button.attachment-preview:hover { background:var(--paper); }
 }
 @media (max-width:760px) {
   .agent-dock { display:none; }
-  :root[data-navigation=dock][data-dock-auto-hide=true] .main:has(.dock-region:is(:hover,:focus-within)) .agent-workspace { padding-bottom:calc(40px * var(--dock-scale,1) + 36px); }
   .topbar { padding:10px 12px; gap:6px; }
   .topbar .brand { margin-right:6px; }
   .topbar .brand-word,.new-chat-label { display:none; }
