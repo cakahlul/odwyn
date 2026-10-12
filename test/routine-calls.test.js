@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { createApp } from '../server.js';
 import { defaults } from '../public/profile.js';
-import { enqueueSchedules } from '../store.js';
+import { createJob, enqueueSchedules } from '../store.js';
 
 test('routines select agents and execute skill or workflow calls with inputs',async()=>{
   const directory=mkdtempSync(join(tmpdir(),'odwyn-routine-calls-'));let app;
@@ -46,7 +46,7 @@ test('routines select agents and execute skill or workflow calls with inputs',as
     expect(state.schedules[0].intervalMinutes).toBe(45);
     expect(await page.locator('.routine-frequency').textContent()).toBe('EVERY 45 MINUTES');
     await page.getByRole('button',{name:'New routine',exact:true}).click();await page.locator('#schedule-call').selectOption('pr-review');
-    await page.locator('#schedule-repeat-count').fill('1');await page.locator('#schedule-interval').selectOption('0');
+    await page.locator('#schedule-interval').selectOption('custom');await page.locator('#schedule-repeat-count').fill('1');await page.locator('#schedule-interval').selectOption('0');
     expect(await page.locator('#schedule-custom-repeat').isVisible()).toBe(false);
     expect(await page.locator('#schedule-repeat-count').isDisabled()).toBe(true);
     expect(await page.locator('#schedule-task-field').isVisible()).toBe(false);
@@ -56,12 +56,42 @@ test('routines select agents and execute skill or workflow calls with inputs',as
     await page.locator('#schedule-inputs [name=url]').fill('https://example.com/pr/1');await page.locator('#schedule-form button').click();await page.waitForFunction(()=>!document.querySelector('#schedule-dialog').open);
     expect(state.schedules[0].prompt).toBe('/pr-review {"url":"https://example.com/pr/1","focus":"Frontend"}');
     expect(state.schedules[0].intervalMinutes).toBe(120);
+    const workflowSchedule=state.schedules[0], skillSchedule=state.schedules[1];
+    await page.locator(`[data-schedule-edit="${workflowSchedule.id}"]`).click();
+    expect(await page.locator('#schedule-call').inputValue()).toBe('pr-review');
+    expect(await page.locator('#schedule-inputs [name=url]').inputValue()).toBe('https://example.com/pr/1');
+    expect(await page.locator('#schedule-repeat-count').inputValue()).toBe('120');
+    await page.locator('#schedule-inputs [name=focus]').fill('Security');
+    await page.locator('#schedule-form button').click();await page.waitForFunction(()=>!document.querySelector('#schedule-dialog').open);
+    expect(state.schedules).toHaveLength(2);expect(workflowSchedule.prompt).toContain('Security');
+    await page.locator(`[data-schedule-edit="${skillSchedule.id}"]`).click();
+    expect(await page.locator('#schedule-call').inputValue()).toBe('review-code');
+    expect(await page.locator('#schedule-prompt').inputValue()).toBe('Check security');
+    await page.locator('#schedule-prompt').fill('Check privacy');
+    await page.locator('#schedule-form button').click();await page.waitForFunction(()=>!document.querySelector('#schedule-dialog').open);
+    expect(skillSchedule.prompt).toBe('/review-code Check privacy');
+    skillSchedule.prompt='/review-code Check security';
+
     expect(()=>app.runtime.schedule({agentId:'rei',prompt:'/missing',at:new Date(Date.now()+3600000).toISOString()})).toThrow('Unknown command');
     state.schedules.forEach(s=>s.nextAt='2020-01-01T00:00:00Z');
     enqueueSchedules(state,new Date(),input=>app.runtime.submit(input));
     const skillJob=state.jobs.find(j=>j.scheduleId===state.schedules[1].id),workflowJob=state.jobs.find(j=>j.scheduleId===state.schedules[0].id);
     expect(skillJob.agentId).toBe('rei');expect(skillJob.prompt).toContain('Check code carefully.');expect(skillJob.prompt).toContain('Check security');
-    expect(workflowJob.agentId).toBe('rei');expect(workflowJob.prompt).toContain('https://example.com/pr/1');expect(state.workflowRuns[0].inputs.focus).toBe('Frontend');
+    expect(workflowJob.agentId).toBe('rei');expect(workflowJob.prompt).toContain('https://example.com/pr/1');expect(state.workflowRuns[0].inputs.focus).toBe('Security');
+    createJob(state,{agentId:'rei',prompt:'Unscheduled task'});
+    skillJob.status='completed';
+    state.conversations.find(c=>c.id===skillJob.conversationId).messages.push({id:'routine-result',role:'assistant',text:'Scheduled check complete.',at:new Date().toISOString(),jobId:skillJob.id,agentId:'rei'});
+    app.runtime.changed();
+    await page.waitForFunction(()=>document.querySelectorAll('.run-row').length===2);
+    expect(await page.locator('.run-list').textContent()).not.toContain('Unscheduled task');
+    await page.getByRole('button',{name:/In motion/}).click();
+    await page.waitForFunction(()=>document.querySelectorAll('.run-row').length===1);
+    await page.getByRole('button',{name:/All runs/}).click();
+    await page.waitForFunction(()=>document.querySelectorAll('.run-row').length===2);
+    await page.locator(`.run-list [data-conversation="${skillJob.conversationId}"]`).last().click();
+    await page.waitForFunction(()=>location.hash.startsWith('#chat/'));
+    expect(page.url()).toContain(skillJob.conversationId);
+    expect(await page.locator('#view').textContent()).toContain('Scheduled check complete.');
     expect(errors).toEqual([]);
   } finally {await browser.close();server.stop(true);app.close();rmSync(directory,{recursive:true,force:true});}
-});
+},20000);

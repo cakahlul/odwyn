@@ -197,7 +197,11 @@ export function createApp(options = {}) {
           const index = store.state.schedules.findIndex(s => s.id === scheduleMatch[1]);
           if (index < 0) return response({ error: 'Schedule not found.' }, 404);
           if (req.method === 'DELETE') store.state.schedules.splice(index, 1);
-          else { const input = await json(req); if (typeof input.enabled !== 'boolean') throw new Error('Choose enabled or paused.'); store.state.schedules[index].enabled = input.enabled; }
+          else {
+            const input = await json(req);
+            if ('prompt' in input) runtime.schedule(input, scheduleMatch[1]);
+            else { if (typeof input.enabled !== 'boolean') throw new Error('Choose enabled or paused.'); store.state.schedules[index].enabled = input.enabled; }
+          }
           runtime.changed(); return response({ ok: true });
         }
         if (pathname === '/api/agents' && req.method === 'POST') {

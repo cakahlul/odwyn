@@ -380,14 +380,14 @@ function render() {
     updateBrowser(state); return;
   }
   $('#composer-area').hidden = view !== 'chat';
-  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'home' ? [workspace.conversations,workspace.jobs,$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : view === 'workflows' ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
+  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'home' ? [workspace.conversations,workspace.jobs,$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? [state.schedules,state.jobs] : view === 'workflows' ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
     const homeFocus = view === 'home' && $('#view').contains(document.activeElement) ? document.activeElement.dataset.conversation : null;
     const pendingCard = $('#view .approval-card');
     const pendingFocus = pendingCard?.contains(document.activeElement) ? document.activeElement : null;
-    $('#view').innerHTML = view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state) : view === 'workflows' ? renderWorkflows(state) : renderFiles(state);
+    $('#view').innerHTML = view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state,filter) : view === 'workflows' ? renderWorkflows(state) : renderFiles(state);
     if (homeFocus) $('#view').querySelector(`[data-conversation="${CSS.escape(homeFocus)}"]`)?.focus({preventScroll:true});
     const nextPendingCard = $('#view .approval-card');
     if (pendingCard && nextPendingCard?.dataset.request === pendingCard.dataset.request) {
@@ -418,14 +418,31 @@ async function refresh() {
 }
 
 async function perform(fn) { try { await fn(); await refresh(); } catch (error) { handleError(error); } }
-function openSchedule() {
+function openSchedule(id = null) {
+  const schedule=state.schedules.find(s=>s.id===id);
+  $('#schedule-form').dataset.scheduleId=schedule?.id || '';
+  $('#schedule-dialog h2').textContent=schedule ? 'Edit routine' : 'Schedule a task';
+  $('#schedule-form button').innerHTML=(schedule ? 'Save changes' : 'Set routine')+icon('arrow-up-right');
   const room=currentRoom(), members=workspace.agents;
   $('#schedule-agent').innerHTML=members.map(a=>`<option value="${esc(a.id)}">${esc(a.customization?.name || defaults.name)}</option>`).join('');
   $('#schedule-agent').value=room && room.memberIds.includes($('#reply-agent').value) ? $('#reply-agent').value : members.find(a=>a.id===agentId)?.id || members[0]?.id;
   $('#schedule-call').innerHTML='<option value="">Task</option>'+[['Skills',workspace.skills],['Workflows',workspace.workflows]].map(([label,items])=>`<optgroup label="${label}">${items.map(item=>`<option value="${esc(item.command)}">/${esc(item.command)} · ${esc(item.name)}</option>`).join('')}</optgroup>`).join('');
-  $('#schedule-prompt').value = $('#prompt').value;
+  if (schedule) $('#schedule-agent').value=schedule.agentId;
+  const match=schedule?.prompt.match(/^[/$](\S+)(?:\s+([\s\S]*))?$/);
+  const command=match && [...workspace.skills,...workspace.workflows].find(item=>item.command===match[1]);
+  $('#schedule-call').value=command?.command || '';
+  $('#schedule-prompt').value = command ? match[2] || '' : schedule?.prompt || $('#prompt').value;
   updateScheduleCall();
-  const soon = new Date(Date.now() + 60 * 60_000); const local = new Date(soon.valueOf() - soon.getTimezoneOffset() * 60_000);
+  if (command && workspace.workflows.some(w=>w.command===command.command)) {
+    const workflow=workspace.workflows.find(w=>w.command===command.command), argument=(match[2] || '').trim();
+    const inputs=argument.startsWith('{') ? JSON.parse(argument) : {[workflow.inputs[0]?.name || 'args']:argument};
+    for (const input of $('#schedule-inputs').querySelectorAll('input')) input.value=inputs[input.name] ?? input.value;
+  }
+  const interval=schedule?.intervalMinutes ?? 1440;
+  $('#schedule-interval').value=[0,60,1440,10080].includes(interval) ? String(interval) : 'custom';
+  $('#schedule-repeat-unit').value='1'; $('#schedule-repeat-count').value=interval || 15;
+  updateScheduleRepeat();
+  const soon = schedule && new Date(schedule.nextAt) > new Date() ? new Date(schedule.nextAt) : new Date(Date.now() + 60 * 60_000); const local = new Date(soon.valueOf() - soon.getTimezoneOffset() * 60_000);
   $('#schedule-at').value = local.toISOString().slice(0,16); $('#schedule-status').textContent = ''; $('#schedule-dialog').showModal();
 }
 function updateScheduleCall() {
@@ -666,7 +683,7 @@ $('#interaction-mode').onchange = async () => {
   finally { selector.disabled = false; render(); }
 };
 $('#settings-open').onclick = () => openSettings();
-$('#schedule-open').onclick = openSchedule;
+$('#schedule-open').onclick = () => openSchedule();
 $('#menu-button').onclick = $('#search-open').onclick = () => { setNavigation(true); $('#menu-button').setAttribute('aria-expanded','true'); };
 for (const id of ['agents','tools']) $('#'+id+'-open').onclick = () => { setNavigation(false); $('#'+id+'-dialog').showModal(); $('#'+id+'-open').setAttribute('aria-expanded','true'); };
 $('#search-input').oninput = search;
@@ -756,8 +773,9 @@ $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(a
   const selectedAgent=$('#schedule-agent').value || agentId, command=$('#schedule-call').value;
   const argumentsText=workspace.workflows.some(w=>w.command===command) ? JSON.stringify(Object.fromEntries([...$('#schedule-inputs').querySelectorAll('input')].map(input=>[input.name,input.value]))) : $('#schedule-prompt').value.trim();
   const intervalMinutes=$('#schedule-interval').value === 'custom' ? Number($('#schedule-repeat-count').value)*Number($('#schedule-repeat-unit').value) : Number($('#schedule-interval').value);
-  await api('/api/schedules',{ agentId:selectedAgent, prompt:command ? `/${command}${argumentsText ? ' '+argumentsText : ''}` : $('#schedule-prompt').value, at:new Date($('#schedule-at').value).toISOString(), intervalMinutes, interactionMode:'confirm' });
-  $('#schedule-dialog').close(); await refresh(); await switchAgent(selectedAgent); navigate('routines'); toast('Routine scheduled.');
+  const editingId=$('#schedule-form').dataset.scheduleId;
+  await api(editingId ? `/api/schedules/${editingId}` : '/api/schedules',{ agentId:selectedAgent, prompt:command ? `/${command}${argumentsText ? ' '+argumentsText : ''}` : $('#schedule-prompt').value, at:new Date($('#schedule-at').value).toISOString(), intervalMinutes },editingId ? 'PATCH' : 'POST');
+  $('#schedule-dialog').close(); await refresh(); await switchAgent(selectedAgent); navigate('routines'); toast(editingId ? 'Routine updated.' : 'Routine scheduled.');
 }); };
 
 document.addEventListener('click', event => {
@@ -810,6 +828,7 @@ document.addEventListener('click', event => {
   if (target.dataset.stopRoom) void perform(() => api(`/api/rooms/${target.dataset.stopRoom}/cancel`,{}));
   if (target.dataset.retry) void perform(() => api(`/api/jobs/${target.dataset.retry}/retry`,{}));
   if (target.dataset.decision) void perform(() => api(`/api/jobs/${target.dataset.job}/answer`,{ requestId:target.dataset.request, decision:target.dataset.decision }));
+  if (target.dataset.scheduleEdit) openSchedule(target.dataset.scheduleEdit);
   if (target.dataset.scheduleToggle) { const s = state.schedules.find(s => s.id === target.dataset.scheduleToggle); void perform(() => api(`/api/schedules/${s.id}`,{ enabled:!s.enabled },'PATCH')); }
   if (target.dataset.scheduleDelete && confirm('Delete this routine? Its previous results stay saved.')) void perform(() => api(`/api/schedules/${target.dataset.scheduleDelete}`,{},'DELETE'));
   if (target.dataset.copy) { const message = state.conversations.flatMap(c => c.messages).find(m => m.id === target.dataset.copy); void navigator.clipboard.writeText(message.text).then(() => toast('Copied.')).catch(handleError); }

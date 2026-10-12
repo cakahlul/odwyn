@@ -89,6 +89,20 @@ test('API protects files and browser control, persists uploads and validates sch
     expect((await request('/api/schedules','POST',{prompt:'Daily check',at:'2020-01-01',intervalMinutes:1440})).status).toBe(400);
     const schedule = await (await request('/api/schedules','POST',{prompt:'Daily check',at:new Date(Date.now()+60_000).toISOString(),intervalMinutes:1440})).json();
     expect(schedule.enabled).toBe(true);
+    const schedulePath=`/api/schedules/${schedule.id}`;
+    await request(schedulePath,'PATCH',{enabled:false});
+    const saved=app.runtime.state.schedules.find(s=>s.id===schedule.id);
+    saved.lastAt='2026-01-01T00:00:00Z';
+    const edit={agentId:primary.id,prompt:'Weekly check',at:new Date(Date.now()+3600000).toISOString(),intervalMinutes:10080};
+    for (const invalid of [{...edit,at:'2020-01-01'},{...edit,intervalMinutes:14},{...edit,agentId:'missing'},{...edit,prompt:''}]) {
+      expect((await request(schedulePath,'PATCH',invalid)).status).toBe(400);
+      expect(saved.prompt).toBe('Daily check');
+    }
+    expect((await request(schedulePath,'PATCH',edit,{origin:'https://evil.test'})).status).toBe(403);
+    expect((await request(schedulePath,'PATCH',edit)).status).toBe(200);
+    expect(saved).toMatchObject({id:schedule.id,prompt:'Weekly check',enabled:false,intervalMinutes:10080,lastAt:'2026-01-01T00:00:00Z',createdAt:schedule.createdAt});
+    const scheduleStore=openStore(directory);expect(scheduleStore.state.schedules.find(s=>s.id===schedule.id)).toEqual(saved);scheduleStore.close();
+
     const form = new FormData(); form.append('file',new File(['safe content'],'<script>.txt'));
     const uploaded = await (await app.fetch(new Request('https://assistant.test/api/files',{method:'POST',headers:{authorization:headers.authorization,origin:headers.origin},body:form}))).json();
     const download = await request(`/api/files/${uploaded.id}`);

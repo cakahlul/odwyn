@@ -577,7 +577,9 @@ export class Runtime {
     } catch (error) { if(workflowAction) throw error;reply({ contentItems: [{ type: 'inputText', text: error.message }], success: false }); }
   }
 
-  schedule(input) {
+  schedule(input, id = null) {
+    const existing = id ? this.state.schedules.find(s => s.id === id) : null;
+    if (id && !existing) throw new Error('Schedule not found.');
     const agent = findAgent(this.state, input.agentId);
     const prompt = textInput(input.prompt);
     workflowInvocation(prompt, this.state);
@@ -585,8 +587,12 @@ export class Runtime {
     if (!Number.isFinite(at.valueOf()) || at <= new Date()) throw new Error('Choose a future date and time.');
     const intervalMinutes = Number(input.intervalMinutes || 0);
     if (!Number.isInteger(intervalMinutes) || (intervalMinutes !== 0 && (intervalMinutes < 15 || intervalMinutes > 525_600))) throw new Error('Recurring intervals must be between 15 minutes and one year.');
-    const interactionMode = input.interactionMode || 'confirm';
+    const interactionMode = input.interactionMode || existing?.interactionMode || 'confirm';
     if (!interactionModes.includes(interactionMode)) throw new Error('Choose an interaction mode.');
+    if (existing) {
+      Object.assign(existing, { agentId:agent.id, prompt, nextAt:at.toISOString(), intervalMinutes, interactionMode });
+      delete existing.error; this.changed(); return existing;
+    }
     const schedule = { id: randomUUID(), agentId: agent.id, prompt, nextAt: at.toISOString(), intervalMinutes, interactionMode, enabled: true, createdAt: new Date().toISOString() };
     this.state.schedules.unshift(schedule); this.changed(); return schedule;
   }
