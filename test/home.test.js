@@ -57,7 +57,7 @@ test('Home prioritizes work across agents, updates live, preserves drafts and re
     expect(await page.locator('.message-assistant').textContent()).toContain('The itinerary is ready.');
     await page.reload();await page.locator('.message-assistant').waitFor();expect(await page.locator('.home').count()).toBe(0);
     await page.goto(server.url.href);await page.locator('.home').waitFor();
-    await page.locator(`[data-select-agent="${first}"]`).click();await page.locator('#composer-area').waitFor();
+    await page.locator("#agents-group>summary").click();await page.locator(`[data-select-agent="${first}"]`).click();await page.locator('#composer-area').waitFor();
     expect(await page.locator('.home').count()).toBe(0);
     await page.locator('.navigation [data-view=home]').click();await page.locator('.home').waitFor();
     await page.getByRole('button',{name:'Start a conversation',exact:true}).click();await page.locator('.welcome').waitFor();expect(await page.locator('#prompt').isVisible()).toBe(true);

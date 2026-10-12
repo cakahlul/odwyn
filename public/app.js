@@ -67,17 +67,21 @@ function renderDock() {
   }
   $('#agent-dock').hidden = !!room && !!agentId;
   positionBubbles();
-  document.querySelectorAll('[data-view]').forEach(button=>button.disabled = switching || !agentId && button.dataset.view !== 'home');
+  document.querySelectorAll('[data-view]').forEach(button=>button.disabled = switching);
+  $('#new-chat').disabled = $('.header-new-chat').disabled = switching;
   $('#minimize-agent').disabled = !agentId || busy || switching;
   $('#reply-agent').disabled = $('#close-conversation').disabled = busy || switching;
   $('.conversation-controls').hidden = !agentId || view === 'home';
   $('#add-agent').disabled = workspace.agents.length >= 5 || busy || switching;
-  $('#agent-count').textContent = `${workspace.agents.length} of 5`;
+  const needsYou = data.filter(a => ['waiting','takeover'].includes(a.status)).length;
+  $('#agent-count').textContent = needsYou ? `${needsYou} needs you` : `${workspace.agents.length} of 5`;
+  $('#agents-group .sidebar-label').textContent = agentId ? `Agents · ${state.customization?.name || defaults.name}` : 'Agents';
   $('#add-agent').title = workspace.agents.length >= 5 ? 'Maximum 5 agents reached' : `Add agent (${workspace.agents.length}/5)`;
 }
 
 function renderRooms() {
   const rooms = workspace.conversations.filter(c => c.kind === 'room'), room = currentRoom();
+  $('#room-count').textContent = rooms.length;
   const listSignature = JSON.stringify([conversationId,view,workspace.agents.length,rooms.map(r=>[r.id,r.title,r.memberIds])]);
   if (listSignature !== roomListSignature) {
     $('#room-list').innerHTML = rooms.length ? rooms.map(r=>`<button class="room-list-item ${r.id === room?.id ? 'selected' : ''}" data-conversation="${esc(r.id)}" aria-label="${esc(r.title)}" title="${esc(r.title)}">${icon('chat')}<span class="room-initial" aria-hidden="true">${esc(Array.from(r.title)[0]?.toUpperCase() || '#')}</span><span><strong>${esc(r.title)}</strong><small>${r.memberIds.length} agents</small></span></button>`).join('') : `<p class="sidebar-empty">${workspace.agents.length < 2 ? 'Add another agent to create a room.' : 'Create a room for your agents.'}</p>`;
@@ -94,7 +98,7 @@ function renderRooms() {
   $('#delete-conversation').disabled = busy || state.jobs.some(j=>j.conversationId===renamingConversationId && activeStatuses.includes(j.status));
   if ($('#room-header').open && (!inRoom || $('#room-header').dataset.room !== room.id)) $('#room-header').close();
   $('#room-header').dataset.room = room?.id || '';
-  $('.reply-agent>span').textContent = room ? 'Send to' : 'Reply with';
+  $('.reply-agent>span').textContent = room ? 'Send to' : 'Agent';
   $('.permission-picker').hidden = $('#schedule-open').hidden = false;
   if (!room || !agentId) return;
   $('#room-heading').textContent = $('#room-label').textContent = room.title;
@@ -282,13 +286,22 @@ function setSidebarCollapsed(collapsed) {
   $('#sidebar-toggle').title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
   $('#sidebar-toggle').setAttribute('aria-label',$('#sidebar-toggle').title);
   if (collapsed) document.querySelectorAll('.agent-menu[open]').forEach(menu=>menu.open=false);
+  syncSidebarGroups();
+}
+function syncSidebarGroups() {
+  const rail = !mobile.matches && document.body.classList.contains('sidebar-collapsed');
+  document.querySelectorAll('.sidebar-group').forEach(group => {
+    if (rail && group.dataset.rail !== 'true') { group.dataset.expanded = String(group.open); group.open = true; }
+    if (!rail && group.dataset.rail === 'true') group.open = group.dataset.expanded === 'true';
+    group.dataset.rail = String(rail);
+  });
 }
 setSidebarCollapsed(localStorage.getItem('odwyn-sidebar-collapsed') === 'true');
 $('#sidebar-toggle').onclick = () => {
   const collapsed = !document.body.classList.contains('sidebar-collapsed');
   setSidebarCollapsed(collapsed); localStorage.setItem('odwyn-sidebar-collapsed',String(collapsed));
 };
-mobile.addEventListener('change', () => setNavigation(false)); setNavigation(false);
+mobile.addEventListener('change', () => { syncSidebarGroups(); setNavigation(false); }); setNavigation(false);
 
 function navigate(next = 'chat', id = null) {
   if (switching) return;
@@ -315,7 +328,6 @@ function render() {
   $('#connection-button').setAttribute('aria-label',$('#connection-label').textContent);
   $('#connection-button').title = globalRuntime.connectionError || `${providerName} · ${workspace.globalProvider.model}`;
 
-  $('#new-chat').disabled = !agentId;
   if (!agentId && view !== 'home') {
     $('#agent-workspace').classList.remove('chat-start'); $('#main').classList.remove('chat-start'); $('#composer-area').hidden = true;
     $('#page-title').textContent = 'No conversation open';

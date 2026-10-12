@@ -13,24 +13,29 @@
       <a href="#home" class="brand" data-view="home" aria-label="Odwyn home"><svg class="product-mark" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="odwyn-edge" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff" stop-opacity=".3"/><stop offset=".5" stop-color="#000" stop-opacity=".05"/><stop offset="1" stop-color="#000" stop-opacity=".32"/></linearGradient><radialGradient id="odwyn-light" cx="24%" cy="12%" r="92%"><stop stop-color="#fff" stop-opacity=".65"/><stop offset=".48" stop-color="#fff" stop-opacity=".08"/><stop offset="1" stop-color="#000" stop-opacity=".16"/></radialGradient><linearGradient id="odwyn-ceramic" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#fff" stop-opacity=".8"/><stop offset=".55" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".12"/></linearGradient></defs><ellipse cx="34" cy="58" rx="21" ry="3" fill="#292b28" opacity=".12"/><rect class="mark-edge" x="10" y="9" width="47" height="48" rx="17"/><rect x="10" y="9" width="47" height="48" rx="17" fill="url(#odwyn-edge)"/><rect class="mark-body" x="6" y="4" width="47" height="48" rx="17"/><rect x="6" y="4" width="47" height="48" rx="17" fill="url(#odwyn-light)"/><path d="M12 24c0-9 5-15 15-16" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="1.5" stroke-linecap="round"/><path d="M20 20c4-4 14-5 19-1 4 4 4 17 0 23-4 5-14 6-19 1-4-4-4-18 0-23Z" fill="#292b28" opacity=".16" transform="translate(1 2)"/><path class="mark-face" d="M20 18c4-4 14-5 19-1 4 4 4 17 0 23-4 5-14 6-19 1-4-4-4-18 0-23Z"/><path d="M20 18c4-4 14-5 19-1 4 4 4 17 0 23-4 5-14 6-19 1-4-4-4-18 0-23Z" fill="url(#odwyn-ceramic)"/><g class="mark-features" fill="none" stroke-linecap="round"><path d="m24 24 .6 6m10-8 .6 6" stroke-width="3.5"/><path d="M24 36q6 5 12-2" stroke-width="2.5"/></g></svg><span class="brand-word">odwyn<span class="brand-dot">.</span></span></a>
       <button type="button" class="icon-button sidebar-toggle" id="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar" aria-expanded="true" aria-controls="sidebar"><span data-icon="chevron"></span></button>
       </div>
-      <div class="sidebar-main">
-      <section class="sidebar-agents" aria-label="Your agents">
-        <div class="sidebar-agents-heading"><strong>Your agents</strong><span id="agent-count">1 of 5</span></div>
-        <div id="sidebar-agent-list" class="sidebar-agent-list"></div>
-        <button class="add-agent-button" id="add-agent" aria-label="Add agent" title="Add agent (maximum 5)"><span class="plus" aria-hidden="true">+</span><span class="sidebar-label">Add agent</span></button>
-      </section>
-      <button class="new-chat" id="new-chat" aria-label="New conversation" title="New conversation"><span class="plus" aria-hidden="true">+</span><span class="sidebar-label">New conversation</span> <kbd>⌘ N</kbd></button>
-      <nav class="navigation">
+      <button class="new-chat" id="new-chat" aria-label="New conversation" title="New conversation"><span class="plus" aria-hidden="true">+</span><span class="sidebar-label">New conversation</span><kbd>⌘ N</kbd></button>
+      <button class="nav-item sidebar-search" id="search-open" title="Search conversations" aria-label="Search conversations"><span data-icon="search"></span><span class="sidebar-label">Search conversations</span></button>
+      <nav class="navigation" aria-label="Main menu">
         <button data-view="home" aria-label="Home" title="Home" class="nav-item active"><span data-icon="home"></span><span class="sidebar-label">Home</span></button>
-        <button data-view="chat" aria-label="Chat" title="Chat" class="nav-item"><span data-icon="chat"></span><span class="sidebar-label">Chat</span></button>
         <button data-view="routines" aria-label="Routines" title="Routines" class="nav-item"><span data-icon="clock"></span><span class="sidebar-label">Routines</span></button>
         <button data-view="workflows" aria-label="Workflows & skills" title="Workflows & skills" class="nav-item"><span data-icon="workflow"></span><span class="sidebar-label">Workflows & skills</span></button>
         <button data-view="files" aria-label="Files & results" title="Files & results" class="nav-item"><span data-icon="folder"></span><span class="sidebar-label">Files & results</span></button>
+        <button data-view="runs" aria-label="Task runs" title="Task runs" class="nav-item history-runs"><span data-icon="history"></span><span class="sidebar-label">Task runs</span><span class="nav-status" id="run-status" role="img" aria-label="Active tasks" title="Active tasks" hidden></span></button>
       </nav>
-      <section class="sidebar-rooms" aria-label="Conversation rooms"><div class="sidebar-agents-heading"><strong>Rooms</strong><button class="icon-button" id="new-room" aria-label="Create conversation room" title="Create conversation room"><span class="plus" aria-hidden="true">+</span></button></div><div id="room-list" class="room-list"></div></section>
+      <div class="sidebar-main">
+        <details class="sidebar-agents sidebar-group" id="agents-group">
+          <summary title="Your agents"><span class="sidebar-label">Agents</span><span id="agent-count">1 of 5</span></summary>
+          <div id="sidebar-agent-list" class="sidebar-agent-list"></div>
+          <button class="add-agent-button" id="add-agent" aria-label="Add agent" title="Add agent (maximum 5)"><span class="plus" aria-hidden="true">+</span><span class="sidebar-label">Add agent</span></button>
+        </details>
+        <details class="sidebar-rooms sidebar-group" id="rooms-group">
+          <summary title="Conversation rooms"><span class="sidebar-label">Rooms</span><span id="room-count">0</span></summary>
+          <button class="add-agent-button" id="new-room" aria-label="Create conversation room" title="Create conversation room"><span class="plus" aria-hidden="true">+</span><span class="sidebar-label">New room</span></button>
+          <div id="room-list" class="room-list"></div>
+        </details>
+        <div class="history-label"><span>RECENT CONVERSATIONS</span></div>
+        <div id="history" class="history"><p class="sidebar-empty">No conversations yet.</p></div>
       </div>
-      <div class="history-label"><span>CONVERSATIONS</span><div class="history-actions"><button data-view="runs" class="icon-button history-runs" aria-label="Task runs" title="Task runs"><span data-icon="history"></span><span class="nav-status" id="run-status" role="img" aria-label="Active tasks" title="Active tasks" hidden></span></button><button class="icon-button" id="search-open" title="Search conversations" aria-label="Search conversations"><span data-icon="search"></span></button></div></div>
-      <div id="history" class="history"><p class="sidebar-empty">No conversations yet.</p></div>
       <div class="sidebar-bottom">
         <button type="button" class="routine-summary" data-view="routines" hidden><span data-icon="clock"></span><span><strong id="routine-note"></strong><small id="routine-note-detail"></small></span></button>
         <button class="owner-button" id="settings-open" aria-label="Odwyn settings" title="Odwyn settings"><span class="owner-avatar">Y</span><span><span id="owner-name">Your space</span><small>Settings</small></span><span data-icon="settings"></span></button>
@@ -41,8 +46,9 @@
       <header class="topbar">
         <div class="breadcrumb"><button class="icon-button mobile-menu" id="menu-button" aria-label="Open navigation" aria-expanded="false"><span data-icon="menu"></span></button><span class="workspace-label" id="agent-name">Odwyn</span><span class="breadcrumb-slash">/</span><button type="button" id="page-title" class="conversation-title" aria-haspopup="dialog" aria-controls="rename-dialog" disabled>New conversation</button><button type="button" id="room-details-open" class="room-details-open" aria-haspopup="dialog" aria-controls="room-header" hidden><span id="room-label"></span><span class="room-details-chevron" aria-hidden="true"></span></button></div>
         <div class="header-actions">
+          <button type="button" class="icon-button header-new-chat" data-new-chat aria-label="Start new conversation" title="New conversation"><span class="plus" aria-hidden="true">+</span></button>
           <section class="conversation-controls" aria-label="Conversation controls">
-            <label class="reply-agent" for="reply-agent"><span>Reply with</span><select id="reply-agent"></select></label>
+            <label class="reply-agent" for="reply-agent"><span>Agent</span><select id="reply-agent"></select></label>
             <div class="conversation-actions"><button class="icon-button" id="minimize-agent" aria-label="Minimize active agent" title="Minimize active agent"><span data-icon="minimize"></span></button><button class="icon-button" id="close-conversation" aria-label="Close conversation" title="Close conversation"><span data-icon="close"></span></button></div>
           </section>
           <button class="icon-button browser-toggle" id="browser-toggle" aria-label="Open browser panel" title="Open browser panel" aria-expanded="false" aria-controls="browser-panel"><span data-icon="globe"></span><span class="browser-toggle-label">Browser</span></button>

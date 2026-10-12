@@ -56,6 +56,7 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
     app.runtime.state.customization={...first.customization,overrideWorkspace:false};app.runtime.state.appearance={palette:'paper',motion:'reduced'};app.runtime.changed();
     await page.locator('#prompt').fill('');
     await page.screenshot({path:join(artifacts,'private-chat-bubbles.png')});
+    if(!await page.locator('#rooms-group').evaluate(node=>node.open)) await page.locator('#rooms-group>summary').click();
     await page.locator('#room-list [data-conversation="room"]').click();await page.locator('#messages.room-messages').waitFor();
     expect(await page.locator('.message-assistant .message-meta strong').allTextContents()).toEqual(['Oddy','Rei','Kai Chen']);expect(await page.locator('.room-messages .message-avatar').count()).toBe(3);
     expect(await page.locator('.message-assistant .message-avatar').first().isVisible()).toBe(true);

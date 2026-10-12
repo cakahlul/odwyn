@@ -20,6 +20,8 @@ test('sidebar rail saves space, keeps menus usable, persists, and preserves the 
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
   try{
     await page.goto(server.url.href);
+    expect(await page.locator('#agents-group').getAttribute('open')).toBeNull();
+    expect(await page.locator('#rooms-group').getAttribute('open')).toBeNull();
     const floatingRail=await page.locator('#sidebar').boundingBox();expect(floatingRail.x).toBe(12);expect(floatingRail.y).toBe(12);expect(floatingRail.y+floatingRail.height).toBe(888);
     expect(await page.locator('#sidebar #sidebar-toggle').count()).toBe(1);
     expect(await page.locator('#browser-toggle [data-icon=chevron]').count()).toBe(0);
@@ -29,10 +31,9 @@ test('sidebar rail saves space, keeps menus usable, persists, and preserves the 
     expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(68);
     expect((await page.locator('#main').boundingBox()).width-before.width).toBe(164);
     expect(await page.getByRole('button',{name:'Expand sidebar',exact:true}).getAttribute('aria-expanded')).toBe('false');
-    expect(await page.locator('.navigation [data-view="runs"]').count()).toBe(0);
-    expect(await page.locator('.history-label [data-view="runs"]').count()).toBe(1);
+    expect(await page.locator('.navigation [data-view="runs"]').count()).toBe(1);
     expect(await page.locator('[data-view="workflows"] [data-icon]').getAttribute('data-icon')).toBe('workflow');
-    for(const label of ['Chat','Routines','Workflows & skills','Files & results']){
+    for(const label of ['Routines','Workflows & skills','Files & results']){
       const button=page.locator('.navigation').getByRole('button',{name:label,exact:true});expect(await button.getAttribute('title')).toBe(label);await button.click();
     }
     await page.getByRole('button',{name:'Task runs',exact:true}).click();
@@ -46,7 +47,7 @@ test('sidebar rail saves space, keeps menus usable, persists, and preserves the 
     const artifacts=resolve(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});await page.screenshot({path:join(artifacts,'sidebar-collapsed.png')});
     await page.reload();await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().width===68);expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(68);
     for(const width of [768,1024,1700]){
-      await page.setViewportSize({width,height:900});expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(68);expect(await page.locator('.shell').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
+      await page.setViewportSize({width,height:900});expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(68);await page.waitForFunction(()=>document.querySelector('.shell').scrollWidth<=document.querySelector('.shell').clientWidth);
       await page.getByRole('button',{name:'Open browser panel',exact:true}).click();
       expect(await page.locator('#browser-panel').evaluate(node=>node.inert)).toBe(false);
       expect(await page.locator('#browser-toggle').getAttribute('aria-expanded')).toBe('true');
@@ -65,21 +66,40 @@ test('sidebar rail saves space, keeps menus usable, persists, and preserves the 
     await page.getByRole('button',{name:'Task runs',exact:true}).click();expect(await page.locator('#sidebar').evaluate(node=>node.inert)).toBe(true);
     await page.setViewportSize({width:1440,height:900});await page.waitForFunction(()=>!document.querySelector('#sidebar').inert);await page.getByRole('button',{name:'Expand sidebar',exact:true}).focus();await page.keyboard.press('Enter');
     await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().width===232);
-    expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(232);expect(await page.locator('.agent-menu').first().isVisible()).toBe(true);
+    expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(232);
+    expect(await page.locator('#agents-group').getAttribute('open')).toBeNull();
+    await page.locator('#agents-group>summary').focus();await page.keyboard.press('Enter');
+    expect(await page.locator('.agent-menu').first().isVisible()).toBe(true);
     await page.reload();expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(232);
-    for(const height of [900,600]) {
+    for(const height of [900,600,480]) {
       await page.setViewportSize({width:1440,height});
+      await page.locator('#agents-group').evaluate(node=>node.open=true);await page.locator('#rooms-group').evaluate(node=>node.open=true);
+      const newChat=await page.locator('#new-chat').boundingBox(), navigation=await page.locator('.navigation').boundingBox();
       const settings=await page.locator('#settings-open').boundingBox();expect(settings.y).toBeGreaterThan(0);expect(settings.y+settings.height).toBeLessThanOrEqual(height);
-      expect(await page.locator('#history').evaluate(node=>node.scrollHeight>node.clientHeight)).toBe(true);
-      await page.locator('#history').evaluate(node=>node.scrollTop=node.scrollHeight);
+      expect(await page.locator('.sidebar-main').evaluate(node=>node.scrollHeight>node.clientHeight)).toBe(true);
+      await page.locator('.sidebar-main').evaluate(node=>node.scrollTop=node.scrollHeight);
       expect((await page.locator('#settings-open').boundingBox()).y).toBe(settings.y);
+      expect((await page.locator('#new-chat').boundingBox()).y).toBe(newChat.y);
+      expect((await page.locator('.navigation').boundingBox()).y).toBe(navigation.y);
+      await page.locator('#new-chat').click();expect(await page.locator('#prompt').evaluate(node=>node===document.activeElement)).toBe(true);
       await page.locator('#settings-open').click();await page.getByRole('button',{name:'Close settings'}).click();
     }
-    await page.setViewportSize({width:320,height:700});await page.locator('#menu-button').click();
+    await page.locator('#minimize-agent').click();await page.getByRole('heading',{name:'Your agents are minimized'}).waitFor();
+    await page.locator('#new-chat').click();await page.locator('#prompt').waitFor({state:'visible'});
+    await page.setViewportSize({width:320,height:700});
+    await page.getByRole('button',{name:'Start new conversation',exact:true}).click();
+    expect(await page.locator('#sidebar').evaluate(node=>node.inert)).toBe(true);
+    expect(await page.locator('#prompt').evaluate(node=>node===document.activeElement)).toBe(true);
+    await page.locator('#menu-button').click();
     const settings=await page.locator('#settings-open').boundingBox();expect(settings.y+settings.height).toBeLessThanOrEqual(700);
-    expect(await page.locator('#history').evaluate(node=>node.scrollHeight>node.clientHeight)).toBe(true);
+    expect(await page.locator('.sidebar-main').evaluate(node=>node.scrollHeight>node.clientHeight)).toBe(true);
+    await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().x===12);
+    await page.screenshot({path:join(artifacts,'sidebar-mobile.png')});
     await page.locator('#settings-open').click();await page.getByRole('button',{name:'Close settings'}).click();
-    await page.setViewportSize({width:1440,height:900});await page.screenshot({path:join(artifacts,'sidebar-expanded.png')});
+    await page.setViewportSize({width:1440,height:900});
+    await page.locator('.sidebar-group').evaluateAll(nodes=>nodes.forEach(node=>node.open=false));
+    await page.locator('.sidebar-main').evaluate(node=>node.scrollTop=0);
+    await page.screenshot({path:join(artifacts,'sidebar-expanded.png')});
     expect(errors).toEqual([]);
   }finally{await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
 },30_000);

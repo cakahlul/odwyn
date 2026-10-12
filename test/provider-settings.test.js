@@ -111,7 +111,7 @@ test('model picker switches catalogs, preserves custom names, and falls back on 
     await page.locator('#provider-type').selectOption('openai');await page.getByText('Model list unavailable. Enter a model name manually.',{exact:true}).waitFor();
     expect(await page.locator('#provider-model-list').isVisible()).toBe(false);await page.locator('#provider-model').fill('manual-api');
     await page.locator('#preferences-form button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});expect(app.runtime.state.globalProvider.model).toBe('manual-api');
-    await page.locator('.sidebar-agent-row summary').first().click();await page.getByRole('button',{name:'Customize agent',exact:true}).click();
+    await page.locator('#agents-group>summary').click();await page.locator('.sidebar-agent-row summary').first().click();await page.getByRole('button',{name:'Customize agent',exact:true}).click();
     await page.locator('[data-custom-step="3"]').click();await page.locator('#provider-source').selectOption('custom');await page.locator('#provider-type').selectOption('claude');
     await page.locator('#provider-model-list option[value="opus"]').waitFor({state:'attached'});await page.locator('#provider-model-list').selectOption('opus');
     await page.locator('#customize-save').click();await page.locator('#customize-dialog').waitFor({state:'hidden'});
@@ -174,7 +174,7 @@ test('settings own global provider; customization saves profile and provider tog
   app.runtime.state.customization={...defaults,name:'Oddy'};app.runtime.state.globalProvider.configured=true;app.runtime.state.provider.configured=true;app.runtime.changed();
   const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}}),page=await context.newPage(),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
-  const edit=async()=>{await page.locator('.sidebar-agent-row').filter({has:page.locator('.sidebar-agent[aria-pressed="true"]')}).locator('summary').click();await page.getByRole('button',{name:'Customize agent',exact:true}).click();};
+  const edit=async()=>{if(!await page.locator('#agents-group').evaluate(node=>node.open)) await page.locator('#agents-group>summary').click();await page.locator('.sidebar-agent-row').filter({has:page.locator('.sidebar-agent[aria-pressed="true"]')}).locator('summary').click();await page.getByRole('button',{name:'Customize agent',exact:true}).click();};
   const save=async()=>{await page.locator('#customize-save').click();await page.locator('#customize-dialog').waitFor({state:'hidden'});};
   try {
     await page.goto(server.url.href);expect(await page.locator('.topbar #connection-button').count()).toBe(0);
