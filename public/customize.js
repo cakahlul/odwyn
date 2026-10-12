@@ -1,10 +1,10 @@
-import { $, api, toast } from './ui.js';
+import { $, api, toast, esc } from './ui.js';
 import { defaults, resolveProfile, ownerPreferenceKeys, palettes, choices, paletteDetails, materialDefaults, customColorKeys, appearanceVars, validateAppearance, specializations, avatarSvg, sampleReply, validateProfile } from './profile.js';
 
 let getState, saved, providerDraft = () => undefined, step = 0, firstRun = false, adding = false, editingId = null, lastApplied = '', appearanceOnly = false;
 const toneDetails = {warm:'Friendly, thoughtful, plainspoken.',crisp:'The answer first. Keep it short.',playful:'A little wit, plenty of useful work.',formal:'Courteous, precise, professional.',patient:'Calm explanations, one step at a time.',coach:'Practical next steps and encouragement.'};
 let ownerDraft = {};
-const readDraft = () => ({...Object.fromEntries(new FormData($('#customize-form'))),...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$('#customize-form').elements.namedItem(key).disabled ? ownerDraft[key] : $('#customize-form').elements.namedItem(key).value])),overrideWorkspace:$('#workspace-override').checked});
+const readDraft = () => ({...Object.fromEntries(new FormData($('#customize-form'))),...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$('#customize-form').elements.namedItem(key).disabled ? ownerDraft[key] : $('#customize-form').elements.namedItem(key).value])),skillIds:[...$('#agent-skill-options').querySelectorAll('input:checked')].map(input=>input.value),overrideWorkspace:$('#workspace-override').checked});
 export const setAppearance = (node, appearance) => {
   const vars = appearanceVars(appearance);node.dataset.scheme = vars.scheme;
   Object.entries(vars).forEach(([key,value])=>node.style.setProperty(`--${key}`,value));
@@ -69,6 +69,7 @@ export function openCustomization(onboarding = false, newAgent = false, workspac
   $('#settings-dialog').close(); $('#customize-form').reset();
   for (const key of ownerPreferenceKeys) $('#customize-form').elements.namedItem(key).disabled = false;
   for (const [key,value] of Object.entries(draft)) { const field = $('#customize-form').elements.namedItem(key); if (field) field.value = value; }
+  $('#agent-skill-options').innerHTML = (getState().skills || []).map(skill=>`<label class="agent-skill-option"><input type="checkbox" value="${esc(skill.id)}" ${(draft.skillIds || []).includes(skill.id) ? 'checked' : ''}><span><strong>${esc(skill.name)}</strong><small>/${esc(skill.command)}${skill.description ? ' · '+esc(skill.description) : ''}</small></span></label>`).join('') || '<p class="field-hint">No skills yet. Add or import skills in Workflows &amp; skills.</p>';
   $('#workspace-override').checked = !adding && !!getState()?.customization?.overrideWorkspace;
   $('#agent-appearance-controls').hidden = appearanceOnly;
   $('.profile-sidebar').hidden = appearanceOnly;
@@ -77,7 +78,7 @@ export function openCustomization(onboarding = false, newAgent = false, workspac
   $('#customize-form').querySelectorAll('details').forEach(node=>node.open = false);
   $('#customize-title').textContent = providerOnly ? 'AI provider' : appearanceOnly ? 'Workspace appearance' : adding ? 'Add agent' : firstRun ? 'Create your first agent' : 'Edit agent';
   $('#customize-description').textContent = providerOnly ? `Connection settings for ${draft.name}.` : appearanceOnly ? 'Choose the theme and animation for Odwyn.' : adding || firstRun ? 'Start with a name and focus. You can change everything later.' : 'Changes apply to this agent’s next task.';
-  $('#customize-save').textContent = appearanceOnly ? firstRun ? 'Continue' : 'Save changes' : adding ? 'Create agent' : firstRun ? 'Create agent' : 'Save changes';
+  $('#customize-save').textContent = appearanceOnly ? firstRun ? 'Continue' : 'Save' : adding ? 'Create agent' : firstRun ? 'Create agent' : 'Save';
   $('#customize-defaults').textContent = 'Use defaults';
   $('#customize-defaults').hidden = !firstRun || adding; $('#customize-status').textContent = '';
   showStep(appearanceOnly ? 0 : providerOnly ? 3 : 1); preview();
@@ -104,6 +105,8 @@ export function readWorkspaceAppearance() {
 
 function previewWorkspaceAppearance() {
   const draft = readWorkspaceAppearance();
+  $('#dock-preferences').hidden = draft.navigation !== 'dock';
+  $('#dock-size').style.setProperty('--range-fill',`${(draft.dockSize-75)*2}%`);
   $('#dock-size-value').textContent = draft.dockSize + '%';
   $('#appearance-preview').style.setProperty('--dock-scale',draft.dockSize / 100);
   for (const key of Object.keys(materialDefaults)) $(`#appearance-${key}-value`).textContent = `${draft[key]}${{opacity:'%',blur:'px',depth:'%',radius:'px'}[key]}`;

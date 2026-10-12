@@ -96,6 +96,10 @@ export const specializations = {general:'',research:'Research and compare option
 export function validateProfile(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Choose your customization.');
   const result = {};
+  if (input.skillIds !== undefined) {
+    if (!Array.isArray(input.skillIds) || input.skillIds.length > 100 || input.skillIds.some(id=>typeof id !== 'string' || !id || id.length > 100)) throw new Error('Choose valid skills.');
+    result.skillIds = [...new Set(input.skillIds)];
+  }
   if (input.overrideWorkspace !== undefined) {
     if (typeof input.overrideWorkspace !== 'boolean') throw new Error('Choose whether to override workspace settings.');
     result.overrideWorkspace = input.overrideWorkspace;

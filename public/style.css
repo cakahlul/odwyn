@@ -1145,3 +1145,25 @@ button.attachment-preview:hover { background:var(--paper); }
   .tool-grid { grid-template-columns:minmax(0,1fr); }
   .tool-card { padding:16px; gap:6px; }
 }
+
+/* Keep save actions reachable while only the fields scroll. */
+:is(#settings-dialog,#schedule-dialog,#room-dialog)[open] { display:flex; flex-direction:column; height:calc(100dvh - 50px); overflow:hidden; }
+:is(#settings-dialog,#schedule-dialog,#room-dialog)>:is(.modal-top,h2,.modal-description) { flex-shrink:0; }
+:is(#preferences-form,#schedule-form,#room-form) { display:flex; flex-direction:column; min-height:0; flex:1; }
+.modal-fields { overflow-y:auto; min-height:0; padding:0 3px 16px; }
+:is(#preferences-form,#schedule-form,#room-form)>.form-footer { flex-shrink:0; border-top:1px solid var(--line); padding-top:14px; margin-top:0; }
+:is(#preferences-form,#schedule-form,#room-form)>.form-footer button { min-height:44px; }
+.agent-skills { margin-top:24px; }
+.modal .agent-skill-option { display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
+.modal .agent-skill-option input { width:18px; height:18px; flex-shrink:0; margin:2px 0 0; accent-color:var(--orange-deep); }
+.agent-skill-option span { min-width:0; overflow-wrap:anywhere; }
+.agent-skill-option small { display:block; margin-top:4px; color:var(--muted); font-weight:400; }
+.dock-preferences .range-endpoints { grid-column:1 / -1; display:flex; justify-content:space-between; color:var(--muted); font-size:10px; }
+.dock-preferences input[type=range] { appearance:none; height:6px; border:0; border-radius:999px; padding:0; margin:12px 0 4px; background:linear-gradient(to right,var(--orange-deep) var(--range-fill),var(--line) var(--range-fill)); cursor:pointer; }
+#dock-size::-webkit-slider-thumb { appearance:none; width:20px; height:20px; border:3px solid var(--surface); border-radius:50%; background:var(--orange-deep); box-shadow:0 1px 4px color-mix(in srgb,var(--ink) 25%,transparent); }
+#dock-size::-moz-range-thumb { width:14px; height:14px; border:3px solid var(--surface); border-radius:50%; background:var(--orange-deep); }
+#dock-size:focus-visible { outline:2px solid var(--orange-deep); outline-offset:8px; }
+.copyable-block { min-width:0; margin:12px 0; border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--wash); }
+.block-toolbar { display:flex; justify-content:flex-end; padding:4px 8px; border-bottom:1px solid var(--line); }
+.block-copy { display:flex; align-items:center; gap:6px; min-height:36px; font-size:11px; }
+.message-text .copyable-block>pre,.message-text .copyable-block>blockquote { margin:0; border:0; border-radius:0; }

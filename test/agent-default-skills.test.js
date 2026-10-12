@@ -1,0 +1,68 @@
+import { test, expect } from 'bun:test';
+import { EventEmitter } from 'node:events';
+import { randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { chromium } from 'playwright';
+import { createApp } from '../server.js';
+import { defaults, validateProfile } from '../public/profile.js';
+
+test('default skill selection persists, reaches provider instructions, and blocks copy independently', async () => {
+  const directory=mkdtempSync(join(tmpdir(),'odwyn-default-skills-')),calls=[];
+  let app;
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
+  const codex=Object.assign(new EventEmitter(),{request:async(method,params)=>{
+    calls.push({method,params});
+    if(method==='account/read')return {account:{type:'chatgpt'}};
+    if(method.startsWith('thread/'))return {thread:{id:params?.threadId || 'skills-thread'}};
+    if(method==='turn/start')return {turn:{id:'skills-turn',status:'inProgress'}};
+    return {};
+  },stop(){}});
+  app=createApp({directory,user:'owner',password:'test-password-long-enough',origin:server.url.origin,codex,browser:{close:async()=>{}}});
+  app.runtime.state.customization={...defaults,name:'Oddy'};
+  const agent=app.runtime.state.agents[0],skill={id:randomUUID(),name:'Review <code>',command:'review',description:'Find bugs.',instructions:'Check each changed caller.'};
+  app.runtime.state.skills=[skill,{id:randomUUID(),name:'Unused',command:'unused',instructions:'UNSELECTED_SKILL'}];
+  agent.provider.configured=true; app.runtime.state.globalProvider.configured=true;
+  const at=new Date().toISOString();
+  app.runtime.state.conversations=[{id:'copy-chat',agentId:agent.id,title:'Copy blocks',createdAt:at,messages:[{id:'reply',role:'assistant',at,text:'Before\n\n```text\nFirst line\nSecond <line>\n```\n\n> A quoted instruction.\n\nAfter'}]}];
+  await app.runtime.refreshAccount();app.runtime.changed();
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},permissions:['clipboard-read','clipboard-write'],viewport:{width:1000,height:700}}),page=await context.newPage();
+  page.setDefaultTimeout(5000);
+  try {
+    expect(()=>validateProfile({...defaults,skillIds:'review'})).toThrow('Choose valid skills.');
+    expect(validateProfile({...defaults,skillIds:[skill.id,skill.id]}).skillIds).toEqual([skill.id]);
+    await page.goto(server.url.href+'#chat/copy-chat');
+    const blocks=page.locator('#messages .block-copy');expect(await blocks.count()).toBe(2);
+    await blocks.first().click();
+    expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe('First line\nSecond <line>\n');
+    expect(await blocks.first().textContent()).toContain('Copied');
+    await page.screenshot({path:join(import.meta.dir,'../artifacts/block-copy.png')});
+    await blocks.nth(1).click();expect((await page.evaluate(()=>navigator.clipboard.readText())).trim()).toBe('A quoted instruction.');
+    await page.evaluate(async()=>{const {openCustomization}=await import('/customize.js');openCustomization();});
+    expect(await page.locator('#agent-skill-options strong').first().textContent()).toBe('Review <code>');
+    await page.locator(`#agent-skill-options input[value="${skill.id}"]`).check();
+    await page.screenshot({path:join(import.meta.dir,'../artifacts/agent-default-skills.png')});
+    await page.locator('#customize-save').click();await page.locator('#customize-dialog').waitFor({state:'hidden'});
+    expect(app.runtime.state.customization.skillIds).toEqual([skill.id]);
+    await page.reload();
+    await page.evaluate(async()=>{const {openCustomization}=await import('/customize.js');openCustomization();});
+    expect(await page.locator(`#agent-skill-options input[value="${skill.id}"]`).isChecked()).toBe(true);
+    await page.locator('#customize-cancel').click();
+    await page.setViewportSize({width:320,height:568});
+    await page.locator('#settings-open').click();
+    await page.locator('.settings-scroll').evaluate(node=>node.scrollTop=0);
+    const save=await page.locator('#preferences-form button.primary-button').boundingBox();
+    expect(save.y+save.height).toBeLessThanOrEqual(568);
+    expect(await page.locator('#settings-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
+    await page.screenshot({path:join(import.meta.dir,'../artifacts/settings-save-mobile.png')});
+    await page.getByRole('button',{name:'Close settings',exact:true}).click();
+    const invalid=await app.fetch(new Request(new URL('/api/customization',server.url),{method:'PUT',headers:{authorization:'Basic '+Buffer.from('owner:test-password-long-enough').toString('base64'),origin:server.url.origin,'content-type':'application/json'},body:JSON.stringify({...defaults,skillIds:['missing']})}));
+    expect(invalid.status).toBe(400);expect(app.runtime.state.customization.skillIds).toEqual([skill.id]);
+    app.runtime.submit({prompt:'Review this change'});await app.runtime.drain();
+    const instructions=calls.find(call=>call.method==='thread/start').params.developerInstructions;
+    expect(instructions).toContain(skill.instructions);expect(instructions).not.toContain('UNSELECTED_SKILL');
+    app.runtime.state.skills=[];
+    expect(app.runtime.state.customization.skillIds).toEqual([skill.id]);
+  } finally {await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
+},20000);

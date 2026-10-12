@@ -168,6 +168,21 @@ export function richText(text, { cards = true, response = null } = {}) {
     } catch {}
   }
   container.innerHTML = structured || (cards ? markdown : plainMarkdown).parse(String(text || ''));
+  container.querySelectorAll('pre, blockquote').forEach(block=>{
+    if (block.parentElement.closest('pre, blockquote')) return;
+    const text = block.matches('pre') ? block.querySelector('code').textContent : block.innerText;
+    const wrapper = document.createElement('div'); wrapper.className = 'copyable-block';
+    const toolbar = document.createElement('div'); toolbar.className = 'block-toolbar';
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button block-copy';
+    button.innerHTML = icon('copy') + 'Copy'; button.setAttribute('aria-label','Copy block');
+    button.onclick = async () => {
+      button.disabled = true;
+      try { await navigator.clipboard.writeText(text); button.innerHTML = icon('check') + 'Copied'; toast('Block copied.'); }
+      catch (error) { handleError(error); }
+      finally { button.disabled = false; }
+    };
+    block.before(wrapper); toolbar.append(button); wrapper.append(toolbar,block);
+  });
   container.querySelectorAll('.result-response').forEach(form=>form.addEventListener('submit',async event=>{
     event.preventDefault();const fields=new FormData(form),selected=fields.getAll('selected'),status=form.querySelector('[role=status]'),fieldset=form.querySelector('fieldset');
     if(!selected.length){status.textContent='Select at least one item.';return;}

@@ -184,7 +184,7 @@ function renderMentions() {
 function openRoomEditor(room = null) {
   editingRoomId = room?.id || null; $('#room-header').close(); setNavigation(false);
   $('#room-dialog-title').textContent = room ? 'Edit conversation room' : 'Create a conversation room';
-  $('#room-save').childNodes[0].textContent = room ? 'Save changes' : 'Create room';
+  $('#room-save').childNodes[0].textContent = room ? 'Save' : 'Create room';
   $('#room-name').value = room?.title || ''; $('#room-status').textContent = '';
   $('#room-agent-options').innerHTML = workspace.agents.map(a=>`<label class="room-agent-option"><input type="checkbox" name="memberIds" value="${esc(a.id)}" ${room ? room.memberIds.includes(a.id) ? 'checked' : '' : a.id === agentId ? 'checked' : ''}>${avatarSvg(a.customization || defaults)}<span><strong>${esc(a.customization?.name || defaults.name)}</strong><small>${esc(providers[a.provider.type][0])} · ${a.runtime.account ? 'Ready' : 'Connect provider'}</small></span></label>`).join('');
   $('#room-dialog').showModal(); $('#room-name').focus();
@@ -422,7 +422,7 @@ function openSchedule(id = null) {
   const schedule=state.schedules.find(s=>s.id===id);
   $('#schedule-form').dataset.scheduleId=schedule?.id || '';
   $('#schedule-dialog h2').textContent=schedule ? 'Edit routine' : 'Schedule a task';
-  $('#schedule-form button').innerHTML=(schedule ? 'Save changes' : 'Set routine')+icon('arrow-up-right');
+  $('#schedule-form button').innerHTML=(schedule ? 'Save' : 'Set routine')+icon('arrow-up-right');
   const room=currentRoom(), members=workspace.agents;
   $('#schedule-agent').innerHTML=members.map(a=>`<option value="${esc(a.id)}">${esc(a.customization?.name || defaults.name)}</option>`).join('');
   $('#schedule-agent').value=room && room.memberIds.includes($('#reply-agent').value) ? $('#reply-agent').value : members.find(a=>a.id===agentId)?.id || members[0]?.id;
@@ -522,7 +522,7 @@ let workspaceSetup = false;
 function openSettings(onboarding = false) {
   workspaceSetup = onboarding === true;
   $('#settings-title').textContent = workspaceSetup ? 'Set up your workspace' : 'Odwyn settings';
-  $('#preferences-form button.primary-button').innerHTML = workspaceSetup ? `Continue to first agent${icon('arrow-up-right')}` : `Save changes${icon('check')}`;
+  $('#preferences-form button.primary-button').innerHTML = workspaceSetup ? `Continue to first agent${icon('arrow-up-right')}` : `Save${icon('check')}`;
   providerGlobal = true; providerAdding = false;
   $('#settings-provider-editor').append($('#provider-editor'));
   $('#provider-editor').hidden = false;

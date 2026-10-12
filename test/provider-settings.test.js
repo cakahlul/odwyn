@@ -67,7 +67,7 @@ test('first run saves full workspace settings before creating an agent with inhe
     expect(await page.locator('#provider-inherit-hint').textContent()).toContain('Claude Code · opus');await page.locator('#customize-save').click();await page.locator('#customize-dialog').waitFor({state:'hidden'});
     expect(app.runtime.state.agents).toHaveLength(1);expect(app.runtime.state.agents[0].providerOverride).toBe(false);expect(app.runtime.state.agents[0].provider.model).toBe('opus');expect(app.runtime.state.customization.name).toBe('Scout');
     await page.reload();expect(await page.locator(':root').getAttribute('data-navigation')).toBe('sidebar');expect(await page.locator('#settings-dialog').isVisible()).toBe(false);expect(await page.locator('#customize-dialog').isVisible()).toBe(false);
-    await page.locator('#settings-open').click();await page.getByRole('heading',{name:'Odwyn settings',exact:true}).waitFor();expect(await page.locator('#preferences-form button.primary-button').textContent()).toContain('Save changes');
+    await page.locator('#settings-open').click();await page.getByRole('heading',{name:'Odwyn settings',exact:true}).waitFor();expect(await page.locator('#preferences-form button.primary-button').textContent()).toContain('Save');
     expect(errors).toEqual([]);
   } finally {await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
 },30_000);

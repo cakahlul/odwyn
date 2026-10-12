@@ -206,6 +206,7 @@ export function createApp(options = {}) {
         }
         if (pathname === '/api/agents' && req.method === 'POST') {
           const input = await json(req), customization = validateProfile(input);
+          if (customization.skillIds?.some(id=>!store.state.skills.some(skill=>skill.id===id))) throw new Error('Choose existing skills.');
           const config = input.provider === undefined || input.provider.inherit === true ? { ...store.state.globalProvider } : validateProvider(input.provider,store.state.globalProvider);
           if (input.provider?.inherit !== undefined && typeof input.provider.inherit !== 'boolean') throw new Error('Choose a provider source.');
           if (store.state.agents.length >= 5) throw new Error('You can have at most 5 agents.');
@@ -225,6 +226,7 @@ export function createApp(options = {}) {
         if (pathname === '/api/customization' && req.method === 'PUT') {
           const agent = findAgent(store.state, url.searchParams.get('agentId') ?? undefined);
           const input = await json(req), customization = validateProfile(input);
+          if (customization.skillIds?.some(id=>!store.state.skills.some(skill=>skill.id===id))) throw new Error('Choose existing skills.');
           let changedAgents = [];
           if (input.provider !== undefined) {
             if (!input.provider || typeof input.provider.inherit !== 'boolean') throw new Error('Choose a provider source.');

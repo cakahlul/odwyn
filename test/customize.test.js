@@ -13,6 +13,7 @@ test('agent editor saves across sections, retains failed drafts, and preserves i
   for (const [id,name] of [['agent-name-input','name'],['owner-name-input','ownerName'],['agent-specialization','specialization'],['user-context-input','userContext'],['workspace-override','overrideWorkspace']]) nodes.set('#'+id,fields.get(name));
   for (const selector of ['.profile-layout','.profile-sidebar']) nodes.set(selector,node());
   const form=nodes.get('#customize-form'), dialog=nodes.get('#customize-dialog'), checkbox=fields.get('overrideWorkspace'), name=fields.get('name');
+  nodes.get('#agent-skill-options').querySelectorAll=()=>[];
   form.elements={namedItem:key=>fields.get(key)};
   form.reset=()=>{};
   form.querySelectorAll=selector=>selector==='details' ? [] : [...sections,...['customize-save','customize-cancel','customize-defaults'].map(id=>nodes.get('#'+id))];
@@ -24,7 +25,7 @@ test('agent editor saves across sections, retains failed drafts, and preserves i
   globalThis.document={querySelector:select,querySelectorAll:selector=>selector==='[data-profile-step]' ? panels : selector==='[data-custom-step]' ? sections : []};
   globalThis.FormData=class { *[Symbol.iterator](){for(const [key,field] of fields) if(!field.disabled && key!=='overrideWorkspace') yield [key,field.value];} };
   const requests=[]; let fail=false;
-  mock.module('../public/ui.js',()=>({$:select,api:async(url,body,method)=>{requests.push({url,body,method});if(fail)throw Error('Save failed');return body;},toast(){}}));
+  mock.module('../public/ui.js',()=>({$:select,esc:value=>String(value),api:async(url,body,method)=>{requests.push({url,body,method});if(fail)throw Error('Save failed');return body;},toast(){}}));
   const {setupCustomization,openCustomization}=await import('../public/customize.js');
   const state={agentId:'scout',agents:[{id:'scout'}],customization:{...defaults,name:'Scout'},appearance:{palette:'fern',motion:'reduced'},owner:{ownerName:'Alex',language:'id',detail:'brief',userContext:'Shared background'}};
   const submit=async()=>{form.onsubmit({preventDefault(){}});await new Promise(resolve=>setTimeout(resolve,0));};

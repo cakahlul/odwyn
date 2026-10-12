@@ -44,7 +44,14 @@ test('workspace themes preview, customize, validate, persist and reset without c
     await setRange('opacity',70);await setRange('blur',28);await setRange('depth',90);await setRange('radius',22);
     expect(await page.locator('#appearance-depth-value').textContent()).toBe('90%');
     expect(await page.locator('#appearance-preview-status').textContent()).toBe('');
+    expect(await page.locator('#dock-preferences').isVisible()).toBe(false);
+    await page.locator('input[name=workspaceNavigation][value=dock]').check();
+    expect(await page.locator('#dock-preferences').isVisible()).toBe(true);
     await page.locator('#dock-size').fill('125');await page.locator('#dock-auto-hide').check();
+    await page.locator('input[name=workspaceNavigation][value=sidebar]').check();
+    await page.locator('.settings-scroll').evaluate(node=>node.scrollTop=0);
+    const saveBox=await page.locator('#preferences-form button.primary-button').boundingBox();
+    expect(saveBox.y+saveBox.height).toBeLessThanOrEqual(1000);
     await page.locator('#preferences-form button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});
     const saved={palette:'graphite',navigation:'sidebar',dockSize:125,dockAutoHide:true,motion:'system',opacity:70,blur:28,depth:90,radius:22,customColors:{paper:'#17202b',surface:'#29394b',orange:'#f3a46c'}};
     expect(app.runtime.state.appearance).toEqual(saved);
