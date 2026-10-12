@@ -51,7 +51,7 @@ test('first run saves full workspace settings before creating an agent with inhe
     await page.goto(server.url.href);await page.getByRole('heading',{name:'Set up your workspace',exact:true}).waitFor();
     expect(await page.locator('#customize-dialog').isVisible()).toBe(false);
     expect(await page.locator('#settings-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
-    await page.locator('input[name="workspacePalette"][value="fern"]').check();await page.locator('#settings-motion').selectOption('reduced');
+    await page.locator('input[name=workspaceNavigation][value=sidebar]').check();await page.locator('input[name="workspacePalette"][value="fern"]').check();await page.locator('#settings-motion').selectOption('reduced');
     await page.locator('#provider-type').selectOption('openai');await page.locator('#provider-model').fill('manual-model');await page.locator('#provider-base-url').fill('file:///tmp/provider');
     await page.getByRole('button',{name:'Continue to first agent'}).click();await page.getByText('Use an HTTP(S) API base URL without credentials, query, or fragment.',{exact:true}).waitFor();
     expect(await page.locator('#customize-dialog').isVisible()).toBe(false);expect(app.runtime.state.globalProvider.type).toBe('codex');
@@ -61,12 +61,12 @@ test('first run saves full workspace settings before creating an agent with inhe
     await page.getByRole('button',{name:'Continue to first agent'}).click();await page.getByRole('heading',{name:'Create your first agent',exact:true}).waitFor();
     expect(await page.locator('#settings-dialog').isVisible()).toBe(false);expect(app.runtime.state.customization).toBeNull();
     expect(app.runtime.state.globalProvider).toMatchObject({type:'claude',model:'opus',effort:'high',configured:true});
-    expect(app.runtime.state.appearance).toMatchObject({palette:'fern',motion:'reduced'});expect(app.runtime.state.owner).toMatchObject({ownerName:'Alex',language:'id'});
+    expect(app.runtime.state.appearance).toMatchObject({palette:'fern',navigation:'sidebar',motion:'reduced'});expect(app.runtime.state.owner).toMatchObject({ownerName:'Alex',language:'id'});
     expect(app.runtime.state.currency).toBe('IDR');expect(app.runtime.state.preferences).toBe('Keep answers concise.');
     await page.locator('#agent-name-input').fill('Scout');await page.locator('[data-custom-step="3"]').click();expect(await page.locator('#provider-source').inputValue()).toBe('global');
     expect(await page.locator('#provider-inherit-hint').textContent()).toContain('Claude Code · opus');await page.locator('#customize-save').click();await page.locator('#customize-dialog').waitFor({state:'hidden'});
     expect(app.runtime.state.agents).toHaveLength(1);expect(app.runtime.state.agents[0].providerOverride).toBe(false);expect(app.runtime.state.agents[0].provider.model).toBe('opus');expect(app.runtime.state.customization.name).toBe('Scout');
-    await page.reload();expect(await page.locator('#settings-dialog').isVisible()).toBe(false);expect(await page.locator('#customize-dialog').isVisible()).toBe(false);
+    await page.reload();expect(await page.locator(':root').getAttribute('data-navigation')).toBe('sidebar');expect(await page.locator('#settings-dialog').isVisible()).toBe(false);expect(await page.locator('#customize-dialog').isVisible()).toBe(false);
     await page.locator('#settings-open').click();await page.getByRole('heading',{name:'Odwyn settings',exact:true}).waitFor();expect(await page.locator('#preferences-form button.primary-button').textContent()).toContain('Save changes');
     expect(errors).toEqual([]);
   } finally {await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}

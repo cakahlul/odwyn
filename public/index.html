@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f8f7f2"><meta name="description" content="Odwyn. Help with the oddly specific. Your personal browser assistant.">
-  <title>Odwyn</title><link rel="icon" href="/mark.svg"><link rel="stylesheet" href="/style.css">
+  <title>Odwyn</title><link id="workspace-favicon" rel="icon" type="image/svg+xml" href="/mark.svg"><link rel="stylesheet" href="/style.css">
 </head>
 <body class="browser-closed">
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -18,9 +18,7 @@
             <label class="reply-agent" for="reply-agent"><span>Agent</span><select id="reply-agent"></select></label>
             <div class="conversation-actions"><button class="icon-button" id="minimize-agent" aria-label="Minimize active agent" title="Minimize active agent"><span data-icon="minimize"></span></button><button class="icon-button" id="close-conversation" aria-label="Close conversation" title="Close conversation"><span data-icon="close"></span></button></div>
           </section>
-          <button type="button" class="workspace-button" id="agents-open" aria-label="Your agents" aria-haspopup="dialog" aria-controls="agents-dialog"><span data-icon="users"></span><span>Agents</span><span id="agent-alert" class="agent-alert" hidden></span></button>
           <button class="icon-button browser-toggle" id="browser-toggle" aria-label="Open browser panel" title="Open browser panel" aria-expanded="false" aria-controls="browser-panel"><span data-icon="globe"></span><span class="browser-toggle-label">Browser</span></button>
-          <button class="icon-button settings-button" id="settings-open" aria-label="Odwyn settings" title="Odwyn settings"><span data-icon="settings"></span><span id="owner-name" class="sr-only">Your space</span></button>
         </div>
       </header>
       <div id="agent-workspace" class="agent-workspace">
@@ -38,11 +36,16 @@
         <div class="composer-footnote"><span>Shift + Enter for a new line</span><span>Enter to send <span class="key-symbol">↵</span></span></div>
       </section>
       </div>
-      <nav class="workspace-dock" aria-label="Workspace navigation">
-        <button data-view="home" class="dock-item active" aria-label="Home"><span data-icon="home"></span><span>Home</span></button>
-        <button id="menu-button" class="dock-item" aria-label="Conversations" aria-haspopup="dialog" aria-expanded="false" aria-controls="search-dialog"><span data-icon="chat"></span><span>Conversations</span></button>
-        <button id="tools-open" class="dock-item" aria-label="Tools" aria-haspopup="dialog" aria-controls="tools-dialog"><span data-icon="workflow"></span><span>Tools</span><span class="nav-status" id="run-status" role="img" aria-label="Active tasks" title="Active tasks" hidden></span></button>
-      </nav>
+      <div class="dock-region"><button type="button" class="dock-reveal-button" aria-label="Show dock" aria-controls="workspace-navigation"><span aria-hidden="true"></span></button>
+      <nav id="workspace-navigation" class="workspace-dock" aria-label="Workspace navigation">
+        <button id="sidebar-collapse" class="sidebar-collapse" aria-label="Collapse sidebar" title="Collapse sidebar" aria-expanded="true" aria-controls="workspace-navigation"><img src="/icons/lucide/panel-left-close.svg" width="20" height="20" alt=""><span>Collapse</span></button>
+        <button data-view="home" class="dock-item active" aria-label="Home" title="Home"><span class="dock-icon dock-home"><img src="/icons/fluent/home.png" width="48" height="48" alt="" draggable="false"></span><span class="dock-tooltip" aria-hidden="true">Home</span></button>
+        <button id="menu-button" class="dock-item" aria-label="Conversations" title="Conversations" aria-haspopup="dialog" aria-expanded="false" aria-controls="search-dialog"><span class="dock-icon dock-conversations"><img src="/icons/fluent/conversations.png" width="48" height="48" alt="" draggable="false"></span><span class="dock-tooltip" aria-hidden="true">Conversations</span></button>
+        <button id="tools-open" class="dock-item" aria-label="Tools" title="Tools" aria-haspopup="dialog" aria-controls="tools-dialog"><span class="dock-icon dock-tools"><img src="/icons/fluent/tools.png" width="48" height="48" alt="" draggable="false"></span><span class="dock-tooltip" aria-hidden="true">Tools</span><span class="nav-status" id="run-status" role="img" aria-label="Active tasks" title="Active tasks" hidden></span></button>
+        <span class="dock-separator" aria-hidden="true"></span>
+        <button id="agents-open" class="dock-item" aria-label="Your agents" title="Agents" aria-haspopup="dialog" aria-controls="agents-dialog"><span class="dock-icon dock-agents"><img src="/icons/fluent/agents.png" width="48" height="48" alt="" draggable="false"></span><span class="dock-tooltip" aria-hidden="true">Agents</span><span id="agent-alert" class="agent-alert" hidden></span></button>
+        <button id="settings-open" class="dock-item" aria-label="Odwyn settings" title="Settings" aria-haspopup="dialog" aria-controls="settings-dialog"><span class="dock-icon dock-settings"><img src="/icons/fluent/settings.png" width="48" height="48" alt="" draggable="false"></span><span class="dock-tooltip" aria-hidden="true">Settings</span><span id="owner-name" class="sr-only">Your space</span></button>
+      </nav></div>
     </main>
     <aside class="browser-panel" id="browser-panel" inert aria-label="Assistant browser and activity">
       <header class="browser-heading"><span class="browser-heading-icon" data-icon="globe"></span><strong>Browser</strong><button class="icon-button" id="browser-close" title="Hide browser panel" aria-label="Close browser panel"><span data-icon="chevron"></span></button></header>
@@ -78,6 +81,8 @@
   <input type="file" id="file-input" multiple hidden>
   <dialog id="settings-dialog" class="modal"><form method="dialog" class="modal-top"><span class="eyebrow">SETTINGS</span><button class="icon-button" aria-label="Close settings"><span data-icon="close"></span></button></form><h2 id="settings-title">Odwyn settings</h2><p class="modal-description">Workspace defaults and shared preferences for all your agents.</p><form id="preferences-form"><section id="settings-appearance-controls" class="settings-appearance profile-controls" aria-labelledby="settings-appearance-title">
 <h3 id="settings-appearance-title">Workspace appearance</h3><p class="field-hint">Choose a foundation, then make it yours.</p>
+<fieldset class="navigation-choice"><legend>How do you like to navigate?</legend><label><input type="radio" name="workspaceNavigation" value="dock"><span class="navigation-choice-art navigation-choice-dock" aria-hidden="true"><i></i><i></i><i></i></span><strong>Dock</strong><small>A floating strip of 3D icons.</small></label><label><input type="radio" name="workspaceNavigation" value="sidebar"><span class="navigation-choice-art navigation-choice-sidebar" aria-hidden="true"><i></i><i></i><i></i></span><strong>Sidebar</strong><small>Familiar navigation with visible labels.</small></label></fieldset>
+<div class="dock-preferences"><label for="dock-size">Dock size <output id="dock-size-value" for="dock-size"></output><input type="range" id="dock-size" min="75" max="125" step="5"></label><label class="check-label"><input type="checkbox" id="dock-auto-hide">Automatically hide the dock</label><p class="field-hint">Applies to Dock navigation. Move to the bottom edge, tap the handle, or use Tab to reveal it.</p></div>
 <fieldset class="palette-field"><legend>Color palette</legend><div id="settings-palette-choices" class="palette-choices"></div></fieldset>
 <div class="appearance-preview-label">Preview <span>Changes apply when you save</span></div>
 <div id="appearance-preview" class="appearance-preview" aria-label="Workspace appearance preview"><div class="appearance-preview-rail" aria-hidden="true"><span class="appearance-preview-mark">o.</span><i></i><i></i><i></i></div><div class="appearance-preview-chat"><strong>Weekend plans</strong><div class="appearance-preview-message appearance-preview-own">Can you check the itinerary?</div><div class="appearance-preview-message">Three options ready to compare.</div><div class="appearance-preview-composer">Message…<span>↑</span></div></div></div>

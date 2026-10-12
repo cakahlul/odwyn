@@ -14,6 +14,45 @@ for (const [storage, keys] of [[localStorage, ['agent','closed-agents','bubble-p
   }
 }
 
+function setSidebarCollapsed(collapsed) {
+  document.documentElement.classList.toggle('sidebar-collapsed',collapsed);
+  const button = $('#sidebar-collapse'), label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  button.setAttribute('aria-expanded',String(!collapsed));
+  button.setAttribute('aria-label',label);button.title = label;
+  button.querySelector('img').src = `/icons/lucide/panel-left-${collapsed ? 'open' : 'close'}.svg`;
+  button.querySelector('span').textContent = collapsed ? 'Expand' : 'Collapse';
+}
+setSidebarCollapsed(localStorage.getItem('odwyn-sidebar-collapsed') === 'true' || (localStorage.getItem('odwyn-sidebar-collapsed') === null && matchMedia('(max-width:760px)').matches));
+document.addEventListener('pointerdown',event => {
+  if (document.documentElement.dataset.navigation === 'dock' && document.documentElement.dataset.dockAutoHide === 'true' && !event.target.closest('.dock-region') && document.activeElement.closest('.dock-region')) document.activeElement.blur();
+});
+$('.dock-region').onclick = event => {
+  if (event.target === event.currentTarget || event.target.closest('.dock-reveal-button')) $('#menu-button').focus({preventScroll:true});
+};
+$('#sidebar-collapse').onclick = () => {
+  const collapsed = !document.documentElement.classList.contains('sidebar-collapsed');
+  setSidebarCollapsed(collapsed);localStorage.setItem('odwyn-sidebar-collapsed',String(collapsed));
+};
+
+const navigationDock = $('#workspace-navigation'), dockItems = [...navigationDock.querySelectorAll('.dock-item')];
+function magnifyDock(clientX = null) {
+  for (const item of dockItems) {
+    const bounds = item.getBoundingClientRect();
+    const distance = clientX === null ? 1 : Math.min(1,Math.abs(clientX - bounds.x - bounds.width / 2) / (bounds.width * 2));
+    item.style.setProperty('--dock-weight',(1 + Math.cos(distance * Math.PI)) / 2);
+  }
+}
+navigationDock.addEventListener('pointermove',event => { if (event.pointerType === 'mouse' || event.pointerType === 'pen') magnifyDock(event.clientX); });
+navigationDock.addEventListener('pointerleave',() => {
+  const focused = dockItems.find(item=>item.matches(':focus-visible'));
+  const bounds = focused?.getBoundingClientRect();magnifyDock(bounds ? bounds.x + bounds.width / 2 : null);
+});
+navigationDock.addEventListener('focusin',event => {
+  const bounds = event.target.matches('.dock-item:focus-visible') ? event.target.getBoundingClientRect() : null;
+  magnifyDock(bounds ? bounds.x + bounds.width / 2 : null);
+});
+navigationDock.addEventListener('focusout',() => magnifyDock());
+
 for (const key of ['language','detail']) $(`#global-${key}`).innerHTML = Object.entries(choices[key]).map(([value,label])=>`<option value="${value}">${label}</option>`).join('');
 
 let state = null, conversationId = null, view = 'home', filter = 'all', signature = '', busy = false, attachments = [], pendingAttachments = [], providerAgentId = null, providerGlobal = false, providerAdding = false;

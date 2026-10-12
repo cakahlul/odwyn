@@ -22,7 +22,7 @@ test('workspace themes preview, customize, validate, persist and reset without c
   const openSettings=async()=>{await page.locator('#settings-open').click();};
   try{
     const base={palette:'graphite',motion:'reduced'};
-    for(const path of ['/api/appearance','/api/preferences'])for(const bad of [{...base,opacity:59},{...base,blur:33},{...base,depth:'90'},{...base,radius:3},{...base,customColors:{paper:'url(x)'}},{...base,customColors:{ink:'#ffffff'}},{...base,customColors:{paper:'#ffffff',surface:'#000000'}}])expect((await request(path,bad)).status).toBe(400);
+    for(const path of ['/api/appearance','/api/preferences'])for(const bad of [{...base,navigation:'invalid'},{...base,dockSize:74},{...base,dockSize:126},{...base,dockSize:'100'},{...base,dockAutoHide:'true'},{...base,opacity:59},{...base,blur:33},{...base,depth:'90'},{...base,radius:3},{...base,customColors:{paper:'url(x)'}},{...base,customColors:{ink:'#ffffff'}},{...base,customColors:{paper:'#ffffff',surface:'#000000'}}])expect((await request(path,bad)).status).toBe(400);
     expect(validateAppearance({palette:'paper',motion:'system'})).toEqual({palette:'paper',motion:'system'});
     await page.goto(server.url.href+'#chat/theme-chat');await page.locator('#messages').waitFor();await openSettings();
     for(const palette of Object.keys(palettes)){
@@ -30,6 +30,12 @@ test('workspace themes preview, customize, validate, persist and reset without c
       expect(await page.locator('#appearance-preview').evaluate(node=>node.style.getPropertyValue('--paper'))).toBe(palettes[palette].vars.paper);
       expect(await page.locator(':root').evaluate(node=>node.style.getPropertyValue('--paper'))).toBe(palettes.paper.vars.paper);
     }
+    await page.locator('input[name=workspaceNavigation][value=sidebar]').check();
+    expect(await page.locator('#appearance-preview').getAttribute('data-navigation')).toBe('sidebar');
+    expect(await page.locator(':root').getAttribute('data-navigation')).toBe('dock');
+    await page.getByRole('button',{name:'Close settings',exact:true}).click();
+    expect(await page.locator(':root').getAttribute('data-navigation')).toBe('dock');
+    await openSettings();await page.locator('input[name=workspaceNavigation][value=sidebar]').check();
     await page.locator('input[name=workspacePalette][value=graphite]').check();
     expect(await page.locator('.appearance-preview-message:not(.appearance-preview-own)').evaluate(node=>{const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');canvas.width=canvas.height=1;ctx.fillStyle=getComputedStyle(node).backgroundColor;ctx.fillRect(0,0,1,1);return Math.max(...ctx.getImageData(0,0,1,1).data.slice(0,3));})).toBeLessThan(100);
     await page.screenshot({path:join(artifacts,'workspace-palettes.png'),animations:'disabled'});
@@ -38,15 +44,34 @@ test('workspace themes preview, customize, validate, persist and reset without c
     await setRange('opacity',70);await setRange('blur',28);await setRange('depth',90);await setRange('radius',22);
     expect(await page.locator('#appearance-depth-value').textContent()).toBe('90%');
     expect(await page.locator('#appearance-preview-status').textContent()).toBe('');
+    await page.locator('#dock-size').fill('125');await page.locator('#dock-auto-hide').check();
     await page.locator('#preferences-form button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});
-    const saved={palette:'graphite',motion:'system',opacity:70,blur:28,depth:90,radius:22,customColors:{paper:'#17202b',surface:'#29394b',orange:'#f3a46c'}};
+    const saved={palette:'graphite',navigation:'sidebar',dockSize:125,dockAutoHide:true,motion:'system',opacity:70,blur:28,depth:90,radius:22,customColors:{paper:'#17202b',surface:'#29394b',orange:'#f3a46c'}};
     expect(app.runtime.state.appearance).toEqual(saved);
+    expect(decodeURIComponent(await page.locator('#workspace-favicon').getAttribute('href'))).toContain('.mark-body,.mark-edge{fill:#f3a46c}');
     await page.screenshot({path:join(artifacts,'workspace-custom-dark.png'),animations:'disabled'});
     await app.close();app=makeApp();await page.reload();await page.locator('#messages').waitFor();
+    expect(await page.locator(':root').getAttribute('data-navigation')).toBe('sidebar');
     expect(app.runtime.state.appearance).toEqual(saved);expect(app.runtime.state.preferences).toBe('Keep my preferences');
     expect(await page.locator(':root').evaluate(node=>node.style.getPropertyValue('--ui-depth'))).toBe('90');
+    const expanded = await page.locator('#view').boundingBox();
+    await page.locator('#sidebar-collapse').focus();await page.keyboard.press('Enter');
+    expect(await page.locator('#sidebar-collapse').getAttribute('aria-expanded')).toBe('false');
+    expect((await page.locator('#view').boundingBox()).width).toBeGreaterThan(expanded.width);
+    await page.locator('#settings-open').focus();
+    expect(await page.locator('#settings-open .dock-tooltip').evaluate(node=>getComputedStyle(node).visibility)).toBe('visible');
+    await page.screenshot({path:join(artifacts,'workspace-sidebar-collapsed.png'),animations:'disabled'});
+    await page.reload();await page.locator('#messages').waitFor();
+    expect(await page.locator(':root').evaluate(node=>node.classList.contains('sidebar-collapsed'))).toBe(true);
+    await page.locator('#sidebar-collapse').click();
+    expect(await page.locator('#sidebar-collapse').getAttribute('aria-expanded')).toBe('true');
     for(const width of [320,768,1440]){
-      await page.setViewportSize({width,height:1000});await openSettings();
+      await page.setViewportSize({width,height:1000});
+      await page.screenshot({path:join(artifacts,`workspace-sidebar-${width}.png`),animations:'disabled'});
+      await page.waitForFunction(()=>document.querySelector('.shell').scrollWidth<=document.querySelector('.shell').clientWidth);
+      if(width===320) { await page.locator('#sidebar-collapse').click();expect(await page.locator('#sidebar-collapse').getAttribute('aria-expanded')).toBe('false'); }
+      await openSettings();
+      expect(await page.locator('input[name=workspaceNavigation][value=sidebar]').isChecked()).toBe(true);
       await page.locator('.appearance-custom').evaluate(node=>node.open=true);
       expect(await page.locator('#settings-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
       await page.locator('#appearance-opacity').focus();expect(await page.locator('#appearance-opacity').evaluate(node=>node===document.activeElement)).toBe(true);
@@ -55,12 +80,13 @@ test('workspace themes preview, customize, validate, persist and reset without c
       await page.getByRole('button',{name:'Close settings',exact:true}).click();
     }
     await openSettings();await page.locator('#appearance-reset').click();
-    expect(await page.locator('#appearance-custom-colors').isChecked()).toBe(false);expect(await page.locator('#appearance-depth').inputValue()).toBe('65');
+    expect(await page.locator('input[name=workspaceNavigation][value=sidebar]').isChecked()).toBe(true);expect(await page.locator('#appearance-custom-colors').isChecked()).toBe(false);expect(await page.locator('#appearance-depth').inputValue()).toBe('65');
     expect(app.runtime.state.appearance).toEqual(saved);await page.getByRole('button',{name:'Close settings',exact:true}).click();
     // An agent's palette override keeps its palette; workspace material settings still apply.
     app.runtime.state.customization={...defaults,name:'Oddy',overrideWorkspace:true,palette:'harbor'};app.runtime.changed();
     await page.waitForFunction(paper=>document.documentElement.style.getPropertyValue('--paper')===paper,palettes.harbor.vars.paper);
     expect(await page.locator(':root').evaluate(node=>node.style.getPropertyValue('--ui-depth'))).toBe('90');
+    expect(decodeURIComponent(await page.locator('#workspace-favicon').getAttribute('href'))).toContain('.mark-body,.mark-edge{fill:#f3a46c}');
     // Text and muted text remain readable on every built-in surface.
     const ratios=await page.evaluate(async()=>{
       const {palettes,appearanceVars}=await import('/profile.js');
@@ -70,6 +96,39 @@ test('workspace themes preview, customize, validate, persist and reset without c
     for(const ratio of ratios)expect(ratio).toBeGreaterThanOrEqual(4.5);
     expect((await request('/api/appearance',saved)).status).toBe(200);
     expect(app.runtime.state.appearance).toEqual(saved);
-    expect(appearanceVars(saved).scheme).toBe('dark');expect(errors).toEqual([]);
+    expect(appearanceVars(saved).scheme).toBe('dark');
+    expect(await page.locator(':root').getAttribute('data-navigation')).toBe('sidebar');
+    await openSettings();await page.locator('input[name=workspaceNavigation][value=dock]').check();
+    await page.locator('#preferences-form button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});
+    expect(await page.locator(':root').getAttribute('data-navigation')).toBe('dock');
+    expect(app.runtime.state.appearance.navigation).toBe('dock');
+    expect(await page.locator('#dock-size').inputValue()).toBe('125');
+    await page.locator('#prompt').focus();await page.mouse.move(500,200);
+    await page.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().top>=innerHeight);
+    await page.locator('.dock-reveal-button').focus();
+    await page.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().bottom<=innerHeight);
+    const large = await page.locator('.workspace-dock').boundingBox();
+    await page.screenshot({path:join(artifacts,'workspace-dock-large-revealed.png'),animations:'disabled'});
+    await page.locator('#prompt').focus();await page.mouse.move(500,200);
+    await page.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().top>=innerHeight);
+    await page.mouse.move(720,999);
+    await page.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().bottom<=innerHeight);
+    const touch = await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:320,height:700},hasTouch:true,isMobile:true});
+    try {
+      const mobile = await touch.newPage();mobile.setDefaultTimeout(5000);await mobile.goto(server.url.href+'#chat/theme-chat');await mobile.locator('#messages').waitFor();
+      await mobile.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().top>=innerHeight);
+      await mobile.getByRole('button',{name:'Show dock',exact:true}).tap();
+      await mobile.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().bottom<=innerHeight);
+      const mobileDock = await mobile.locator('.workspace-dock').boundingBox();
+      expect(mobileDock.x).toBeGreaterThanOrEqual(0);expect(mobileDock.x+mobileDock.width).toBeLessThanOrEqual(320);
+      await mobile.screenshot({path:join(artifacts,'workspace-dock-autohide-mobile.png'),animations:'disabled'});
+      await mobile.locator('#prompt').tap();
+      await mobile.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().top>=innerHeight);
+    } finally { await touch.close(); }
+    await openSettings();await page.locator('#dock-size').fill('75');await page.locator('#dock-auto-hide').uncheck();
+    await page.locator('#preferences-form button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});
+    expect((await page.locator('.workspace-dock').boundingBox()).width).toBeLessThan(large.width);
+    expect(await page.locator('.dock-reveal-button').isVisible()).toBe(false);
+    expect(errors).toEqual([]);
   }finally{await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
 },30_000);

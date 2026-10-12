@@ -5,14 +5,27 @@ let getState, saved, providerDraft = () => undefined, step = 0, firstRun = false
 const toneDetails = {warm:'Friendly, thoughtful, plainspoken.',crisp:'The answer first. Keep it short.',playful:'A little wit, plenty of useful work.',formal:'Courteous, precise, professional.',patient:'Calm explanations, one step at a time.',coach:'Practical next steps and encouragement.'};
 let ownerDraft = {};
 const readDraft = () => ({...Object.fromEntries(new FormData($('#customize-form'))),...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$('#customize-form').elements.namedItem(key).disabled ? ownerDraft[key] : $('#customize-form').elements.namedItem(key).value])),overrideWorkspace:$('#workspace-override').checked});
-export const setAppearance = (node, appearance) => Object.entries(appearanceVars(appearance)).forEach(([key,value])=>node.style.setProperty(`--${key}`,value));
+export const setAppearance = (node, appearance) => {
+  const vars = appearanceVars(appearance);node.dataset.scheme = vars.scheme;
+  Object.entries(vars).forEach(([key,value])=>node.style.setProperty(`--${key}`,value));
+};
 const setPalette = (node, palette) => setAppearance(node,{palette});
 
 export function applyProfile(profile, appearance = {}, owner = {}) {
   const p = resolveProfile(profile,appearance,owner), signature = JSON.stringify([p,appearance,owner]);
   if (signature === lastApplied) return;
-  lastApplied = signature; setAppearance(document.documentElement,{...appearance,palette:p.palette,customColors:profile?.overrideWorkspace ? {} : appearance.customColors});
-  document.documentElement.style.setProperty('--workspace-accent',appearanceVars(appearance).orange);
+  lastApplied = signature;
+  document.documentElement.dataset.navigation = appearance.navigation || 'dock';
+  document.documentElement.dataset.dockAutoHide = String(appearance.dockAutoHide || false);
+  document.documentElement.style.setProperty('--dock-scale',(appearance.dockSize ?? 100) / 100);
+  setAppearance(document.documentElement,{...appearance,palette:p.palette,customColors:profile?.overrideWorkspace ? {} : appearance.customColors});
+  const workspaceColors = appearanceVars(appearance);
+  document.documentElement.style.setProperty('--workspace-accent',workspaceColors.orange);
+  const favicon = $('.product-mark').cloneNode(true);
+  favicon.removeAttribute('aria-hidden');
+  favicon.insertAdjacentHTML('afterbegin',`<style>.mark-body,.mark-edge{fill:${workspaceColors.orange}}.mark-face{fill:${workspaceColors.surface}}.mark-features{stroke:${workspaceColors.ink}}</style>`);
+  const faviconHref = 'data:image/svg+xml,' + encodeURIComponent(favicon.outerHTML);
+  if ($('#workspace-favicon').getAttribute('href') !== faviconHref) $('#workspace-favicon').href = faviconHref;
   document.documentElement.dataset.motion = p.motion;
   $('#agent-name').textContent = p.name;
   $('#reply-agent').title = p.name;
@@ -20,7 +33,6 @@ export function applyProfile(profile, appearance = {}, owner = {}) {
   $('#owner-name').textContent = owner.ownerName || 'Your space';
   $('label[for="prompt"]').textContent = `What would you like ${p.name} to do?`;
   document.title = p.name === 'Odwyn' ? 'Odwyn' : `Odwyn · ${p.name}`;
-  $('link[rel="icon"]').href = `data:image/svg+xml,${encodeURIComponent(avatarSvg(p))}`;
   $('meta[name="theme-color"]').content = appearanceVars({...appearance,palette:p.palette,customColors:profile?.overrideWorkspace ? {} : appearance.customColors}).paper;
 }
 
@@ -87,16 +99,19 @@ async function save(profile, resetAppearance = false) {
 }
 
 export function readWorkspaceAppearance() {
-  return {palette:$('#preferences-form').elements.namedItem('workspacePalette').value,motion:$('#settings-motion').value,...Object.fromEntries(Object.keys(materialDefaults).map(key=>[key,Number($(`#appearance-${key}`).value)])),customColors:$('#appearance-custom-colors').checked ? Object.fromEntries(customColorKeys.map(key=>[key,$(`#appearance-color-${key}`).value])) : {}};
+  return {palette:$('#preferences-form').elements.namedItem('workspacePalette').value,navigation:$('#preferences-form').elements.namedItem('workspaceNavigation').value,dockSize:Number($('#dock-size').value),dockAutoHide:$('#dock-auto-hide').checked,motion:$('#settings-motion').value,...Object.fromEntries(Object.keys(materialDefaults).map(key=>[key,Number($(`#appearance-${key}`).value)])),customColors:$('#appearance-custom-colors').checked ? Object.fromEntries(customColorKeys.map(key=>[key,$(`#appearance-color-${key}`).value])) : {}};
 }
 
 function previewWorkspaceAppearance() {
   const draft = readWorkspaceAppearance();
+  $('#dock-size-value').textContent = draft.dockSize + '%';
+  $('#appearance-preview').style.setProperty('--dock-scale',draft.dockSize / 100);
   for (const key of Object.keys(materialDefaults)) $(`#appearance-${key}-value`).textContent = `${draft[key]}${{opacity:'%',blur:'px',depth:'%',radius:'px'}[key]}`;
   for (const key of customColorKeys) $(`#appearance-color-${key}-value`).textContent = $(`#appearance-color-${key}`).value;
   $('#appearance-color-fields').hidden = !$('#appearance-custom-colors').checked;
   try {
     validateAppearance(draft);setAppearance($('#appearance-preview'),draft);
+    $('#appearance-preview').dataset.navigation = draft.navigation;
     $('#appearance-preview-status').textContent = '';
   } catch (error) { $('#appearance-preview-status').textContent = error.message; }
 }
@@ -104,6 +119,9 @@ function previewWorkspaceAppearance() {
 export function fillWorkspaceAppearance(appearance = {}) {
   $('#preferences-form').elements.namedItem('workspacePalette').value = appearance.palette || defaults.palette;
   $('#settings-motion').value = appearance.motion || defaults.motion;
+  $('#preferences-form').elements.namedItem('workspaceNavigation').value = appearance.navigation || 'dock';
+  $('#dock-size').value = appearance.dockSize ?? 100;
+  $('#dock-auto-hide').checked = appearance.dockAutoHide || false;
   $('#appearance-custom-colors').checked = !!Object.keys(appearance.customColors || {}).length;
   const vars = appearanceVars(appearance);
   for (const key of customColorKeys) $(`#appearance-color-${key}`).value = vars[key];
@@ -129,7 +147,7 @@ export function setupCustomization(state, onSaved, readProvider = () => undefine
     previewWorkspaceAppearance();
   };
   $('#appearance-reset').onclick = () => {
-    const draft = readWorkspaceAppearance();fillWorkspaceAppearance({palette:draft.palette,motion:draft.motion});
+    const draft = readWorkspaceAppearance();fillWorkspaceAppearance({palette:draft.palette,motion:draft.motion,navigation:draft.navigation,dockSize:draft.dockSize,dockAutoHide:draft.dockAutoHide});
   };
   $('#customize-close').onclick = () => $('#customize-dialog').close();
   $('#customize-cancel').onclick = () => $('#customize-dialog').close();

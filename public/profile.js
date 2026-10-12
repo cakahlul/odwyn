@@ -61,6 +61,18 @@ export function appearanceVars(appearance = {}) {
 export function validateAppearance(input) {
   if (!input || typeof input!=='object' || Array.isArray(input) || !Object.hasOwn(palettes,input.palette) || !Object.hasOwn(choices.motion,input.motion)) throw new Error('Choose a palette and motion preference.');
   const result = {palette:input.palette,motion:input.motion};
+  if (input.navigation !== undefined) {
+    if (!['dock','sidebar'].includes(input.navigation)) throw new Error('Choose Dock or Sidebar navigation.');
+    result.navigation = input.navigation;
+  }
+  if (input.dockSize !== undefined) {
+    if (!Number.isInteger(input.dockSize) || input.dockSize < 75 || input.dockSize > 125) throw new Error('Choose a dock size between 75% and 125%.');
+    result.dockSize = input.dockSize;
+  }
+  if (input.dockAutoHide !== undefined) {
+    if (typeof input.dockAutoHide !== 'boolean') throw new Error('Choose whether to automatically hide the dock.');
+    result.dockAutoHide = input.dockAutoHide;
+  }
   for (const [key,[min,max]] of Object.entries(materialLimits)) {
     if (input[key]===undefined) continue;
     if (!Number.isInteger(input[key]) || input[key]<min || input[key]>max) throw new Error(`Choose ${key} between ${min} and ${max}.`);
