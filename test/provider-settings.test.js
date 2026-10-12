@@ -67,7 +67,7 @@ test('first run saves full workspace settings before creating an agent with inhe
     expect(await page.locator('#provider-inherit-hint').textContent()).toContain('Claude Code · opus');await page.locator('#customize-save').click();await page.locator('#customize-dialog').waitFor({state:'hidden'});
     expect(app.runtime.state.agents).toHaveLength(1);expect(app.runtime.state.agents[0].providerOverride).toBe(false);expect(app.runtime.state.agents[0].provider.model).toBe('opus');expect(app.runtime.state.customization.name).toBe('Scout');
     await page.reload();expect(await page.locator('#settings-dialog').isVisible()).toBe(false);expect(await page.locator('#customize-dialog').isVisible()).toBe(false);
-    await page.locator('#menu-button').click();await page.locator('#settings-open').click();await page.getByRole('heading',{name:'Odwyn settings',exact:true}).waitFor();expect(await page.locator('#preferences-form button.primary-button').textContent()).toContain('Save changes');
+    await page.locator('#settings-open').click();await page.getByRole('heading',{name:'Odwyn settings',exact:true}).waitFor();expect(await page.locator('#preferences-form button.primary-button').textContent()).toContain('Save changes');
     expect(errors).toEqual([]);
   } finally {await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
 },30_000);
@@ -111,7 +111,7 @@ test('model picker switches catalogs, preserves custom names, and falls back on 
     await page.locator('#provider-type').selectOption('openai');await page.getByText('Model list unavailable. Enter a model name manually.',{exact:true}).waitFor();
     expect(await page.locator('#provider-model-list').isVisible()).toBe(false);await page.locator('#provider-model').fill('manual-api');
     await page.locator('#preferences-form button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});expect(app.runtime.state.globalProvider.model).toBe('manual-api');
-    await page.locator('#agents-group>summary').click();await page.locator('.sidebar-agent-row summary').first().click();await page.getByRole('button',{name:'Customize agent',exact:true}).click();
+    await page.locator('#agents-open').click();await page.locator('.sidebar-agent-row summary').first().click();await page.getByRole('button',{name:'Customize agent',exact:true}).click();
     await page.locator('[data-custom-step="3"]').click();await page.locator('#provider-source').selectOption('custom');await page.locator('#provider-type').selectOption('claude');
     await page.locator('#provider-model-list option[value="opus"]').waitFor({state:'attached'});await page.locator('#provider-model-list').selectOption('opus');
     await page.locator('#customize-save').click();await page.locator('#customize-dialog').waitFor({state:'hidden'});
@@ -174,7 +174,7 @@ test('settings own global provider; customization saves profile and provider tog
   app.runtime.state.customization={...defaults,name:'Oddy'};app.runtime.state.globalProvider.configured=true;app.runtime.state.provider.configured=true;app.runtime.changed();
   const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}}),page=await context.newPage(),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
-  const edit=async()=>{if(!await page.locator('#agents-group').evaluate(node=>node.open)) await page.locator('#agents-group>summary').click();await page.locator('.sidebar-agent-row').filter({has:page.locator('.sidebar-agent[aria-pressed="true"]')}).locator('summary').click();await page.getByRole('button',{name:'Customize agent',exact:true}).click();};
+  const edit=async()=>{if(!await page.locator('#agents-dialog').evaluate(node=>node.open)) await page.locator('#agents-open').click();await page.locator('.sidebar-agent-row').filter({has:page.locator('.sidebar-agent[aria-pressed="true"]')}).locator('summary').click();await page.getByRole('button',{name:'Customize agent',exact:true}).click();};
   const save=async()=>{await page.locator('#customize-save').click();await page.locator('#customize-dialog').waitFor({state:'hidden'});};
   try {
     await page.goto(server.url.href);expect(await page.locator('.topbar #connection-button').count()).toBe(0);
@@ -191,9 +191,9 @@ test('settings own global provider; customization saves profile and provider tog
     await edit();await page.locator('[data-custom-step="3"]').click();expect(await page.locator('#provider-source').inputValue()).toBe('custom');expect(await page.locator('#provider-model').inputValue()).toBe('agent-model');
     const artifacts=resolve(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});await page.screenshot({path:join(artifacts,'agent-provider-override.png')});
     await page.locator('#provider-source').selectOption('global');await save();expect(app.runtime.state.agents[0].provider.model).toBe('workspace-v2');expect(app.runtime.state.agents[0].providerOverride).toBe(false);
-    await page.locator('#add-agent').click();await page.locator('[data-custom-step="3"]').click();await page.locator('#provider-source').selectOption('custom');await page.locator('#provider-type').selectOption('claude');await save();
+    await page.locator('#agents-open').click();await page.locator('#add-agent').click();await page.locator('[data-custom-step="3"]').click();await page.locator('#provider-source').selectOption('custom');await page.locator('#provider-type').selectOption('claude');await save();
     expect(app.runtime.state.agents[1].provider.type).toBe('claude');expect(app.runtime.state.agents[1].providerOverride).toBe(true);
-    await page.locator(`[data-select-agent="${app.runtime.state.agents[1].id}"][aria-pressed="true"]`).waitFor();
+    await page.waitForFunction(id=>document.querySelector(`[data-select-agent="${id}"]`)?.getAttribute("aria-pressed")==="true",app.runtime.state.agents[1].id);
     await page.reload();await edit();await page.locator('[data-custom-step="3"]').click();expect(await page.locator('#provider-type').inputValue()).toBe('claude');
     await page.locator('#customize-cancel').click();await page.locator('#settings-open').click();expect(await page.locator('#provider-type').inputValue()).toBe('openai');
     await page.screenshot({path:join(artifacts,'settings-provider.png')});

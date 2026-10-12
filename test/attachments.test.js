@@ -102,8 +102,7 @@ test('image picker and paste show removable previews; image-only sends persist i
     const artifacts = join(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});
     for (const width of [320,768,1024,1440]) {
       await page.setViewportSize({width,height:900});
-      await page.locator('#menu-button').evaluate(button=>{if(document.body.classList.contains('nav-open'))button.click();});
-      await page.waitForFunction(()=>innerWidth>760 || document.querySelector('.sidebar').getBoundingClientRect().right<=0);
+      await page.waitForFunction(()=>innerWidth>760 || !document.querySelector('#search-dialog').open);
       expect(await page.locator('.attachment-chip').evaluateAll(nodes=>nodes.every(node=>node.getBoundingClientRect().right<=innerWidth))).toBe(true);
       await photoPreview.click();
       expect(await page.locator('#image-preview').evaluate(node=>node.getBoundingClientRect().width<=innerWidth)).toBe(true);
@@ -111,8 +110,7 @@ test('image picker and paste show removable previews; image-only sends persist i
     }
     await page.screenshot({path:join(artifacts,'attachments-desktop.png')});
     await page.setViewportSize({width:320,height:900});
-    await page.locator('#menu-button').evaluate(button=>{if(document.body.classList.contains('nav-open'))button.click();});
-    await page.waitForFunction(()=>innerWidth>760 || document.querySelector('.sidebar').getBoundingClientRect().right<=0);
+    await page.waitForFunction(()=>innerWidth>760 || !document.querySelector('#search-dialog').open);
     await page.screenshot({path:join(artifacts,'attachments-mobile.png')});
     await page.setViewportSize({width:1440,height:900});
     let releaseUpload, uploadContinued;
@@ -176,7 +174,7 @@ test('image picker and paste show removable previews; image-only sends persist i
     await page.locator('.message-assistant .file-chip[download]').waitFor();
     expect(await page.locator('.message-user [download]').count()).toBe(0);
     expect(await page.locator('.message-assistant .file-chip[download]').getAttribute('download')).toBe('agent-result.txt');
-    await page.locator('[data-view="files"]').first().click();
+    await page.locator("#tools-open").click();await page.locator('[data-view="files"]').first().click();
     await page.locator('.file-list').waitFor();
     expect(await page.locator('a.file-row[download]').count()).toBe(1);
     expect(await page.locator('a.file-row[download]').textContent()).toContain('agent-result.txt');

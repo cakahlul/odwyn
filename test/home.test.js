@@ -35,12 +35,12 @@ test('Home prioritizes work across agents, updates live, preserves drafts and re
     await page.waitForFunction(()=>!document.querySelector('#agent-workspace').inert);
     await page.locator('#prompt').fill('Keep these details for the trip');
     expect(await page.locator('#prompt').inputValue()).toBe('Keep these details for the trip');
-    await page.locator('.navigation [data-view=home]').click();await page.locator('.home').waitFor();
+    await page.locator('.workspace-dock [data-view=home]').click();await page.locator('.home').waitFor();
     expect(await page.locator('#prompt').inputValue()).toBe('Keep these details for the trip');
     expect(await page.locator('.home-actions .primary-button').textContent()).toBe('Continue your draft');
     await page.getByRole('button',{name:'Continue your draft',exact:true}).click();await page.locator('.approval-card').waitFor();
     expect(await page.locator('#prompt').inputValue()).toBe('Keep these details for the trip');expect(page.url()).toContain('#chat/waiting');
-    await page.locator('#prompt').fill('');await page.locator('.navigation [data-view=home]').click();
+    await page.locator('#prompt').fill('');await page.locator('.workspace-dock [data-view=home]').click();
     await page.locator('.home [data-conversation="ready"]').focus();
     app.runtime.state.jobs[0].pending.title='What is your budget?';app.runtime.changed();
     await page.locator('.home').filter({hasText:'What is your budget?'}).waitFor();
@@ -48,7 +48,7 @@ test('Home prioritizes work across agents, updates live, preserves drafts and re
     await page.screenshot({path:join(artifacts,'home-desktop.png')});
     for(const width of [320,768,1024,1440]) {
       await page.setViewportSize({width,height:1000});
-      await page.waitForFunction(()=>innerWidth>760 || document.querySelector('.sidebar').getBoundingClientRect().right<=0);
+      await page.waitForFunction(()=>innerWidth>760 || !document.querySelector('#search-dialog').open);
       expect(await page.locator('.home').evaluate(node=>node.getBoundingClientRect().right<=innerWidth && node.scrollWidth<=node.clientWidth)).toBe(true);
       if(width===320) await page.screenshot({path:join(artifacts,'home-mobile.png')});
     }
@@ -57,15 +57,15 @@ test('Home prioritizes work across agents, updates live, preserves drafts and re
     expect(await page.locator('.message-assistant').textContent()).toContain('The itinerary is ready.');
     await page.reload();await page.locator('.message-assistant').waitFor();expect(await page.locator('.home').count()).toBe(0);
     await page.goto(server.url.href);await page.locator('.home').waitFor();
-    await page.locator("#agents-group>summary").click();await page.locator(`[data-select-agent="${first}"]`).click();await page.locator('#composer-area').waitFor();
+    await page.locator('#agents-open').click();await page.locator(`[data-select-agent="${first}"]`).click();await page.locator('#composer-area').waitFor();
     expect(await page.locator('.home').count()).toBe(0);
-    await page.locator('.navigation [data-view=home]').click();await page.locator('.home').waitFor();
+    await page.locator('.workspace-dock [data-view=home]').click();await page.locator('.home').waitFor();
     await page.getByRole('button',{name:'Start a conversation',exact:true}).click();await page.locator('.welcome').waitFor();expect(await page.locator('#prompt').isVisible()).toBe(true);
     app.runtime.state.jobs=[];app.runtime.state.conversations=[];app.runtime.changed();
     await page.goto(server.url.href);await page.getByRole('heading',{name:'What would you like to get done?'}).waitFor();
     expect(await page.locator('.home-section').count()).toBe(0);
     await page.evaluate(()=>localStorage.setItem('odwyn-agent','minimized'));await page.reload();await page.locator('.home').waitFor();
-    expect(await page.locator('.navigation [data-view=home]').isDisabled()).toBe(false);
+    expect(await page.locator('.workspace-dock [data-view=home]').isDisabled()).toBe(false);
     await page.getByRole('button',{name:'Start a conversation',exact:true}).click();await page.locator('.welcome').waitFor();
     expect(errors).toEqual([]);
   } finally {await browser.close();await app.close();await server.stop(true);rmSync(directory,{recursive:true,force:true});}

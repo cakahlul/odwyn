@@ -7,7 +7,7 @@ import { chromium } from 'playwright';
 import { createApp } from '../server.js';
 import { defaults } from '../public/profile.js';
 
-test('sidebar rail saves space, keeps menus usable, persists, and preserves the mobile drawer',async()=>{
+test('workspace dock separates conversations, agents, and tools while keeping chat controls reachable',async()=>{
   const directory=mkdtempSync(join(tmpdir(),'odwyn-sidebar-'));let app;
   const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
   app=createApp({directory,user:'owner',password:'test-password-long-enough',origin:server.url.origin,codex:Object.assign(new EventEmitter(),{request:async()=>({account:null}),stop(){}}),browser:{close:async()=>{}}});
@@ -19,87 +19,65 @@ test('sidebar rail saves space, keeps menus usable, persists, and preserves the 
   const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}}),page=await context.newPage(),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
   try{
+    await page.emulateMedia({reducedMotion:'reduce'});
     await page.goto(server.url.href);
-    expect(await page.locator('#agents-group').getAttribute('open')).toBeNull();
-    expect(await page.locator('#rooms-group').getAttribute('open')).toBeNull();
-    const floatingRail=await page.locator('#sidebar').boundingBox();expect(floatingRail.x).toBe(12);expect(floatingRail.y).toBe(12);expect(floatingRail.y+floatingRail.height).toBe(888);
-    expect(await page.locator('#sidebar #sidebar-toggle').count()).toBe(1);
-    expect(await page.locator('#browser-toggle [data-icon=chevron]').count()).toBe(0);
-    const before=await page.locator('#main').boundingBox();
-    await page.getByRole('button',{name:'Collapse sidebar',exact:true}).click();
-    await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().width===68);
-    expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(68);
-    expect((await page.locator('#main').boundingBox()).width-before.width).toBe(164);
-    expect(await page.getByRole('button',{name:'Expand sidebar',exact:true}).getAttribute('aria-expanded')).toBe('false');
-    expect(await page.locator('.navigation [data-view="runs"]').count()).toBe(1);
-    expect(await page.locator('[data-view="workflows"] [data-icon]').getAttribute('data-icon')).toBe('workflow');
-    for(const label of ['Routines','Workflows & skills','Files & results']){
-      const button=page.locator('.navigation').getByRole('button',{name:label,exact:true});expect(await button.getAttribute('title')).toBe(label);await button.click();
+    expect(await page.locator('.shell>.sidebar').count()).toBe(0);
+    expect(await page.locator('#settings-open [data-icon=settings]').count()).toBe(1);
+    expect(await page.locator('.workspace-dock .dock-item').count()).toBe(3);
+    expect(await page.locator('#main').evaluate(node=>node.clientWidth)).toBe(1440);
+    expect(await page.locator('#search-dialog').evaluate(node=>node.open)).toBe(false);
+    expect(await page.locator('#agents-dialog').evaluate(node=>node.open)).toBe(false);
+    const artifacts=resolve(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});
+    await page.screenshot({path:join(artifacts,'workspace-dock-desktop.png')});
+    for(const label of ['Routines','Workflows & skills','Files & results','Task runs']){
+      await page.getByRole('button',{name:'Tools',exact:true}).click();
+      expect(await page.locator('#tools-dialog').evaluate(node=>node.matches(':modal'))).toBe(true);
+      await page.getByRole('button',{name:label,exact:true}).click();
+      expect(await page.locator('#tools-dialog').evaluate(node=>node.open)).toBe(false);
+      expect(await page.locator('#tools-open').getAttribute('class')).toContain('active');
     }
-    await page.getByRole('button',{name:'Task runs',exact:true}).click();
-    expect(await page.locator('.history-runs').getAttribute('title')).toBe('Task runs');
-    await page.getByRole('heading',{name:'Task runs',exact:true}).waitFor();
-    await page.getByRole('button',{name:'Odwyn settings',exact:true}).click();await page.getByRole('heading',{name:'Odwyn settings'}).waitFor();await page.getByRole('button',{name:'Close settings'}).click();
-    await page.getByRole('button',{name:'Search conversations',exact:true}).click();expect(await page.locator('#search-dialog').isVisible()).toBe(true);await page.keyboard.press('Escape');
-    await page.getByRole('button',{name:'Open Rei',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#agent-name').textContent==='Rei' && !document.querySelector('#minimize-agent').disabled);
-    expect(await page.locator('[data-select-agent="agent-0"]').getAttribute('aria-pressed')).toBe('true');
+    await page.locator('#tools-open').click();await page.screenshot({path:join(artifacts,'workspace-tools.png')});await page.keyboard.press('Escape');
+    expect(await page.locator('#tools-open').evaluate(node=>node===document.activeElement)).toBe(true);
+    await page.locator('#settings-open').click();await page.getByRole('heading',{name:'Odwyn settings'}).waitFor();await page.getByRole('button',{name:'Close settings'}).click();
+    await page.locator('#agents-open').click();
+    await page.locator('#agents-dialog .agent-menu summary').first().click();
+    await page.keyboard.press('Escape');expect(await page.locator('#agents-dialog').evaluate(node=>node.open)).toBe(true);
+    await page.screenshot({path:join(artifacts,'workspace-agents.png')});
+    await page.getByRole('button',{name:'Open Rei',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('#agent-name').textContent==='Rei' && !document.querySelector('#minimize-agent').disabled);
+    expect(await page.locator('#agents-dialog').evaluate(node=>node.open)).toBe(false);
+    await page.locator('#menu-button').click();
+    expect(await page.locator('#search-dialog').evaluate(node=>node.matches(':modal'))).toBe(true);
+    expect(await page.locator('#history [data-conversation]').count()).toBe(30);
+    await page.locator('#search-input').fill('Conversation 30');
+    expect(await page.locator('.library-browse').isVisible()).toBe(false);
+    expect(await page.locator('#search-results .search-result').count()).toBe(1);
+    await page.locator('#search-input').fill('');
+    expect(await page.locator('.library-browse').isVisible()).toBe(true);
+    await page.screenshot({path:join(artifacts,'workspace-conversations.png')});
     await page.getByRole('button',{name:'Weekend plans',exact:true}).click();await page.locator('#room-label').filter({hasText:'Weekend plans'}).waitFor();
-    const artifacts=resolve(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});await page.screenshot({path:join(artifacts,'sidebar-collapsed.png')});
-    await page.reload();await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().width===68);expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(68);
-    for(const width of [768,1024,1700]){
-      await page.setViewportSize({width,height:900});expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(68);await page.waitForFunction(()=>document.querySelector('.shell').scrollWidth<=document.querySelector('.shell').clientWidth);
-      await page.getByRole('button',{name:'Open browser panel',exact:true}).click();
-      expect(await page.locator('#browser-panel').evaluate(node=>node.inert)).toBe(false);
-      expect(await page.locator('#browser-toggle').getAttribute('aria-expanded')).toBe('true');
-      expect(await page.locator('#browser-close').evaluate(node=>node===document.activeElement)).toBe(true);
-      expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(68);
-      if(width===1700) { await page.waitForFunction(()=>document.querySelector('#browser-panel').getBoundingClientRect().width===390);await page.screenshot({path:join(artifacts,'panels-open.png')}); }
-      await page.keyboard.press('Escape');
-      expect(await page.locator('#browser-panel').evaluate(node=>node.inert)).toBe(true);
-      expect(await page.locator('#browser-toggle').evaluate(node=>node===document.activeElement)).toBe(true);
-      expect(await page.locator('#browser-toggle').getAttribute('aria-expanded')).toBe('false');
-      await page.locator('#browser-toggle').click();await page.locator('#browser-close').click();
-      expect(await page.locator('#browser-toggle').evaluate(node=>node===document.activeElement)).toBe(true);
-    }
-    await page.setViewportSize({width:320,height:700});await page.waitForFunction(()=>document.querySelector('#sidebar').inert);expect(await page.locator('#sidebar-toggle').isVisible()).toBe(false);expect(await page.locator('#sidebar').evaluate(node=>node.inert)).toBe(true);
-    await page.getByRole('button',{name:'Open navigation',exact:true}).click();expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(260);expect(await page.locator('.navigation .sidebar-label').first().isVisible()).toBe(true);
-    await page.getByRole('button',{name:'Task runs',exact:true}).click();expect(await page.locator('#sidebar').evaluate(node=>node.inert)).toBe(true);
-    await page.setViewportSize({width:1440,height:900});await page.waitForFunction(()=>!document.querySelector('#sidebar').inert);await page.getByRole('button',{name:'Expand sidebar',exact:true}).focus();await page.keyboard.press('Enter');
-    await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().width===232);
-    expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(232);
-    expect(await page.locator('#agents-group').getAttribute('open')).toBeNull();
-    await page.locator('#agents-group>summary').focus();await page.keyboard.press('Enter');
-    expect(await page.locator('.agent-menu').first().isVisible()).toBe(true);
-    await page.reload();expect(await page.locator('#sidebar').evaluate(node=>node.offsetWidth)).toBe(232);
-    for(const height of [900,600,480]) {
-      await page.setViewportSize({width:1440,height});
-      await page.locator('#agents-group').evaluate(node=>node.open=true);await page.locator('#rooms-group').evaluate(node=>node.open=true);
-      const newChat=await page.locator('#new-chat').boundingBox(), navigation=await page.locator('.navigation').boundingBox();
-      const settings=await page.locator('#settings-open').boundingBox();expect(settings.y).toBeGreaterThan(0);expect(settings.y+settings.height).toBeLessThanOrEqual(height);
-      expect(await page.locator('.sidebar-main').evaluate(node=>node.scrollHeight>node.clientHeight)).toBe(true);
-      await page.locator('.sidebar-main').evaluate(node=>node.scrollTop=node.scrollHeight);
-      expect((await page.locator('#settings-open').boundingBox()).y).toBe(settings.y);
-      expect((await page.locator('#new-chat').boundingBox()).y).toBe(newChat.y);
-      expect((await page.locator('.navigation').boundingBox()).y).toBe(navigation.y);
+    expect(await page.locator('#search-dialog').evaluate(node=>node.open)).toBe(false);
+    for(const width of [320,768,1024,1700]){
+      await page.setViewportSize({width,height:700});
+      await page.waitForFunction(()=>document.querySelector('.shell').scrollWidth<=document.querySelector('.shell').clientWidth);
+      const dock=await page.locator('.workspace-dock').boundingBox();expect(dock.x).toBeGreaterThanOrEqual(0);expect(dock.x+dock.width).toBeLessThanOrEqual(width);
       await page.locator('#new-chat').click();expect(await page.locator('#prompt').evaluate(node=>node===document.activeElement)).toBe(true);
-      await page.locator('#settings-open').click();await page.getByRole('button',{name:'Close settings'}).click();
+      for(const id of ['agents','tools']){
+        await page.locator('#'+id+'-open').click();
+        expect(await page.locator('#'+id+'-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
+        await page.keyboard.press('Escape');
+      }
+      await page.locator('#menu-button').click();expect(await page.locator('#search-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);await page.keyboard.press('Escape');
+      await page.locator('#browser-toggle').click();expect(await page.locator('#browser-panel').evaluate(node=>node.inert)).toBe(false);await page.keyboard.press('Escape');
+      expect(await page.locator('#browser-toggle').evaluate(node=>node===document.activeElement)).toBe(true);
+      if(width===320) await page.screenshot({path:join(artifacts,'workspace-dock-mobile.png')});
     }
     await page.locator('#minimize-agent').click();await page.getByRole('heading',{name:'Your agents are minimized'}).waitFor();
     await page.locator('#new-chat').click();await page.locator('#prompt').waitFor({state:'visible'});
-    await page.setViewportSize({width:320,height:700});
-    await page.getByRole('button',{name:'Start new conversation',exact:true}).click();
-    expect(await page.locator('#sidebar').evaluate(node=>node.inert)).toBe(true);
-    expect(await page.locator('#prompt').evaluate(node=>node===document.activeElement)).toBe(true);
-    await page.locator('#menu-button').click();
-    const settings=await page.locator('#settings-open').boundingBox();expect(settings.y+settings.height).toBeLessThanOrEqual(700);
-    expect(await page.locator('.sidebar-main').evaluate(node=>node.scrollHeight>node.clientHeight)).toBe(true);
-    await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().x===12);
-    await page.screenshot({path:join(artifacts,'sidebar-mobile.png')});
-    await page.locator('#settings-open').click();await page.getByRole('button',{name:'Close settings'}).click();
-    await page.setViewportSize({width:1440,height:900});
-    await page.locator('.sidebar-group').evaluateAll(nodes=>nodes.forEach(node=>node.open=false));
-    await page.locator('.sidebar-main').evaluate(node=>node.scrollTop=0);
-    await page.screenshot({path:join(artifacts,'sidebar-expanded.png')});
+    await page.reload();expect(await page.locator('.workspace-dock').isVisible()).toBe(true);
+    await page.keyboard.press('Control+k');expect(await page.locator('#search-input').evaluate(node=>node===document.activeElement)).toBe(true);await page.keyboard.press('Escape');
+    await page.setViewportSize({width:1440,height:480});
+    const newChat=await page.locator('#new-chat').boundingBox();expect(newChat.y+newChat.height).toBeLessThanOrEqual(480);
     expect(errors).toEqual([]);
   }finally{await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
 },30_000);

@@ -56,7 +56,7 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
     app.runtime.state.customization={...first.customization,overrideWorkspace:false};app.runtime.state.appearance={palette:'paper',motion:'reduced'};app.runtime.changed();
     await page.locator('#prompt').fill('');
     await page.screenshot({path:join(artifacts,'private-chat-bubbles.png')});
-    if(!await page.locator('#rooms-group').evaluate(node=>node.open)) await page.locator('#rooms-group>summary').click();
+    if(!await page.locator('#search-dialog').evaluate(node=>node.open)) await page.locator('#menu-button').click();
     await page.locator('#room-list [data-conversation="room"]').click();await page.locator('#messages.room-messages').waitFor();
     expect(await page.locator('.message-assistant .message-meta strong').allTextContents()).toEqual(['Oddy','Rei','Kai Chen']);expect(await page.locator('.room-messages .message-avatar').count()).toBe(3);
     expect(await page.locator('.message-assistant .message-avatar').first().isVisible()).toBe(true);
@@ -67,7 +67,7 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
     expect(await page.locator('.conversation-line').count()).toBe(0);
     for(const width of [320,768,1024,1440]){
       await page.setViewportSize({width,height:900});
-      if(width<=760)await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().right<=0);
+      if(width<=760)await page.waitForFunction(()=>!document.querySelector('#search-dialog').open);
       expect(await page.locator('.topbar').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
       for(const selector of ['#room-details-open','#reply-agent','#minimize-agent','#close-conversation','#browser-toggle','#composer']){
         expect(await page.locator(selector).evaluate(node=>{const box=node.getBoundingClientRect();return box.left>=0 && box.right<=innerWidth;})).toBe(true);

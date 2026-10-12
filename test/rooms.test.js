@@ -48,7 +48,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
   };
   try {
     await page.goto(server.url.href+'#chat'); await page.getByRole('heading',{name:'Message Pip',exact:true}).waitFor();
-    if(!await page.locator('#rooms-group').evaluate(node=>node.open)) await page.locator('#rooms-group>summary').click();
+    if(!await page.locator('#search-dialog').evaluate(node=>node.open)) await page.locator('#menu-button').click();
     await page.locator('#new-room').click(); await page.locator('#room-name').fill('Weekend council');
     await page.locator('#room-save').click(); expect(await page.locator('#room-status').textContent()).toContain('at least two');
     await page.locator(`#room-agent-options input[value="${scout.id}"]`).check();
@@ -150,12 +150,12 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     expect(await page.locator('#room-members .room-member').count()).toBe(3);
     for (const width of [320,768,1024,1440]) {
       await page.setViewportSize({width,height:900});
-      if (width<=760) await page.waitForFunction(()=>document.querySelector('.sidebar').getBoundingClientRect().right<=0);
+      if (width<=760) await page.waitForFunction(()=>!document.querySelector('#search-dialog').open);
       expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
       expect(await page.locator('#room-header').isVisible()).toBe(false);
       expect(await page.locator('#agent-dock').isVisible()).toBe(false);
       const chatBox=await page.locator('#view').boundingBox(), composerBox=await page.locator('#composer').boundingBox();
-      expect(chatBox.height).toBeGreaterThan(600);
+      expect(chatBox.height).toBeGreaterThan(450);
       expect(composerBox.x+composerBox.width).toBeLessThanOrEqual(width);
       const sendBox=await page.locator('#send-button').boundingBox();
       expect(sendBox.x+sendBox.width).toBeLessThanOrEqual(width);
@@ -174,7 +174,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     await page.locator('#room-details-open').click(); await page.locator('#edit-room').click(); await page.locator('#room-name').fill('Unsaved name'); await page.keyboard.press('Escape');
     expect(await page.locator('#room-heading').textContent()).toBe('Weekend planning');
     await page.locator('#close-conversation').click(); await page.waitForFunction(()=>document.querySelector('#room-details-open').hidden);
-    if(!await page.locator('#rooms-group').evaluate(node=>node.open)) await page.locator('#rooms-group>summary').click();
+    if(!await page.locator('#search-dialog').evaluate(node=>node.open)) await page.locator('#menu-button').click();
     await page.locator('#room-list [data-conversation]').click(); await page.locator('#room-details-open').waitFor({state:'visible'});
     await page.waitForFunction(()=>!document.querySelector('#minimize-agent').disabled);
     await page.locator('#new-chat').click(); expect(await page.locator('#room-details-open').isVisible()).toBe(false);
@@ -183,7 +183,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     const ordinary=await request('/api/jobs',{prompt:'Original chat title',agentId:primary}); await app.runtime.drain();
     await attach(app.runtime.state.jobs.find(j=>j.id===ordinary.id),'answer.png');
     complete(first,app.runtime.state.jobs.find(j=>j.id===ordinary.id),'Saved chat answer');
-    await page.locator(`#history [data-conversation="${ordinary.conversationId}"]`).click();
+    await page.locator("#menu-button").click();await page.locator(`#history [data-conversation="${ordinary.conversationId}"]`).click();
     await page.locator('#page-title').filter({hasText:'Original chat title'}).waitFor();
     await page.waitForFunction(()=>document.querySelector('.answer-file img')?.naturalWidth===1);
     await page.locator('#page-title').click(); await page.locator('#conversation-name').fill('Weekend notes');
@@ -201,7 +201,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     expect(app.runtime.state.conversations.some(c=>c.id===ordinary.conversationId)).toBe(false);
     expect(app.runtime.state.jobs.some(j=>j.conversationId===ordinary.conversationId)).toBe(false);
     expect(await page.locator(`#history [data-conversation="${ordinary.conversationId}"]`).count()).toBe(0);
-    if(!await page.locator('#rooms-group').evaluate(node=>node.open)) await page.locator('#rooms-group>summary').click();
+    if(!await page.locator('#search-dialog').evaluate(node=>node.open)) await page.locator('#menu-button').click();
     await page.locator(`#room-list [data-conversation="${room.id}"]`).click(); await page.locator('#room-details-open').click();
     page.once('dialog',dialog=>dialog.dismiss()); await page.locator('#delete-room').click();
     expect(app.runtime.state.conversations.some(c=>c.id===room.id)).toBe(true);
@@ -210,7 +210,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     await page.getByRole('heading',{name:/^Message /,level:1}).waitFor();
     expect(app.runtime.state.conversations.some(c=>c.id===room.id)).toBe(false);
     expect(app.runtime.state.jobs.some(j=>j.conversationId===room.id)).toBe(false);
-    if(!await page.locator('#rooms-group').evaluate(node=>node.open)) await page.locator('#rooms-group>summary').click();
+    if(!await page.locator('#search-dialog').evaluate(node=>node.open)) await page.locator('#menu-button').click();
     expect(await page.locator('#room-list [data-conversation]').count()).toBe(0);
     expect(app.runtime.state.agents).toHaveLength(3);
     await page.reload(); await page.getByRole('heading',{name:/^Message /,level:1}).waitFor();

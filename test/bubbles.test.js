@@ -52,7 +52,8 @@ test('minimized agents float as staggered circles, preserve dragging, and respec
     for (const width of [320,768,1024]) {
       await page.setViewportSize({width,height:700});
       await page.waitForFunction(()=>[...document.querySelectorAll('.agent-slot')].every(node=>node.offsetLeft+node.offsetWidth<=innerWidth && node.offsetTop+node.offsetHeight<=innerHeight));
-      for (const box of await slots.evaluateAll(nodes=>nodes.map(node=>({x:node.offsetLeft,y:node.offsetTop,width:node.offsetWidth,height:node.offsetHeight})))) {expect(box.x).toBeGreaterThanOrEqual(8);expect(box.x+box.width).toBeLessThanOrEqual(width);expect(box.y).toBeGreaterThanOrEqual(8);expect(box.y+box.height).toBeLessThanOrEqual(700);}
+      if(width===320) expect(await page.locator("#agent-dock").isVisible()).toBe(false);
+      else for (const box of await slots.evaluateAll(nodes=>nodes.map(node=>({x:node.offsetLeft,y:node.offsetTop,width:node.offsetWidth,height:node.offsetHeight})))) {expect(box.x).toBeGreaterThanOrEqual(8);expect(box.x+box.width).toBeLessThanOrEqual(width);expect(box.y).toBeGreaterThanOrEqual(8);expect(box.y+box.height).toBeLessThanOrEqual(700);}
       if(width===320) await page.screenshot({path:join(artifacts,'floating-agents-mobile.png'),fullPage:true});
     }
     await page.locator(`[data-agent="${id}"]`).click();await page.getByRole('heading',{name:'Your agents are minimized'}).waitFor({state:'hidden'});

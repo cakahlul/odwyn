@@ -20,7 +20,7 @@ test('agent, workflow and skill mentions navigate from messages and composer wit
   app.runtime.state.conversations=[{id:'mentions',agentId:first.id,title:'Mention navigation',createdAt:at,messages:[{id:'message',agentId:first.id,role:'user',text:'@Rei /pr-review-fe /review-code',at}]}];app.runtime.changed();
   const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}}),page=await context.newPage(),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
-  const returnToChat=async()=>{await page.locator('#history [data-conversation="mentions"]').click();await page.waitForFunction(()=>document.querySelector('#agent-name').textContent==='Oddy' && !document.querySelector('#agent-workspace').inert && location.hash==='#chat/mentions');await page.locator('#messages').waitFor();};
+  const returnToChat=async()=>{await page.locator('#menu-button').click();await page.locator('#history [data-conversation="mentions"]').click();await page.waitForFunction(()=>document.querySelector('#agent-name').textContent==='Oddy' && !document.querySelector('#agent-workspace').inert && location.hash==='#chat/mentions');await page.locator('#messages').waitFor();};
   try {
     await page.goto(server.url.href+'#chat/mentions');await page.locator('#messages').waitFor();
     await page.locator('#messages').getByRole('button',{name:'/pr-review-fe',exact:true}).click();

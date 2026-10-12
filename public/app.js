@@ -75,7 +75,9 @@ function renderDock() {
   $('#add-agent').disabled = workspace.agents.length >= 5 || busy || switching;
   const needsYou = data.filter(a => ['waiting','takeover'].includes(a.status)).length;
   $('#agent-count').textContent = needsYou ? `${needsYou} needs you` : `${workspace.agents.length} of 5`;
-  $('#agents-group .sidebar-label').textContent = agentId ? `Agents · ${state.customization?.name || defaults.name}` : 'Agents';
+  $('#agent-alert').hidden = !needsYou;
+  $('#agent-alert').textContent = needsYou;
+  $('#agents-open').title = needsYou ? `${needsYou} agents need your input` : 'Choose or manage your agents';
   $('#add-agent').title = workspace.agents.length >= 5 ? 'Maximum 5 agents reached' : `Add agent (${workspace.agents.length}/5)`;
 }
 
@@ -273,35 +275,17 @@ function renderAttachments() {
     return `<div class="attachment-chip">${image && !file.uploading ? `<button type="button" class="attachment-preview" data-preview-file="${esc(file.id)}" aria-label="Preview ${esc(file.name)}">${content}</button>` : `<div class="attachment-preview">${content}</div>`}${file.uploading ? '' : `<button type="button" class="attachment-remove" data-remove-attachment="${esc(file.id)}" aria-label="Remove ${esc(file.name)}">${icon('close')}</button>`}</div>`;
   }).join('');
 }
-const mobile = matchMedia('(max-width: 760px)');
 function setNavigation(open) {
-  document.body.classList.toggle('nav-open',open);
-  $('#menu-button').setAttribute('aria-expanded',String(open));
-  $('.sidebar').inert = mobile.matches && !open;
-  if (open && mobile.matches) ($('#new-chat').disabled ? $('.sidebar-agent') : $('#new-chat'))?.focus();
+  if (open && $('#search-dialog').open) { $('#search-input').focus(); return; }
+  for (const id of ['search-dialog','agents-dialog','tools-dialog']) {
+    if ($('#'+id).open) $('#'+id).close();
+  }
+  if (open) { $('#search-dialog').showModal(); search(); $('#search-input').focus(); }
 }
-function setSidebarCollapsed(collapsed) {
-  document.body.classList.toggle('sidebar-collapsed',collapsed);
-  $('#sidebar-toggle').setAttribute('aria-expanded',String(!collapsed));
-  $('#sidebar-toggle').title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
-  $('#sidebar-toggle').setAttribute('aria-label',$('#sidebar-toggle').title);
-  if (collapsed) document.querySelectorAll('.agent-menu[open]').forEach(menu=>menu.open=false);
-  syncSidebarGroups();
+for (const [buttonId, dialogId] of [['menu-button','search-dialog'],['agents-open','agents-dialog'],['tools-open','tools-dialog']]) {
+  $('#'+dialogId).addEventListener('close', () => $('#'+buttonId).setAttribute('aria-expanded','false'));
+  $('#'+buttonId).setAttribute('aria-expanded','false');
 }
-function syncSidebarGroups() {
-  const rail = !mobile.matches && document.body.classList.contains('sidebar-collapsed');
-  document.querySelectorAll('.sidebar-group').forEach(group => {
-    if (rail && group.dataset.rail !== 'true') { group.dataset.expanded = String(group.open); group.open = true; }
-    if (!rail && group.dataset.rail === 'true') group.open = group.dataset.expanded === 'true';
-    group.dataset.rail = String(rail);
-  });
-}
-setSidebarCollapsed(localStorage.getItem('odwyn-sidebar-collapsed') === 'true');
-$('#sidebar-toggle').onclick = () => {
-  const collapsed = !document.body.classList.contains('sidebar-collapsed');
-  setSidebarCollapsed(collapsed); localStorage.setItem('odwyn-sidebar-collapsed',String(collapsed));
-};
-mobile.addEventListener('change', () => { syncSidebarGroups(); setNavigation(false); }); setNavigation(false);
 
 function navigate(next = 'chat', id = null) {
   if (switching) return;
@@ -328,13 +312,6 @@ function render() {
   $('#connection-button').setAttribute('aria-label',$('#connection-label').textContent);
   $('#connection-button').title = globalRuntime.connectionError || `${providerName} · ${workspace.globalProvider.model}`;
 
-  if (!agentId && view !== 'home') {
-    $('#agent-workspace').classList.remove('chat-start'); $('#main').classList.remove('chat-start'); $('#composer-area').hidden = true;
-    $('#page-title').textContent = 'No conversation open';
-    if (signature !== 'minimized') $('#view').innerHTML = `<div class="agents-empty"><h1>${workspace.agents.every(a => closedAgents.has(a.id)) ? 'No conversation open' : 'Your agents are minimized'}</h1><p>Choose an agent in the sidebar or restore a floating bubble. Your conversations stay in history.</p></div>`;
-    signature = 'minimized';
-    updateBrowser(state); return;
-  }
   $('#run-status').hidden = !state.jobs.some(job => activeStatuses.includes(job.status));
   const conversation = state.conversations.find(c => c.id === conversationId);
   const permissionJob = state.jobs.find(job=>job.conversationId === conversationId && job.id === state.runtime.activeJobId) || state.jobs.find(job=>job.conversationId === conversationId && job.status === 'queued');
@@ -343,7 +320,7 @@ function render() {
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#agent-workspace').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { home:'Home', runs:'Task runs', routines:'Routines', files:'Files & results', workflows:'Workflows & skills' }[view];
-  if (view === 'home') $('#agent-name').textContent = 'Odwyn';
+  $('#agent-name').textContent = view === 'home' ? 'Odwyn' : state.customization?.name || defaults.name;
   $('#page-title').disabled = view !== 'chat' || !conversation;
   $('#page-title').title = conversation && view === 'chat' ? 'Rename conversation' : '';
   $('#page-title').setAttribute('aria-label',conversation && view === 'chat' ? `Rename conversation: ${conversation.title}` : $('#page-title').textContent);
@@ -353,10 +330,16 @@ function render() {
     const job = state.jobs.find(job => job.conversationId === c.id);
     return `<button class="history-item ${c.id === conversationId && view === 'chat' ? 'selected' : ''}" data-conversation="${esc(c.id)}"><span class="history-bullet ${job?.status === 'running' ? 'running' : ''}"></span><span>${esc(c.title)}</span>${job?.status === 'waiting' ? '<span class="needs-you-dot" title="Needs your input">!</span>' : ''}</button>`;
   }).join('') : '<p class="sidebar-empty">No conversations yet.</p>';
-  const nextRoutine = state.schedules.filter(s=>s.enabled).sort((a,b)=>Date.parse(a.nextAt)-Date.parse(b.nextAt))[0];
-  $('.routine-summary').hidden = !nextRoutine;
-  $('#routine-note').textContent = nextRoutine?.prompt || '';
-  $('#routine-note-detail').textContent = nextRoutine ? `Next: ${date(nextRoutine.nextAt)}` : '';
+  $('#menu-button').classList.toggle('active',view === 'chat');
+  $('#tools-open').classList.toggle('active',['routines','workflows','files','runs'].includes(view));
+  if ($('#search-dialog').open) search();
+  if (!agentId && view !== 'home') {
+    $('#agent-workspace').classList.remove('chat-start'); $('#main').classList.remove('chat-start'); $('#composer-area').hidden = true;
+    $('#page-title').textContent = 'No conversation open';
+    if (signature !== 'minimized') $('#view').innerHTML = `<div class="agents-empty"><h1>${workspace.agents.every(a => closedAgents.has(a.id)) ? 'No conversation open' : 'Your agents are minimized'}</h1><p>Choose an agent from Agents or restore a floating bubble. Your conversations stay in history.</p></div>`;
+    signature = 'minimized';
+    updateBrowser(state); return;
+  }
   $('#composer-area').hidden = view !== 'chat';
   const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'home' ? [workspace.conversations,workspace.jobs,$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? state.schedules : view === 'workflows' ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
   if (signature !== nextSignature) {
@@ -558,7 +541,10 @@ $('#provider-type').onchange = () => {
 };
 const providerInput = () => ({type:$('#provider-type').value,model:$('#provider-model').value,effort:$('#provider-effort').value,baseUrl:$('#provider-base-url').value,apiKey:$('#provider-api-key').value});
 function search() {
-  const query = $('#search-input').value.toLowerCase();
+  const query = $('#search-input').value.trim().toLowerCase();
+  $('.library-browse').hidden = !!query;
+  $('#search-results').hidden = !query;
+  if (!query) return;
   const found = state?.conversations.filter(c => c.title.toLowerCase().includes(query) || c.messages.some(m => m.text.toLowerCase().includes(query))) || [];
   $('#search-results').innerHTML = found.length ? found.map(c => `<button class="search-result" data-conversation="${esc(c.id)}">${icon('chat')}<span>${esc(c.title)}</span>${icon('arrow-up-right')}</button>`).join('') : '<p class="search-empty">No conversations found. Start a fresh one.</p>';
 }
@@ -642,9 +628,8 @@ $('#interaction-mode').onchange = async () => {
 };
 $('#settings-open').onclick = () => openSettings();
 $('#schedule-open').onclick = openSchedule;
-$('#menu-button').onclick = () => setNavigation(!document.body.classList.contains('nav-open'));
-$('#nav-scrim').onclick = () => { setNavigation(false); $('#menu-button').focus(); };
-$('#search-open').onclick = () => { $('#search-dialog').showModal(); $('#search-input').focus(); search(); };
+$('#menu-button').onclick = $('#search-open').onclick = () => { setNavigation(true); $('#menu-button').setAttribute('aria-expanded','true'); };
+for (const id of ['agents','tools']) $('#'+id+'-open').onclick = () => { setNavigation(false); $('#'+id+'-dialog').showModal(); $('#'+id+'-open').setAttribute('aria-expanded','true'); };
 $('#search-input').oninput = search;
 $('#image-preview-image').onload = () => { $('#image-preview-status').textContent = ''; };
 $('#image-preview-image').onerror = () => { $('#image-preview-image').hidden = true; $('#image-preview-status').textContent = 'Image preview unavailable.'; };
@@ -766,7 +751,7 @@ document.addEventListener('click', event => {
     return;
   }
   if (target.dataset.roomAgent) { $('#room-header').close(); const room = currentRoom(); void switchAgent(target.dataset.roomAgent,{sharedChat:room.id,keepDraft:true}).then(()=>openAgentProvider()); return; }
-  if (target.dataset.selectAgent) { void switchAgent(target.dataset.selectAgent).then(()=>{ if (view === 'home') navigate('chat',conversationId); }); return; }
+  if (target.dataset.selectAgent) { setNavigation(false); void switchAgent(target.dataset.selectAgent).then(()=>{ if (view === 'home') navigate('chat',conversationId); }); return; }
   if (target.dataset.closeAgent) { closeAgent(target.dataset.closeAgent); return; }
   if (target.dataset.agent) { void switchAgent(target.dataset.agent).then(()=>{ if (view === 'home') navigate('chat',conversationId); }); return; }
   if (target.hasAttribute('data-mascot-toggle')) {
@@ -777,7 +762,7 @@ document.addEventListener('click', event => {
   if (target.hasAttribute('data-home-search')) { $('#search-open').click(); return; }
   if (target.dataset.view) { event.preventDefault(); navigate(target.dataset.view); }
   if (target.dataset.conversation) { $('#search-dialog').close(); navigate('chat',target.dataset.conversation); }
-  if (target.hasAttribute('data-new-chat')) navigate();
+  if (target.hasAttribute('data-new-chat')) { setNavigation(false); navigate(); }
   if (target.dataset.prompt) { $('#prompt').value = target.dataset.prompt; $('#prompt').focus(); $('#prompt').dispatchEvent(new Event('input')); }
   if (target.hasAttribute('data-schedule-open')) openSchedule();
   if (target.hasAttribute('data-upload')) $('#file-input').click();
@@ -797,15 +782,9 @@ document.addEventListener('submit', event => {
 });
 document.addEventListener('result-response-sent',() => { signature='';void refresh(); });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && $('.agent-menu[open]')) { const menu = $('.agent-menu[open]'); menu.open = false; menu.querySelector('summary').focus(); event.preventDefault(); return; }
+  if (event.key === 'Escape' && $('#agents-dialog[open] .agent-menu[open]')) { const menu = $('#agents-dialog[open] .agent-menu[open]'); menu.open = false; menu.querySelector('summary').focus(); event.preventDefault(); return; }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('#search-open').click(); }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') { event.preventDefault(); navigate(); }
-  if (event.key === 'Escape' && document.body.classList.contains('nav-open')) { setNavigation(false); $('#menu-button').focus(); }
-  if (event.key === 'Tab' && mobile.matches && document.body.classList.contains('nav-open')) {
-    const focusable = [...$('.sidebar').querySelectorAll('a,button,summary')].filter(button => !button.disabled && button.getClientRects().length); const first = focusable[0], last = focusable.at(-1);
-    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-    if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-  }
 });
 
 new ResizeObserver(() => {

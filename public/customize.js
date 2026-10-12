@@ -18,7 +18,6 @@ export function applyProfile(profile, appearance = {}, owner = {}) {
   $('#reply-agent').title = p.name;
   document.querySelectorAll('[data-agent-avatar]').forEach(node=>node.innerHTML=avatarSvg(p));
   $('#owner-name').textContent = owner.ownerName || 'Your space';
-  $('.owner-avatar').textContent = Array.from(owner.ownerName || 'You')[0].toUpperCase();
   $('label[for="prompt"]').textContent = `What would you like ${p.name} to do?`;
   document.title = p.name === 'Odwyn' ? 'Odwyn' : `Odwyn · ${p.name}`;
   $('link[rel="icon"]').href = `data:image/svg+xml,${encodeURIComponent(avatarSvg(p))}`;

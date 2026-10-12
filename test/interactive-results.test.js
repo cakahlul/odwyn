@@ -24,7 +24,7 @@ test('workflow result cards configure, select, send a follow-up, and persist aft
       const {api}=await import('/ui.js');
       await api('/api/workflows',{name:'PR review',command:'pr-review',steps:[{id:'review',name:'Review result',type:'output',prompt:JSON.stringify(data)}]});
     },data);
-    await page.locator('[data-view=workflows]').click();await page.locator('[data-workflow-edit]').click();
+    await page.locator('#tools-open').click();await page.locator('[data-view=workflows]').click();await page.locator('[data-workflow-edit]').click();
     await page.locator('[data-wf-select="0"]').click();await page.getByText('Interactive response',{exact:true}).click();
     await page.locator('[data-wf-field="step.responseItems"]').fill('feedback');
     await page.locator('[data-wf-field="step.responseLabel"]').fill('Post selected feedback');

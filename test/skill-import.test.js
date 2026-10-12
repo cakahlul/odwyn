@@ -23,7 +23,7 @@ test('Import skill previews SKILL.md, handles command collisions, saves a new sk
   try {
     const page = await browser.newPage({httpCredentials:{username:'owner',password:'test-password-long-enough'}});
     await page.goto(server.url.href+'#chat'); await page.locator('.welcome').waitFor();
-    await page.locator('[data-view=workflows]').click();
+    await page.locator('#tools-open').click();await page.locator('[data-view=workflows]').click();
     await page.locator('[data-skill-edit]').click(); await page.locator('[data-skill-close]').click();
     const chooser = page.waitForEvent('filechooser');
     await page.getByRole('button',{name:'Import skill',exact:true}).click();
@@ -43,7 +43,7 @@ test('Import skill previews SKILL.md, handles command collisions, saves a new sk
     expect(app.runtime.state.skills).toHaveLength(2);
     expect(app.runtime.state.skills.find(skill=>skill.id===existing.id).instructions).toBe('Original instructions.');
     expect(app.runtime.state.skills.find(skill=>skill.command==='imported-review').instructions).toBe(body);
-    await page.reload(); await page.locator('[data-view=workflows]').click();
+    await page.reload(); await page.locator('#tools-open').click();await page.locator('[data-view=workflows]').click();
     await page.getByRole('heading',{name:'Review Code',exact:true}).waitFor();
     await page.locator('#skill-import-file').setInputFiles({name:'SKILL.md',mimeType:'text/markdown',buffer:Buffer.from('No frontmatter')});
     await page.locator('#toast').filter({hasText:'needs YAML frontmatter'}).waitFor();

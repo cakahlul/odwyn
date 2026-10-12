@@ -97,14 +97,14 @@ test('assistant cards cover shopping outcomes, preserve fallback content, and fi
     await page.waitForFunction(() => document.querySelector('.card-media img')?.naturalWidth > 0);
     await page.screenshot({path:join(artifacts,'concert-receipt.png'),fullPage:true});
     await page.setViewportSize({width:320,height:900});
-    await page.waitForFunction(() => document.querySelector('.sidebar').getBoundingClientRect().right <= 0);
+    await page.waitForFunction(() => !document.querySelector('#search-dialog').open);
     expect(await page.locator('#view').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
     await page.screenshot({path:join(artifacts,'concert-receipt-mobile.png'),fullPage:true});
     await render(block(concert));
     await page.waitForFunction(() => document.querySelector('.card-media img')?.naturalWidth > 0);
     await page.screenshot({path:join(artifacts,'concert-card-mobile.png'),fullPage:true});
     await page.setViewportSize({width:1440,height:900});
-    await page.waitForFunction(() => document.querySelector('.sidebar').getBoundingClientRect().left >= 0);
+    await page.waitForFunction(() => !document.querySelector('#search-dialog').open);
     for (const [category,label] of [['flight','Flight'],['shopping','Shopping'],['hotel','Hotel'],['__proto__','Shopping']]) {
       await render(block({...concert,category})); expect(await page.locator('.card-category').textContent()).toContain(label);
     }
@@ -120,8 +120,7 @@ test('assistant cards cover shopping outcomes, preserve fallback content, and fi
     for (const width of [320, 768, 1024, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await page.waitForFunction(() => {
-        const box = document.querySelector('.sidebar').getBoundingClientRect();
-        return innerWidth <= 760 ? box.right <= 0 : box.left >= 0;
+        return document.querySelector('.shell').clientWidth === innerWidth;
       });
       expect(await page.locator('#view').evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
       for (const card of await page.locator('.product-card').all()) {

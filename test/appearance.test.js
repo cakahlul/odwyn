@@ -19,7 +19,7 @@ test('workspace themes preview, customize, validate, persist and reset without c
   const artifacts=resolve(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});
   const request=async(path,appearance)=>{const response=await app.fetch(new Request(new URL(path,server.url),{method:'PUT',headers:{authorization:'Basic '+Buffer.from('owner:test-password-long-enough').toString('base64'),origin:server.url.origin,'content-type':'application/json'},body:JSON.stringify(path==='/api/preferences' ? {text:'Keep my preferences',appearance} : appearance)}));return response;};
   const setRange=async(key,value)=>page.locator(`#appearance-${key}`).evaluate((node,value)=>{node.value=value;node.dispatchEvent(new Event('input',{bubbles:true}));},value);
-  const openSettings=async()=>{if((await page.viewportSize()).width<=760)await page.locator('#menu-button').click();await page.locator('#settings-open').click();};
+  const openSettings=async()=>{await page.locator('#settings-open').click();};
   try{
     const base={palette:'graphite',motion:'reduced'};
     for(const path of ['/api/appearance','/api/preferences'])for(const bad of [{...base,opacity:59},{...base,blur:33},{...base,depth:'90'},{...base,radius:3},{...base,customColors:{paper:'url(x)'}},{...base,customColors:{ink:'#ffffff'}},{...base,customColors:{paper:'#ffffff',surface:'#000000'}}])expect((await request(path,bad)).status).toBe(400);
