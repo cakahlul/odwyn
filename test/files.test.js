@@ -24,7 +24,7 @@ test('generated files preserve bytes, detect images, and cannot publish outside 
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
 
-test('attachment inputs keep binary bytes out of text and expose extraction paths', async () => {
+test('attachment inputs keep binary bytes and host paths out of model context', async () => {
   const {attachmentInput} = await import('../files.js');
   const directory = mkdtempSync(join(tmpdir(),'odwyn-file-input-'));
   try {
@@ -37,7 +37,8 @@ test('attachment inputs keep binary bytes out of text and expose extraction path
     for (const [id,bytes,name] of cases) {
       writeFileSync(join(directory,id),bytes);
       const input = attachmentInput([{id,name}],directory);
-      expect(input[0].text).toContain(join(directory,id));
+      expect(input[0].text).not.toContain(directory);
+      expect(input[0].text).toContain(id);
       expect(input[1].type).toBe('text');
       if (id === 'notes') expect(input[1].text).toContain('not actually a PNG');
       else expect(input[1].text).toContain('odwyn_terminal');

@@ -19,6 +19,8 @@ test('Home prioritizes work across agents, updates live, preserves drafts and re
   app.runtime.state.conversations=[conversation('waiting','Review weekend plans',second),conversation('running','Compare desk prices'),conversation('ready','Trip itinerary'),conversation('recent','A previous conversation')];
   app.runtime.state.conversations[2].messages.push({id:'result',jobId:'ready-job',role:'assistant',text:'The itinerary is ready.',agentId:first,at});
   app.runtime.state.jobs=[{...job('waiting-job','waiting','waiting',second),pending:{id:'question',type:'question',title:'Which dates work for you?',detail:'Choose travel dates.'}},job('running-job','running','running'),job('ready-job','ready','completed')];
+  const policy=app.runtime.store.security;for(const c of app.runtime.state.conversations)c.spaceId=policy.legacySpaceId;
+  for(const j of app.runtime.state.jobs){j.spaceId=policy.legacySpaceId;policy.bind(j.id,j.agentId,j.spaceId);}
   app.runtime.changed();
   const browser=await chromium.launch(),page=await browser.newPage({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:1000}});
   page.setDefaultTimeout(5000);const errors=[];page.on('pageerror',error=>errors.push(error.message));

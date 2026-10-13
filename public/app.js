@@ -1,3 +1,4 @@
+import {setupSecurity} from './security-ui.js';
 import { renderWorkflows, setupWorkflows } from './workflows-ui.js';
 import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date } from './ui.js';
 import { renderHome, renderChat, insertMessages, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
@@ -69,6 +70,7 @@ const providers = { codex: ['Codex','gpt-6.1-sol'], claude: ['Claude Code','sonn
 const currencyNames = new Intl.DisplayNames(['en'],{type:'currency'});
 $('#preferred-currency').innerHTML = currencies.map(code=>`<option value="${code}">${code === 'source' ? 'Original currency' : `${code} · ${esc(currencyNames.of(code))}`}</option>`).join('');
 hydrateIcons(); setupBrowser(() => state);
+const renderSecuritySpace=setupSecurity(() => state);
 setupCustomization(() => state, async (result, adding, onboarding) => { $('#provider-api-key').value = ''; signature = ''; await refresh(); if (adding) await switchAgent(result.id); if (onboarding && !workspace.globalProvider.configured) openSettings(); }, () => $('#provider-source').value === 'global' ? {inherit:true} : {...providerInput(),inherit:false});
 
 function selectState() {
@@ -166,6 +168,7 @@ function renderRooms() {
 function renderMentions() {
   const room = currentRoom(), prompt = $('#prompt');
   const highlights = $('#prompt-highlights');
+  highlights.style.width = prompt.clientWidth + 'px';
   highlights.textContent = prompt.value;
   colorMentions(highlights,workspace?.agents.filter(a=>!room || room.memberIds.includes(a.id)),[...(workspace?.skills || []),...(workspace?.workflows || [])],true);
   if (prompt.value.endsWith('\n')) highlights.append('\n');
@@ -353,6 +356,7 @@ function render() {
 
   $('#run-status').hidden = !state.jobs.some(job => activeStatuses.includes(job.status));
   const conversation = state.conversations.find(c => c.id === conversationId);
+  renderSecuritySpace(conversation,busy||switching);
   const permissionJob = state.jobs.find(job=>job.conversationId === conversationId && job.id === state.runtime.activeJobId) || state.jobs.find(job=>job.conversationId === conversationId && job.status === 'queued');
   if (permissionJob && !$('#interaction-mode').disabled) $('#interaction-mode').value = permissionJob.interactionMode;
   $('#prompt').placeholder = conversation?.kind === 'room' ? 'Message the room, or @mention an agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
@@ -698,7 +702,7 @@ async function attachFiles(files) {
     if (attachments.length + files.length > 20) throw new Error('Choose up to 20 uploaded files.');
     pendingAttachments = files.map(file=>({name:file.name,mimeType:file.type,size:file.size,uploading:true})); renderAttachments();
     for (const file of files) {
-      const form = new FormData(); form.append('file',file);
+      const form = new FormData(); form.append('file',file);form.append('spaceId',$('#task-space').value);
       const saved = await api('/api/files',form); attachments.push(saved); pendingAttachments.shift(); renderAttachments();
     }
   });
@@ -722,7 +726,7 @@ $('#composer').onsubmit = async event => {
   busy = true; $('#send-button').disabled = true;
   await perform(async () => {
     const room = currentRoom();
-    const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt, attachments:attachments.map(file=>file.id), agentId:room ? $('#reply-agent').value : agentId, conversationId, interactionMode:$('#interaction-mode').value });
+    const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt, spaceId:$('#task-space').value, attachments:attachments.map(file=>file.id), agentId:room ? $('#reply-agent').value : agentId, conversationId, interactionMode:$('#interaction-mode').value });
     $('#prompt').value = ''; $('#prompt').style.height = ''; attachments = []; $('#attachments').replaceChildren(); navigate('chat',room?.id || result.conversationId);
     if (room) { roomRecipients.delete(room.id); $('#reply-agent').value = 'all'; }
   });

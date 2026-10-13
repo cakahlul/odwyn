@@ -1,0 +1,12 @@
+# Phase 5 plan and current boundary
+
+Phase 4 predecessor: `artifacts/security/20261013T072830Z-50439`, exit 0; 45/45 mandatory cases, no missing/skipped. No live systems, merge or deployment authorized.
+
+1. Read both contracts and the unchanged 55-ID registry. Add the ten Phase 5 real Bun cases and stable mappings before production edits; fresh-process cases retain actual child JUnit and structured proof/execution records. Red runs reproduce missing migration review, connector-disable audit and unsafe browser availability.
+2. Reuse the owner Access editor for migration review; preserve five agents/history/routines, create no grants. Centralize compatible private DB/env/key backups. Implement read-only dry-run. SIGKILL the real migration transaction and restore the actual backup.
+3. Exercise real three-Space Runtime tools, provider/agent changes, routines, Room membership and cross-step workflow disclosure; OS workers, safe network sink, fake MCP/action services, browser fixture only. Probe browser PID/OS principal, not just policy results. Fail closed if whole-process containment is absent.
+4. Inject hostile HTML, issues, README and actual terminal output; dispatch deterministic attempts to follow them. Forge approval evidence via real MCP/README and test owner/task authority. Kill the actual controller after a committed upstream action and before receipt, then recover/retry with zero repeat effects.
+5. Revoke/disable while MCP is held; discard results, deny subsequent calls and emit owner audit. Corrupt/close the policy store and remove the sandbox backend: no host shell or broad MCP. Disable unsupported native agent browser access by default.
+6. Run cumulative phase 5 gate, all actual regression tests, and retain sanitized JUnit/proofs/results. Run release only on an actually disposable Linux runner; workstation release preflight must block. Add PR checks and hard-gate prerequisites, owner setup/rollback documentation.
+
+Remediation: replace the native browser adapter with an immutable network-none worker and exact reviewed credential-free HTML broker; strengthen E2E-001 to require live Chromium OS/filesystem/network containment. Local phase sign-off requires all cumulative cases; release still requires a disposable Linux runner. Do not weaken supplied verifier or infer a security release from native profile tests. Production VPS is not an authorized test runner. No deployment will be performed.

@@ -6,7 +6,8 @@ import { startProxy } from './proxy.js';
 import { validateAction, resolvePublic } from './security.js';
 
 export class Browser {
-  constructor({ directory, onFile = () => {}, findFile = () => null, executablePath, headless = true }) {
+  constructor({ directory, onFile = () => {}, findFile = () => null, executablePath, headless = true, proxyOptions, contextOptions, onContext }) {
+    this.proxyOptions=proxyOptions;this.contextOptions=contextOptions;this.onContext=onContext;
     this.directory = directory; this.onFile = onFile; this.findFile = findFile;
     this.executablePath = executablePath; this.headless = headless;
     this.context = null; this.page = null; this.proxy = null; this.tail = Promise.resolve(); this.owner = null; this.dialog = null; this.generation = 0;
@@ -40,7 +41,7 @@ export class Browser {
     if (this.context) return;
     mkdirSync(join(this.directory, 'browser'), { recursive: true, mode: 0o700 });
     mkdirSync(join(this.directory, 'files'), { recursive: true, mode: 0o700 });
-    const generation = this.generation, proxy = await startProxy();
+    const generation = this.generation, proxy = await startProxy(this.proxyOptions);
     if (generation !== this.generation) { proxy.close(); throw new Error('Browser operation interrupted.'); }
     this.proxy = proxy;
     try {
@@ -48,11 +49,13 @@ export class Browser {
         headless: this.headless, executablePath: this.executablePath, viewport: { width: 1280, height: 800 },
         acceptDownloads: true, serviceWorkers: 'block', proxy: { server: proxy.url },
         args: ['--proxy-bypass-list=<-loopback>', '--disable-quic', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'],
+        ...this.contextOptions,
       });
       this.launching = launching;
       const context = await launching;
       if (generation !== this.generation) { await context.close(); throw new Error('Browser operation interrupted.'); }
       this.context = context;
+      await this.onContext?.(context);
       this.context.setDefaultTimeout(12_000);
       this.context.setDefaultNavigationTimeout(30_000);
       this.context.on('page', page => { this.attach(page); this.page = page; });

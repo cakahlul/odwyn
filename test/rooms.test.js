@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { createApp } from '../server.js';
+import { grantFiles } from '../tests/security/access-fixtures.js';
 import { defaults } from '../public/profile.js';
 
 class RoomAI extends EventEmitter {
@@ -102,7 +103,9 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=','base64');
     writeFileSync(join(app.runtime.workspace,'answer.png'),png);
     writeFileSync(join(app.runtime.workspace,'itinerary.csv'),'City,Days\nKyoto,2\n');
-    const attach = (job,path) => app.runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_send_file',arguments:{path}}});
+    const resources=grantFiles(app.runtime.store,primary,['answer.png','itinerary.csv']);
+    const p=app.runtime.store.security;p.putAccess(scout.id,{revision:p.revision,spaceIds:[p.legacySpaceId],grants:Object.values(resources).map(resourceId=>({spaceId:p.legacySpaceId,resourceId,action:"file.download",mode:"auto"}))});
+    const attach = (job,path) => app.runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_send_file',arguments:{path,resourceId:resources[path]}}});
     await attach(jobs[0],'answer.png'); await attach(jobs[0],'itinerary.csv');
     complete(first,jobs[0],'Pip suggests Kyoto.'); await app.runtime.drain();
     await page.locator('.working-row strong').filter({hasText:'Scout'}).waitFor();

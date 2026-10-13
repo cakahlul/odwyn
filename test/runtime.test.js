@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore, createRoom, deleteAgent, recoverJobs } from '../store.js';
 import { Runtime } from '../runtime.js';
+import { grantFiles } from '../tests/security/access-fixtures.js';
 import { defaults, agentModeInstructions } from '../public/profile.js';
 
 class FakeCodex extends EventEmitter {
@@ -37,46 +38,29 @@ test('skill commands stay visible while the provider receives snapshotted instru
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('MCP tool approvals follow chat permissions and use approval buttons', async () => {
-  for (const mode of ['confirm','safe','allow']) {
+test('raw MCP approvals remain declined under every interaction mode', async () => {
+  for(const mode of ['confirm','safe','allow']) {
     const dir=mkdtempSync(join(tmpdir(),'odwyn-mcp-approval-')),store=openStore(dir),codex=new FakeCodex();
     const runtime=new Runtime({store,codex,browser:{},workspace:dir});
     try {
-      await runtime.refreshAccount();
-      const job=runtime.submit({prompt:'Use MCP',interactionMode:mode});await runtime.drain();
-      expect(codex.calls.find(c=>c.method==='thread/start').params.mcpApprovalMode).toBe(mode==='safe' ? 'writes':'prompt');
-      const params={threadId:job.threadId,turnId:job.turnId,serverName:'fixture',mode:'form',message:'Allow tool?',requestedSchema:{type:'object',properties:{}},_meta:{codex_approval_kind:'mcp_tool_call'}};
-      let request=runtime.handleRequest({id:'approval',method:'mcpServer/elicitation/request',params});await Bun.sleep(1);
-      if(mode!=='allow') {
-        expect(job.pending.type).toBe('mcp');
-        runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'});await request;
-        expect(codex.replies.at(-1).result.action).toBe('decline');
-        request=runtime.handleRequest({id:'approval2',method:'mcpServer/elicitation/request',params});await Bun.sleep(1);
-        runtime.setInteractionMode(job.id,'allow');
+      await runtime.refreshAccount();const job=runtime.submit({prompt:'Use MCP',interactionMode:mode});await runtime.drain();
+      expect(codex.calls.find(c=>c.method==='thread/start').params.mcpEnabled).toBe(false);
+      for(const sensitive of [false,true]) {
+        await runtime.handleRequest({id:'approval',method:'mcpServer/elicitation/request',params:{threadId:job.threadId,turnId:job.turnId,serverName:'fixture',mode:'form',message:'Allow tool?',requestedSchema:{type:'object'},_meta:{codex_approval_kind:'mcp_tool_call',codex_sensitive_action:sensitive}}});
+        expect(codex.replies.at(-1).result.action).toBe('decline');expect(job.pending).toBeFalsy();
+        runtime.setInteractionMode(job.id,'allow');expect(job.pending).toBeFalsy();
       }
-      await request;
-      expect(job.pending ?? null).toBeNull();
-      expect(codex.replies.at(-1).result).toEqual({action:'accept',content:{}});
-      request=runtime.handleRequest({id:'real-input',method:'mcpServer/elicitation/request',params:{...params,_meta:undefined}});await Bun.sleep(1);
-      expect(job.pending.type).toBe('question');
-      runtime.answer(job.id,{requestId:job.pending.id,answer:'{}'});await request;
-      request=runtime.handleRequest({id:'sensitive',method:'mcpServer/elicitation/request',params:{...params,_meta:{...params._meta,codex_sensitive_action:true}}});await Bun.sleep(1);
-      expect(job.pending.risk).toBe('payment');
-      runtime.setInteractionMode(job.id,'allow');
-      expect(job.pending.type).toBe('mcp');
-      expect(()=>runtime.answer(job.id,{requestId:job.pending.id,decision:'allow-run'})).toThrow('for this action only');
-      runtime.answer(job.id,{requestId:job.pending.id,decision:'allow'});await request;
-    } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+    }finally{runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
   }
 });
 
-test('MCP questions, validated forms, URL refusals and cancellation use owner input', async () => {
+test('owner questions and validated forms survive raw MCP refusal and cancellation', async () => {
   const dir = mkdtempSync(join(tmpdir(),'odwyn-mcp-input-')), store = openStore(dir), codex = new FakeCodex();
   const runtime = new Runtime({store,codex,browser:{},workspace:dir});
   try {
     await runtime.refreshAccount();
     const job = runtime.submit({prompt:'Use configured MCP'}); await runtime.drain();
-    expect(codex.calls.find(call=>call.method==='thread/start').params.mcpEnabled).toBe(true);
+    expect(codex.calls.find(call=>call.method==='thread/start').params.mcpEnabled).toBe(false);
     codex.emit('notification',{method:'item/started',params:{threadId:job.threadId,turnId:job.turnId,item:{type:'mcpToolCall',server:'fixture',tool:'echo'}}});
     expect(job.events.at(-1).detail).toBe('fixture.echo');
     const invoke = (method, params) => runtime.handleRequest({id:'mcp-input',method,params:{threadId:job.threadId,turnId:job.turnId,...params}});
@@ -86,18 +70,20 @@ test('MCP questions, validated forms, URL refusals and cancellation use owner in
     runtime.answer(job.id,{requestId:job.pending.id,selected:['0']}); await question;
     expect(codex.replies.at(-1).result).toEqual({answers:{approve:{answers:['Accept']}}});
     const params = {serverName:'fixture',mode:'form',message:'Choose count',requestedSchema:{type:'object',properties:{count:{type:'integer',minimum:1}},required:['count'],additionalProperties:false}};
-    const form = invoke('mcpServer/elicitation/request',params); await Bun.sleep(1);
+    await invoke('mcpServer/elicitation/request',params);
+    expect(codex.replies.at(-1).result.action).toBe('decline');
+    const form=runtime.waitForOwner(job,{type:'question',title:'Count',detail:'Choose count',schema:params.requestedSchema});await Bun.sleep(1);
     const requestId = job.pending.id;
     expect(()=>runtime.answer(job.id,{requestId,answer:'{"count":"wrong"}'})).toThrow('schema');
     expect(job.pending.id).toBe(requestId);
     runtime.answer(job.id,{requestId,answer:'{"count":2}'}); await form;
-    expect(codex.replies.at(-1).result).toEqual({action:'accept',content:{count:2}});
+    expect(JSON.parse((await form).answer)).toEqual({count:2});
     const url = invoke('mcpServer/elicitation/request',{serverName:'fixture',mode:'url',message:'Sign in',url:'https://login.example/'}); await Bun.sleep(1);
-    runtime.answer(job.id,{requestId:job.pending.id,answer:'decline'}); await url;
+    await url;expect(job.pending).toBeNull();
     expect(codex.replies.at(-1).result.action).toBe('decline');
-    const cancelled = invoke('mcpServer/elicitation/request',params); await Bun.sleep(1);
+    const cancelled=invoke('tool/requestUserInput',{questions:[{id:'cancel',header:'Question',question:'Continue?'}]});await Bun.sleep(1);
     await runtime.cancel(job.id); await cancelled;
-    expect(codex.replies.at(-1).result.action).toBe('cancel');
+    expect(codex.replies.at(-1).result).toEqual({answers:{}});
     expect(job.pending).toBeNull();
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
 });
@@ -259,9 +245,11 @@ test('AI file attachments persist in ordinary chats and rooms with the producing
   const runtime = new Runtime({store,codex,browser:{},workspace:dir});
   try {
     await runtime.refreshAccount(); writeFileSync(join(dir,'report.csv'),'Name,Result\nTask,Done\n');
+    const resourceId=grantFiles(store,primary,['report.csv'])['report.csv'];
+    const p=store.security;p.putAccess('scout',{revision:p.revision,spaceIds:[p.legacySpaceId],grants:[resourceId].map(resourceId=>({spaceId:p.legacySpaceId,resourceId,action:"file.download",mode:"auto"}))});
     for (const conversationId of [null,room.id]) {
       const job = runtime.submit({prompt:'Send report',conversationId,agentId:primary}); await runtime.drain();
-      await runtime.handleRequest({id:job.id,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_send_file',arguments:{path:'report.csv'}}});
+      await runtime.handleRequest({id:job.id,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_send_file',arguments:{path:'report.csv',resourceId}}});
       expect(codex.replies.at(-1).result.success).toBe(true);
       const file = store.state.files.find(f=>f.id===job.files[0]); expect(file.jobId).toBe(job.id);
       expect(readFileSync(join(dir,'files',file.id),'utf8')).toContain('Task,Done');
@@ -469,13 +457,12 @@ test('room discussions share one owner message, take turns with context, and sto
     expect(second.calls.find(c=>c.method==='thread/start').params.developerInstructions).toContain('Reply from Pip');
     const invoke=(tool,args,id)=>runtime.handleRequest({id,method:'item/tool/call',params:{threadId:jobs[1].threadId,turnId:jobs[1].turnId,tool,arguments:args}});
     await invoke('odwyn_browser',{action:'click',ref:'0',reason:'Search the requested itinerary'},33);
-    expect(second.replies.at(-1).result.success).toBe(true); expect(browserCalls).toBe(1);
+    expect(second.replies.at(-1).result.success).toBe(false); expect(browserCalls).toBe(0);
     label='Pay for ticket'; const payment=invoke('odwyn_browser',{action:'click',ref:'0',reason:'Pay for the ticket'},34); await Bun.sleep(10);
-    expect(jobs[1].pending.risk).toBe('payment'); expect(browserCalls).toBe(1);
-    runtime.answer(jobs[1].id,{requestId:jobs[1].pending.id,decision:'deny'}); await payment;
-    await invoke('odwyn_remember',{note:'Prefer morning trains'},35); expect(store.state.preferences).toContain('Prefer morning trains');
+    await payment;expect(jobs[1].pending).toBeFalsy();expect(browserCalls).toBe(0);expect(second.replies.at(-1).result.success).toBe(false);
+    await invoke('odwyn_remember',{note:'Prefer morning trains'},35); expect(store.state.preferences).toBe('');expect(second.replies.at(-1).result.success).toBe(false);
     await invoke('odwyn_schedule',{prompt:'Check train times',at:new Date(Date.now()+60_000).toISOString(),intervalMinutes:0,interactionMode:'confirm'},36);
-    expect(second.replies.at(-1).result.success).toBe(true); expect(store.state.schedules[0].agentId).toBe('scout');
+    expect(second.replies.at(-1).result.success).toBe(false);expect(store.state.schedules).toHaveLength(0);
     await runtime.cancelRoom(room.id); expect(jobs[1].status).toBe('cancelled');
     const next = runtime.submitRoom(room.id,{prompt:'Discuss transport'}); await runtime.drain();
     await runtime.cancelRoom(room.id); expect(next.every(j=>j.status==='cancelled')).toBe(true);
@@ -486,7 +473,7 @@ test('room discussions share one owner message, take turns with context, and sto
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true});}
 });
 
-test('real tool protocol pauses interactions until exact approval and resumes the same thread', async () => {
+test('real tool protocol pauses owner questions and resumes the same thread', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'odwyn-runtime-'));
   const store = openStore(dir); const codex = new FakeCodex(); codex.config={type:'codex',effort:'high'}; const browserCalls = [];
   store.state.currency='IDR';
@@ -507,14 +494,14 @@ test('real tool protocol pauses interactions until exact approval and resumes th
   expect(identity.endsWith(agentModeInstructions)).toBe(true);
   expect(identity).toContain('Owner preferred currency: IDR'); expect(identity).toContain('exchange rate verified using the browser'); expect(identity).toContain('Receipts and confirmed charges keep their exact original amounts');
   expect(identity).toContain('Bahasa Indonesia'); expect(identity).toContain('Reply depth: shortest complete answer'); expect(identity).toContain('Beginner traveler');
-  const handle = runtime.handleRequest({ id: 77, method: 'item/tool/call', params: { threadId: 'thread-test', turnId: 'turn-test', tool: 'odwyn_browser', arguments: { action: 'click', ref: '0', reason: 'Submit the requested form' } } });
+  const handle = runtime.handleRequest({ id: 77, method: 'item/tool/call', params: { threadId: 'thread-test', turnId: 'turn-test', tool: 'odwyn_ask', arguments: { question: 'Which form should I prepare?' } } });
   await Bun.sleep(10);
   expect(job.status).toBe('waiting'); expect(browserCalls).toHaveLength(0);
   expect(() => runtime.answer(job.id, { requestId: 'stale', decision: 'allow' })).toThrow();
-  runtime.answer(job.id, { requestId: job.pending.id, decision: 'allow' });
+  runtime.answer(job.id, { requestId: job.pending.id, answer: 'The booking form' });
   await handle;
-  expect(browserCalls).toHaveLength(1); expect(codex.replies[0].result.success).toBe(true);
-  expect(job.browserUsed).toBe(true);
+  expect(browserCalls).toHaveLength(0); expect(codex.replies[0].result.success).toBe(true);
+  expect(job.browserUsed).toBeFalsy();
   codex.emit('notification', { method: 'item/completed', params: { threadId: 'thread-test', turnId: 'turn-test', item: { id: 'message-1', type: 'agentMessage', text: 'Form submitted.', phase: 'final_answer' } } });
   codex.emit('notification', { method: 'turn/completed', params: { threadId: 'thread-test', turn: { id: 'turn-test', status: 'completed' } } });
   expect(job.status).toBe('completed');
@@ -630,7 +617,7 @@ test('multiple agents continue one chat with separate sessions and attributed re
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true});}
 });
 
-test('approval modes auto-approve only allowed risks and never bypass payment confirmation', async () => {
+test('interaction modes cannot grant browser access for safe payment or credential targets', async () => {
   const dir=mkdtempSync(join(tmpdir(),'odwyn-approvals-')), store=openStore(dir), codex=new FakeCodex();
   let label='Search', calls=0;
   const browser={last:{url:'https://example.com',elements:[{ref:'0',label:'Search'}]},inspectAction:async action=>({url:'https://example.com',element:action.ref === undefined && !(action.x === 469 && action.y === 421) ? null : {tag:'button',label,type:label === 'Password' ? 'password' : undefined},dialog:action.action === 'dialog' ? {type:'confirm',message:label} : undefined}),action:async()=>{calls++;return {text:'Done'};}};
@@ -641,88 +628,36 @@ test('approval modes auto-approve only allowed risks and never bypass payment co
     for (const mode of ['confirm','safe','allow']) {
       const job=runtime.submit({prompt:'Search and save',interactionMode:mode}); await runtime.drain();
       const invoke=action=>runtime.handleRequest({id:calls+100,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_browser',arguments:{reason:'Perform the requested action',...action}}});
-      for (const [target,auto,action={action:'click'}] of [['Search',mode!=='confirm'],['Save profile',mode==='allow'],['Add Children',mode==='allow'],['Next month',mode==='allow'],['Continue',mode==='allow'],['Enter a destination or property',mode!=='confirm',{action:'press',text:'Enter'}],['Name',mode==='allow',{action:'type',text:'Odwyn'}],['Continue',mode==='allow',{action:'press',text:'Enter'}],['Summarecon Mal Serpong',mode==='allow',{action:'click',x:469,y:421,ref:undefined}],['Destination',mode!=='confirm',{action:'fill',text:'Serpong'}],['Guests',mode!=='confirm',{action:'select',text:'2'}],['Upload file',mode==='allow',{action:'upload',fileId:'00000000-0000-0000-0000-000000000000'}],['Continue',mode==='allow',{action:'dialog',choice:'accept'}],['Cancel',mode!=='confirm',{action:'dialog',choice:'dismiss'}]]) {
-        label=target; const before=calls, pending=invoke({ref:'0',...action}); await Bun.sleep(10);
-        if (auto) expect(job.pending).toBeFalsy();
-        else { expect(job.pending.type).toBe('interaction'); expect(calls).toBe(before); runtime.answer(job.id,{requestId:job.pending.id,decision:'allow'}); }
-        await pending; expect(calls).toBe(before+1);
+      for(const action of [
+        ...['Search','Save profile','Add Children','Next month','Continue','Pay now','Password'].flatMap(target=>[
+          {action:'click',ref:'0',target},{action:'fill',ref:'0',text:'100',target},{action:'press',text:'Enter',target},
+          {action:'upload',fileId:'00000000-0000-0000-0000-000000000000',target},
+          {action:'dialog',choice:'accept',target},{action:'click',x:1245,y:400,target}
+        ])
+      ]) {
+        label=action.target;await invoke(action);
+        expect(codex.replies.at(-1).result.success).toBe(false);expect(job.pending).toBeFalsy();expect(calls).toBe(0);
       }
-      label='Pay Rp 100,000'; const before=calls;
-      for (const action of [{action:'click'},{action:'fill',text:'100'},{action:'select',text:'100'},{action:'type',text:'100'},{action:'press',text:'Enter'},{action:'upload',fileId:'00000000-0000-0000-0000-000000000000'},{action:'dialog',choice:'accept'}]) {
-        const payment=invoke({ref:'0',...action}); await Bun.sleep(10);
-        expect(job.pending.risk).toBe('payment'); expect(calls).toBe(before);
-        expect(()=>runtime.answer(job.id,{requestId:job.pending.id,decision:'allow-run'})).toThrow('payment');
-        runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'}); await payment; expect(calls).toBe(before);
-      }
-      label='Catalogue navigation';
-      for (const x of [12,1245]) {
-        const beforeUnknown=calls, unknown=invoke({action:'click',x,y:400}); await Bun.sleep(10);
-        if (mode === 'allow') { expect(job.pending).toBeFalsy(); await unknown; expect(calls).toBe(beforeUnknown+1); }
-        else { expect(job.pending.risk).toBe('unknown'); expect(calls).toBe(beforeUnknown); runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'}); await unknown; }
-      }
-      label='Password'; const beforeCredential=calls, credential=invoke({action:'press',ref:'0',text:'Enter'}); await Bun.sleep(10);
-      expect(job.pending.risk).toBe('credential'); expect(calls).toBe(beforeCredential);
-      expect(()=>runtime.answer(job.id,{requestId:job.pending.id,decision:'allow-run'})).toThrow('credential');
-      runtime.setInteractionMode(job.id,mode); expect(job.pending.risk).toBe('credential');
-      runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'}); await credential;
-      if (mode === 'confirm') {
-        label='Catalogue navigation'; const pending=invoke({action:'click',x:1245,y:400}); await Bun.sleep(10);
-        runtime.setInteractionMode(job.id,'allow'); await pending;
-        expect(job.pending).toBe(null); expect(job.interactionMode).toBe('allow'); expect(calls).toBe(before+1);
-        label='Pay now'; const payment=invoke({action:'click',ref:'0'}); await Bun.sleep(10);
-        runtime.setInteractionMode(job.id,'allow'); expect(job.pending.risk).toBe('payment');
-        runtime.answer(job.id,{requestId:job.pending.id,decision:'deny'}); await payment;
-        expect(()=>runtime.setInteractionMode(job.id,'invalid')).toThrow();
-      }
+      runtime.setInteractionMode(job.id,'allow');await invoke({action:'click',ref:'0'});
+      expect(calls).toBe(0);expect(codex.replies.at(-1).result.success).toBe(false);
+      expect(()=>runtime.setInteractionMode(job.id,'invalid')).toThrow();
       await runtime.cancel(job.id);
     }
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true});}
 });
 
-test('terminal respects permission modes, releases pending commands, reaches all providers, and stops with the task', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'odwyn-terminal-runtime-'));
-  const store = openStore(dir), codex = new FakeCodex();
-  const runtime = new Runtime({ store, codex, browser: {}, workspace: dir });
-  const invoke = (job, command, id) => runtime.handleRequest({ id, method: 'item/tool/call', params: { threadId: job.threadId, turnId: job.turnId, tool: 'odwyn_terminal', arguments: { command, reason: 'Run the requested check' } } });
+test('terminal denies host execution across providers and modes; cancellation remains usable', async () => {
+  const dir=mkdtempSync(join(tmpdir(),'odwyn-terminal-runtime-')),store=openStore(dir),codex=new FakeCodex();
+  const runtime=new Runtime({store,codex,browser:{},workspace:dir});
   try {
     await runtime.refreshAccount();
-    for (const type of ['codex', 'claude', 'openai']) {
-      codex.config = { type };
-      for (const interactionMode of ['confirm', 'safe', 'allow']) {
-        const job = runtime.submit({ prompt: 'Check terminal', interactionMode }); await runtime.drain();
-        const params = codex.calls.filter(c => c.method === 'thread/start').at(-1).params;
-        expect(params.dynamicTools.some(t => t.name === 'odwyn_terminal')).toBe(true);
-        expect(params.developerInstructions.endsWith(agentModeInstructions)).toBe(true);
-        if (interactionMode !== 'allow') {
-          const denied = invoke(job, 'touch declined', `${type}-${interactionMode}-deny`); await Bun.sleep(10);
-          expect(job.pending.type).toBe('terminal'); expect(job.pending.preview).toBe('touch declined');
-          runtime.answer(job.id, { requestId: job.pending.id, decision: 'deny' }); await denied;
-          expect(codex.replies.at(-1).result.success).toBe(false);
-        }
-        const command = invoke(job, 'test ! -e declined && printf approved', `${type}-${interactionMode}-allow`);
-        if (interactionMode !== 'allow') {
-          await Bun.sleep(10); expect(job.pending.type).toBe('terminal');
-          if (interactionMode === 'confirm') runtime.answer(job.id, { requestId: job.pending.id, decision: 'allow-run' });
-          else runtime.setInteractionMode(job.id, 'allow');
-        }
-        if (interactionMode === 'allow') {
-          await Bun.sleep(10); expect(job.pending).toBeFalsy();
-        }
-        await command;
-        expect(job.pending).toBeFalsy(); expect(job.interactionMode).toBe('allow');
-        const approvedReply = codex.replies.at(-1).result;
-        await invoke(job, 'printf next', `${type}-${interactionMode}-next`);
-        expect(JSON.parse(codex.replies.at(-1).result.contentItems[0].text).stdout).toBe('next');
-        expect(approvedReply.success).toBe(true); expect(JSON.parse(approvedReply.contentItems[0].text).stdout).toBe('approved');
-        await runtime.cancel(job.id);
-      }
+    for(const type of ['codex','claude','openai'])for(const interactionMode of ['confirm','safe','allow']) {
+      codex.config={type};const job=runtime.submit({prompt:'Check terminal',interactionMode});await runtime.drain();
+      expect(codex.calls.filter(c=>c.method==='thread/start').at(-1).params.dynamicTools.some(t=>t.name==='odwyn_terminal')).toBe(true);
+      await runtime.handleRequest({id:job.id,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_terminal',arguments:{command:'touch forbidden',reason:'Fixture'}}});
+      expect(codex.replies.at(-1).result.success).toBe(false);expect(job.pending).toBeFalsy();expect(runtime.terminalRun).toBeFalsy();
+      expect(()=>readFileSync(join(dir,'forbidden'))).toThrow();
+      runtime.setInteractionMode(job.id,'allow');await runtime.cancel(job.id);expect(job.status).toBe('cancelled');
     }
-    const job = runtime.submit({ prompt: 'Long command' }); await runtime.drain();
-    const running = invoke(job, 'sleep 10', 'cancel-command'); await Bun.sleep(10);
-    runtime.answer(job.id, { requestId: job.pending.id, decision: 'allow' }); await Bun.sleep(10);
-    expect(runtime.terminalRun?.job).toBe(job);
-    await runtime.cancel(job.id); await running;
-    expect(job.status).toBe('cancelled'); expect(runtime.terminalRun).toBe(null);
-    expect(JSON.parse(codex.replies.at(-1).result.contentItems[0].text).cancelled).toBe(true);
-  } finally { runtime.close(); store.close(); rmSync(dir, { recursive: true, force: true }); }
+  }finally{runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
 });

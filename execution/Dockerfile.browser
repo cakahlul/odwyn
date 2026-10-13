@@ -1,0 +1,9 @@
+FROM oven/bun@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895
+USER root
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources && apt-get -o Acquire::ForceIPv4=true -o Acquire::https::Timeout=20 -o Acquire::Retries=0 update && apt-get -o Acquire::ForceIPv4=true -o Acquire::https::Timeout=20 -o Acquire::Retries=0 install -y --no-install-recommends chromium ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY node_modules/playwright/ ./node_modules/playwright/
+COPY node_modules/playwright-core/ ./node_modules/playwright-core/
+COPY browser.js proxy.js security.js ./
+COPY execution/browser-worker.js ./execution/browser-worker.js
+USER 1000:1000

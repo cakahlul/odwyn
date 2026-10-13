@@ -1165,3 +1165,14 @@ button.attachment-preview:hover { background:var(--paper); }
 .block-toolbar { display:flex; justify-content:flex-end; padding:4px 8px; border-bottom:1px solid var(--line); }
 .block-copy { display:flex; align-items:center; gap:6px; min-height:36px; font-size:11px; }
 .message-text .copyable-block>pre,.message-text .copyable-block>blockquote { margin:0; border:0; border-radius:0; }
+
+#security-dialog {width:min(760px,calc(100vw - 24px));max-height:90dvh;overflow:auto;padding:24px;box-sizing:border-box;}
+#security-dialog header {display:flex;justify-content:space-between;gap:12px;}
+#security-dialog label {display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;align-items:center;}
+#security-dialog input:not([type=checkbox]),#security-dialog textarea,#security-dialog select {max-width:100%;min-width:0;box-sizing:border-box;}
+#security-dialog section {margin:20px 0;} #security-dialog pre {white-space:pre-wrap;overflow-wrap:anywhere;}
+#security-dialog p,#access-effective,#access-simulation {white-space:pre-wrap;overflow-wrap:anywhere;}
+#security-dialog button {margin:4px;} #security-dialog small {display:block;} #security-auth {max-width:calc(100vw - 24px);}
+.composer-tools {flex-wrap:wrap;}
+.task-space-picker {display:flex;align-items:center;gap:4px;font-size:12px;min-width:0;max-width:100%;}
+.task-space-picker select {max-width:160px;min-width:0;padding:3px 6px;font-size:12px;}

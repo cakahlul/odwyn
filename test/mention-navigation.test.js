@@ -39,8 +39,10 @@ test('agent, workflow and skill mentions navigate from messages and composer wit
     await page.locator('#prompt').fill('/review-code');await page.locator('#prompt').evaluate(node=>node.setSelectionRange(4,4));await page.keyboard.press('Alt+Enter');
     await page.locator('#skill-editor').waitFor();expect(await page.locator('#skill-form [name=command]').inputValue()).toBe('review-code');
     await page.locator('[data-skill-close]').click();await returnToChat();
+    // Returning from a hidden editor can leave the observer's width stale.
+    await page.locator('#prompt-highlights').evaluate(node=>node.style.width='0px');
     await page.locator('#prompt').fill('@Rei');
-    const agentBox=await page.locator('#prompt-highlights .agent-mention').boundingBox();await page.mouse.click(agentBox.x+5,agentBox.y+agentBox.height/2);
+    const agentBox=await page.locator('#prompt-highlights .agent-mention').boundingBox();expect(agentBox.height).toBeLessThanOrEqual((await page.locator('#prompt').boundingBox()).height);await page.mouse.click(agentBox.x+5,agentBox.y+agentBox.height/2);
     await page.waitForFunction(()=>document.querySelector('#agent-name').textContent==='Rei' && !document.querySelector('#agent-workspace').inert);
     expect(app.runtime.state.jobs).toHaveLength(0);expect(errors).toEqual([]);
   } finally {await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}

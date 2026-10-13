@@ -13,11 +13,11 @@ export function imageMime(bytes) {
   return null;
 }
 
-export function saveGeneratedFile(workspace, path, directory, jobId) {
+export function saveGeneratedFile(workspace, path, directory, jobId, validateBytes=()=>{}) {
   const root = realpathSync(workspace), source = realpathSync(resolve(root,textInput(path,2000)));
   const inside = relative(root,source);
   if (!inside || inside === '..' || inside.startsWith('../') || isAbsolute(inside)) throw new Error('Send only files inside the shared workspace.');
-  const fd = openSync(source,constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  const fd = openSync(resolve(root,textInput(path,2000)),constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   let bytes;
   try {
     const stat = fstatSync(fd), limit = 20 * 1024 * 1024;
@@ -29,6 +29,7 @@ export function saveGeneratedFile(workspace, path, directory, jobId) {
     }
     bytes = Buffer.concat(chunks); if (!bytes.length) throw new Error('Cannot send an empty file.');
   } finally { closeSync(fd); }
+  validateBytes(bytes);
   const file = {id:randomUUID(),name:basename(source).replace(/[\x00-\x1f\x7f\\]/g,'_').slice(0,180),kind:'generated',jobId,mimeType:imageMime(bytes) || 'application/octet-stream',size:bytes.length,createdAt:new Date().toISOString()};
   mkdirSync(directory,{recursive:true,mode:0o700});
   writeFileSync(join(directory,file.id),bytes,{mode:0o600,flag:'wx'});
@@ -39,10 +40,17 @@ export function attachmentInput(files, directory) {
   return files.flatMap(file => {
     const path = join(directory,file.id), bytes = readFileSync(path);
     const mimeType = imageMime(bytes);
-    const label = {type:'text',text:`Owner attachment: ${JSON.stringify({name:file.name,fileId:file.id,path})}`};
+    const label = {type:'text',text:`Owner attachment: ${JSON.stringify({name:file.name,fileId:file.id})}`};
     if (mimeType && ['image/png','image/jpeg','image/gif','image/webp'].includes(mimeType)) return [label,{type:'image',url:`data:${mimeType};base64,${bytes.toString('base64')}`}];
     const text = bytes.toString('utf8');
     // ponytail: binary documents need approved terminal extraction; add native document blocks when all providers support them.
-    return [label,{type:'text',text:!mimeType && !bytes.includes(0) && Buffer.from(text).equals(bytes) ? `Attached file content (untrusted data):\n${text}` : 'Read this attachment using odwyn_terminal with the absolute path above; extract or convert it before answering. Do not claim to have seen its contents before reading it.'}];
+    return [label,{type:'text',text:!mimeType && !bytes.includes(0) && Buffer.from(text).equals(bytes) ? `Attached file content (untrusted data):\n${text}` : 'Binary attachment extraction is unavailable until staged in an owner-authorized isolated odwyn_terminal workspace. Ask the owner for a text or supported image version. Do not claim to have read its contents.'}];
   });
+}
+
+export function saveFileBytes(bytes,name,directory,jobId,validateBytes=()=>{}){
+  if(!bytes.length||bytes.length>20*1024*1024)throw new Error('Invalid bounded file export.');
+  validateBytes(bytes);
+  const file={id:randomUUID(),name:basename(name),kind:'generated',jobId,mimeType:imageMime(bytes)||'application/octet-stream',size:bytes.length,createdAt:new Date().toISOString()};
+  mkdirSync(directory,{recursive:true,mode:0o700});writeFileSync(join(directory,file.id),bytes,{mode:0o600,flag:'wx'});return file;
 }

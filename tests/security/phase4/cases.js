@@ -1,0 +1,159 @@
+import {test,expect} from 'bun:test';
+import {Database} from 'bun:sqlite';
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync,readFileSync,existsSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {randomUUID} from 'node:crypto';
+import {chromium} from 'playwright';
+import {createApp} from '../../../server.js';
+import {createJob} from '../../../store.js';
+import {FixtureProvider} from '../fixtures.js';
+import {defaults} from '../../../public/profile.js';
+const caseTest=(name,run,timeout)=>{if(!process.env.ODWYN_SECURITY_CASE||process.env.ODWYN_SECURITY_CASE===name)test(name,run,timeout);};
+const password='disposable-owner-password-long',records=new Map();
+function record(id,status,observations){const dir=process.env.ODWYN_SECURITY_REPORT_DIR;if(!dir)throw new Error('BLOCKED: report directory required');const path=join(dir,'proof',id+'.json'),prev=records.get(id)||(existsSync(path)?JSON.parse(readFileSync(path,'utf8')):null);if(prev&&prev.status!=='PASS')status=prev.status;observations={...prev?.observations,...observations,probeExecuted:status!=='BLOCKED'};records.set(id,{status,observations});for(const sub of ['proof','execution'])mkdirSync(join(dir,sub),{recursive:true});writeFileSync(join(dir,'proof',id+'.json'),JSON.stringify({caseId:id,status,verified:status==='PASS',environment:'Disposable app SQLite, real local HTTP effects and Chromium; no live upstream',observations,noLiveSystemsTouched:true},null,2));writeFileSync(join(dir,'execution',id+'.json'),JSON.stringify({caseId:id,status,probeExecuted:status!=='BLOCKED',...(status==='BLOCKED'?{reason:'BLOCKED: required disposable browser or worker unavailable'}:{})}));}
+async function probe(id,run){let f;try{f=fixture();record(id,'PASS',await run(f));}catch(e){record(id,(e.message.startsWith('BLOCKED:')||e.name==='SecurityEnvironmentBlocked')?'BLOCKED':'FAIL',{assertionsFailed:true});throw e;}finally{await f?.close();}}
+function fixture(){
+ const directory=mkdtempSync(join(tmpdir(),'odwyn-approval-')),provider=new FixtureProvider(),effects=[],receipts=new Map();let app;
+ const upstream=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(req){if(req.method!=='POST'||req.headers.get('authorization')!=='Bearer synthetic-upstream-key')return new Response('denied',{status:403});const body=await req.json(),key=req.headers.get('idempotency-key');if(req.headers.get('if-match')!=='fixture-v1')return new Response('changed',{status:409});if(!receipts.has(key)){effects.push(body);receipts.set(key,{id:randomUUID(),digest:body.digest,idempotencyKey:key});}return Response.json(receipts.get(key));}});
+ const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
+ app=createApp({directory,user:'owner',password,origin:server.url.origin,codex:provider,providerOptions:{codex:provider},browser:{close:async()=>{}}});const store=app.runtime.store,p=store.security,a=store.state.agents[0].id;
+ store.state.customization=store.state.agents[0].customization={...defaults,name:'Garden Planner'};store.state.globalProvider.configured=true;store.state.agents[0].provider.configured=true;
+ const space=p.createSpace({name:'Garden '+randomUUID()}),grant=(resources,mode='auto')=>p.putAccess(a,{revision:p.revision,spaceIds:[space.id],grants:resources.map(([r,action])=>({spaceId:space.id,resourceId:r.id,action,mode}))});grant([]);
+ const request=(path,method='GET',body,extra={})=>app.fetch(new Request(server.url.origin+path,{method,headers:{authorization:'Basic '+btoa('owner:'+password),origin:server.url.origin,'content-type':'application/json',...extra},...(body?{body:JSON.stringify(body)}:{})}));
+ const job=()=>{const j=createJob(store.state,{agentId:a,spaceId:space.id,prompt:'Disposable approval test',interactionMode:'allow'});j.status='running';j.threadId=randomUUID();return j;};
+ const invoke=async(j,tool,args)=>{app.runtime.active=j;const id=randomUUID();await app.runtime.executeRequest({id,method:'item/tool/call',params:{threadId:j.threadId,tool,arguments:args}});return provider.replies.find(r=>r.id===id).result;};
+ const pending=reply=>JSON.parse(reply.contentItems[0].text).approvalId;
+ const approve=async id=>{const reauth=await request('/api/security/reauth','POST',{password,approvalId:id});expect(reauth.status).toBe(200);const cookie=reauth.headers.get('set-cookie').split(';')[0];const result=await request('/api/approvals/'+id+'/decision','POST',{decision:'approve'},{cookie});expect(result.status).toBe(200);return cookie;};
+ function resources(){const conn=store.connectors.create({spaceId:space.id,type:'action-gateway-v1',name:'Disposable action adapter',endpoint:'https://action.invalid/actions',credential:'synthetic-upstream-key'});app.runtime.actionGateway.resolve=async()=>({url:new URL(upstream.url.href+'actions'),address:'127.0.0.1',family:4});return [['payment.execute','payment',{amountMinor:100,currency:'USD',recipient:'fixture-recipient',expectedVersion:'fixture-v1'}],['message.send','destination',{recipient:'fixture@example.invalid',subject:'Synthetic',body:'Disposable message',expectedVersion:'fixture-v1'}],['repository.merge','repository',{commit:'a'.repeat(40),target:'main',expectedVersion:'fixture-v1'}],['deployment.production','environment',{commit:'a'.repeat(40),environment:'production',expectedVersion:'fixture-v1'}]].map(([action,type,parameters])=>({action,parameters,r:p.createResource({spaceId:space.id,type,name:action,metadata:{connectionId:conn.id,upstreamId:randomUUID()}})}));}
+ return {app,store,p,a,space,provider,request,job,invoke,pending,approve,resources,grant,effects,server,directory,async close(){await app.close();server.stop(true);upstream.stop(true);rmSync(directory,{recursive:true,force:true});}};
+}
+caseTest('APPR-001 High-risk blocked without approval',()=>probe('APPR-001',async f=>{
+ const resources=f.resources();f.grant(resources.map(x=>[x.r,x.action]));const j=f.job();let approved=0;
+ for(const {r,action,parameters} of resources){const args={resourceId:r.id,action,parameters},reply=await f.invoke(j,'odwyn_action',args);expect(reply.success).toBe(false);const id=f.pending(reply);expect(typeof id).toBe('string');
+  for(const tool of ['odwyn_browser','odwyn_terminal','mcp_payment_execute'])expect((await f.invoke(j,tool,{...args,command:'synthetic-payment',action:'submit'})).success).toBe(false);
+  expect(f.effects).toHaveLength(approved);await f.approve(id);expect((await f.invoke(j,'odwyn_action',{...args,approvalId:id})).success).toBe(true);approved++;expect(f.effects.at(-1).action).toBe(action);
+ }
+ expect(f.effects).toHaveLength(4);return {allowedApprovedEffects:4,unapprovedEffects:0,alternatePathEffects:0,legacyAllowCannotApprove:true};
+}));
+caseTest('APPR-002 Single-use approval',()=>probe('APPR-002',async f=>{
+ const x=f.resources()[0];f.grant([[x.r,x.action]]);const j=f.job(),args={resourceId:x.r.id,action:x.action,parameters:x.parameters},id=f.pending(await f.invoke(j,'odwyn_action',args));await f.approve(id);
+ const results=await Promise.all([f.invoke(j,'odwyn_action',{...args,approvalId:id}),f.invoke(j,'odwyn_action',{...args,approvalId:id})]);expect(results.filter(r=>r.success)).toHaveLength(1);expect(f.effects).toHaveLength(1);expect((await f.invoke(j,'odwyn_action',{...args,approvalId:id})).success).toBe(false);return {realUpstreamEffects:1,concurrentReplayDenied:true,laterReplayDenied:true};
+}));
+caseTest('APPR-003 Payload binding',()=>probe('APPR-003',async f=>{
+ const resources=f.resources();f.grant(resources.map(x=>[x.r,x.action]));const j=f.job();
+ for(const x of resources){const args={resourceId:x.r.id,action:x.action,parameters:x.parameters},id=f.pending(await f.invoke(j,'odwyn_action',args));await f.approve(id);
+  for(const [key,changed] of Object.entries(x.parameters)){const value=typeof changed==='number'?changed+1:key==='commit'?'b'.repeat(40):key==='currency'?'EUR':'changed';expect((await f.invoke(j,'odwyn_action',{...args,parameters:{...x.parameters,[key]:value},approvalId:id})).success).toBe(false);}
+  expect((await f.invoke(j,'odwyn_action',{...args,resourceId:resources.find(v=>v!==x).r.id,approvalId:id})).success).toBe(false);
+  expect(f.effects).toHaveLength(0);expect((await f.invoke(j,'odwyn_action',{...args,approvalId:id})).success).toBe(true);f.effects.length=0;
+ }
+ return {allParameterSubstitutionsDenied:true,targetSubstitutionDenied:true,originalApprovedActionsSucceed:true,forbiddenEffects:0};
+}));
+caseTest('APPR-004 Expiry and revocation',()=>probe('APPR-004',async f=>{
+ const x=f.resources()[0];f.grant([[x.r,x.action]]);const j=f.job(),args={resourceId:x.r.id,action:x.action,parameters:x.parameters};
+ const revoked=f.pending(await f.invoke(j,'odwyn_action',args));await f.approve(revoked);expect((await f.request('/api/approvals/'+revoked+'/decision','POST',{decision:'deny'})).status).toBe(200);expect((await f.invoke(j,'odwyn_action',{...args,approvalId:revoked})).success).toBe(false);
+ const expiring=f.store.approvals.prepare(j,x.action,x.r.id,{tool:'odwyn_action',arguments:{...args,parameters:{...args.parameters,amountMinor:101}}},1);await new Promise(r=>setTimeout(r,5));expect((await f.request('/api/security/reauth','POST',{password,approvalId:expiring.id})).status).toBe(400);f.store.save();const {openStore}=await import('../../../store.js'),reopened=openStore(f.directory);try{expect(()=>reopened.approvals.reauth(revoked)).toThrow();expect(()=>reopened.approvals.reauth(expiring.id)).toThrow();}finally{reopened.close();}expect(f.effects).toHaveLength(0);return {expiredApprovalDenied:true,revokedApprovalDenied:true,expiryAndRevocationSurviveReload:true,forbiddenEffects:0};
+}));
+caseTest('APPR-005 Authenticated owner only',()=>probe('APPR-005',async f=>{
+ const x=f.resources()[0];f.grant([[x.r,x.action]]);const j=f.job(),id=f.pending(await f.invoke(j,'odwyn_action',{resourceId:x.r.id,action:x.action,parameters:x.parameters}));
+ for(const headers of [{authorization:'Bearer '+f.store.data.issueToken(j)},{authorization:'Basic '+btoa('owner:wrong')},{origin:'https://attacker.invalid'},{'x-owner-approved':'true'}])expect((await f.request('/api/approvals/'+id+'/decision','POST',{decision:'approve'},headers)).status).not.toBe(200);
+ expect((await f.request('/api/security/reauth','POST',{password:'wrong',approvalId:id})).status).not.toBe(200);const cookie=await f.approve(id);
+ const other=f.pending(await f.invoke(j,'odwyn_action',{resourceId:x.r.id,action:x.action,parameters:{...x.parameters,amountMinor:101}}));expect((await f.request('/api/approvals/'+other+'/decision','POST',{decision:'approve'},{cookie})).status).not.toBe(200);expect(f.effects).toHaveLength(0);return {actualOwnerHTTPBoundary:true,taskCannotApprove:true,csrfDenied:true,passwordRequired:true,stepUpSingleUseAndActionBound:true};
+}));
+caseTest('APPR-006 Recheck grants before execute',()=>probe('APPR-006',async f=>{
+ const x=f.resources()[0];f.grant([[x.r,x.action]]);const j=f.job(),args={resourceId:x.r.id,action:x.action,parameters:x.parameters},id=f.pending(await f.invoke(j,'odwyn_action',args));await f.approve(id);f.grant([]);expect((await f.invoke(j,'odwyn_action',{...args,approvalId:id})).success).toBe(false);
+ f.grant([[x.r,x.action]]);expect((await f.invoke(j,'odwyn_action',{...args,approvalId:id})).success).toBe(false);expect(f.effects).toHaveLength(0);return {revokedGrantDenied:true,staleRevisionDenied:true,forbiddenEffects:0};
+}));
+caseTest('AUD-001 Policy audit and sanitization',()=>probe('AUD-001',async f=>{
+ const x=f.resources()[0];f.grant([[x.r,x.action]]);const j=f.job(),args={resourceId:x.r.id,action:x.action,parameters:{...x.parameters,recipient:'safe-recipient'}},id=f.pending(await f.invoke(j,'odwyn_action',args));await f.approve(id);expect((await f.invoke(j,'odwyn_action',{...args,approvalId:id})).success).toBe(true);await f.invoke(j,'odwyn_action',{...args,approvalId:id});
+ const audit=await (await f.request('/api/audit')).json();expect(JSON.stringify(audit)).not.toContain('synthetic-upstream-key');expect(audit.events.some(e=>e.taskId===j.id&&e.agentId===f.a&&e.spaceId===f.space.id&&e.resourceId===x.r.id&&e.action===x.action)).toBe(true);expect(audit.events.some(e=>e.reason.includes('consumed'))).toBe(true);
+ expect((await f.request('/api/audit','DELETE',{}, {authorization:'Bearer '+f.store.data.issueToken(j)})).status).not.toBe(200);return {auditCorrelatesActualExecution:true,auditSecretsRemoved:true,agentAuditMutationDenied:true};
+}));
+async function ui(f,run){const {existsSync}=await import('node:fs');if(!existsSync(chromium.executablePath()))throw new Error('BLOCKED: disposable Chromium unavailable');let browser;try{browser=await chromium.launch();const page=await browser.newPage({httpCredentials:{username:'owner',password},viewport:{width:1100,height:900}});await page.goto(f.server.url.href);await page.locator('.home').waitFor();return await run(page); }finally{await browser?.close();}}
+caseTest('UX-001 Arbitrary name UX',()=>probe('UX-001',async f=>ui(f,async page=>{
+ for(const name of ['Garden Planner','Bookkeeper','Personal Artist']){
+  await page.locator('#agents-open').click();await page.locator('#add-agent').click();await page.locator('#agent-name-input').fill(name);await page.locator('#customize-save').click();await page.locator('#customize-dialog').waitFor({state:'hidden'});
+  const agent=f.store.state.agents.find(a=>a.customization.name===name&&a.id!==f.a);expect(agent.id).toBeDefined();await page.waitForFunction(id=>localStorage.getItem('odwyn-agent')===id&&!document.querySelector('#agent-workspace').inert,agent.id);
+  await page.locator('#agents-open').click();await page.locator(`[data-manage-agent="${agent.id}"] summary`).click();await page.locator(`[data-agent-action="customize"][data-agent-id="${agent.id}"]`).click();await page.getByRole('button',{name:'Access & Autonomy',exact:true}).click();
+  await page.locator('#access-space-name').fill('Space for '+name);await page.locator('#access-create-space').click();await page.locator('#access-resource-name').fill('Notes for '+name);await page.locator('#access-resource-type').selectOption('memory');await page.locator('#access-create-resource').click();
+  await page.locator('[data-access-action="memory.read"] select').selectOption('auto');await page.locator('#access-preview').click();await page.locator('#access-effective').filter({hasText:'Auto'}).waitFor();await page.locator('#access-save').click();await page.locator('#access-status').filter({hasText:'Saved'}).waitFor();
+  const access=await(await f.request('/api/agents/'+agent.id+'/access')).json();expect(access.grants.some(g=>g.action==='memory.read'&&g.mode==='auto')).toBe(true);expect(access.defaultSpaceId).toBeDefined();await page.locator('#security-dialog').press('Escape');await page.locator('#customize-dialog').press('Escape');
+ }
+ const last=f.store.state.agents.find(a=>a.customization.name==='Personal Artist'),expected=f.p.defaultSpace(last.id);await page.locator('#new-chat').click();await page.waitForFunction(id=>document.querySelector('#task-space').value===id,expected);expect(await page.locator('#task-space').inputValue()).toBe(expected);await page.screenshot({path:join(process.env.ODWYN_SECURITY_REPORT_DIR,'proof','UX-001.png')});return {realChromium:true,arbitraryAgentsConfigured:3,arbitrarySpacesConfigured:3,stableIdGrants:true,ownerTaskSpacePicker:true};
+})),60000);
+caseTest('UX-002 Effective permission preview',()=>probe('UX-002',async f=>ui(f,async page=>{
+ await page.locator('#agents-open').click();await page.locator('.agent-menu summary').first().click();await page.getByRole('button',{name:'Customize agent',exact:true}).first().click();await page.getByRole('button',{name:'Access & Autonomy',exact:true}).click();await page.locator('#access-space-name').fill('Permission laboratory');await page.locator('#access-create-space').click();await page.locator('#access-resource-name').fill('Selected notes');await page.locator('#access-create-resource').click();
+ await page.locator('[data-access-action="memory.read"] select').selectOption('auto');await page.locator('#access-deny-all').check();await page.locator('#access-preview').click();await page.locator('#access-effective').filter({hasText:'Explicit owner deny'}).waitFor();await page.locator('#access-save').click();await page.locator('#access-status').filter({hasText:'Saved'}).waitFor();
+ await page.locator('#access-simulate').click();await page.locator('#access-simulation').filter({hasText:'Explicit owner deny'}).waitFor();await page.locator('#access-pause-agent').click();await page.locator('#access-status').filter({hasText:'Automation paused'}).waitFor();expect(f.p.isPaused(f.a, f.space.id)).toBe(true);await page.setViewportSize({width:360,height:800});expect(await page.locator('#security-dialog').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);await page.screenshot({path:join(process.env.ODWYN_SECURITY_REPORT_DIR,'proof','UX-002.png')});return {realChromium:true,previewEqualsBackend:true,explicitDenyWins:true,emergencyPause:true,mobileFits:true};
+})),60000);
+
+caseTest('APPR-005 Authenticated owner only: privileged policy expansion needs a fresh password',()=>probe('APPR-005',async f=>{
+ const x=f.resources()[0],body={revision:f.p.revision,spaceIds:[f.space.id],grants:[{spaceId:f.space.id,resourceId:x.r.id,action:x.action,mode:'auto'}]};
+ expect((await f.request('/api/agents/'+f.a+'/access','PUT',body)).status).not.toBe(200);expect(f.p.access(f.a).grants).toHaveLength(0);
+ expect((await f.request('/api/agents/'+f.a+'/access','PUT',{...body,ownerPassword:'wrong'})).status).not.toBe(200);
+ expect((await f.request('/api/agents/'+f.a+'/access','PUT',{...body,ownerPassword:password})).status).toBe(200);return {privilegeExpansionReauthenticated:true};
+}));
+caseTest('AUD-001 Policy audit and sanitization: secret-bearing trusted events never persist plaintext',()=>probe('AUD-001',async f=>{
+ const x=f.resources()[0];f.grant([[x.r,x.action]]);const j=f.job();f.p.auditApproval(j,x.action,x.r.id,'deny','Synthetic upstream key synthetic-upstream-key');f.store.save();
+ const {readFileSync}=await import('node:fs');expect(readFileSync(join(f.directory,'odwyn.db-wal')).includes(Buffer.from('synthetic-upstream-key'))).toBe(false);return {auditAtRestRedacted:true};
+}));
+
+caseTest('APPR-001 High-risk blocked without approval: provider completion preserves owner review and explicit execution',()=>probe('APPR-001',async f=>{
+ const x=f.resources()[0];f.grant([[x.r,x.action]]);const j=f.job(),id=f.pending(await f.invoke(j,'odwyn_action',{resourceId:x.r.id,action:x.action,parameters:x.parameters}));
+ f.app.runtime.finish(j,'completed');expect(j.status).toBe('waiting');expect(f.effects).toHaveLength(0);await f.approve(id);
+ expect((await f.request('/api/approvals/'+id+'/execute','POST',{})).status).toBe(200);expect(f.effects).toHaveLength(1);expect(j.status).toBe('completed');
+ expect((await f.request('/api/approvals/'+id+'/execute','POST',{})).status).not.toBe(200);expect(f.effects).toHaveLength(1);return {nativeCompletionWaitsForOwner:true,explicitOwnerExecution:true,ownerExecutionReplayDenied:true};
+}));
+caseTest('APPR-002 Single-use approval: identical retry cannot mint another payable approval',()=>probe('APPR-002',async f=>{
+ const x=f.resources()[0];f.grant([[x.r,x.action]]);const j=f.job(),args={resourceId:x.r.id,action:x.action,parameters:x.parameters},id=f.pending(await f.invoke(j,'odwyn_action',args));
+ expect(f.pending(await f.invoke(j,'odwyn_action',args))).toBe(id);await f.approve(id);await f.invoke(j,'odwyn_action',{...args,approvalId:id});expect(f.pending(await f.invoke(j,'odwyn_action',args))).toBe(id);expect(f.effects).toHaveLength(1);return {duplicateProposalIdStable:true,duplicatePaymentEffects:0};
+}));
+
+caseTest('APPR-005 Authenticated owner only: real approval UI authenticates and executes its fixed preview',()=>probe('APPR-005',async f=>{
+ const x=f.resources()[0];f.grant([[x.r,x.action]]);const j=f.job(),id=f.pending(await f.invoke(j,'odwyn_action',{resourceId:x.r.id,action:x.action,parameters:x.parameters}));f.app.runtime.finish(j,'completed');
+ return ui(f,async page=>{await page.locator('#agents-open').click();await page.locator('.agent-menu summary').first().click();await page.getByRole('button',{name:'Customize agent',exact:true}).first().click();await page.getByRole('button',{name:'Access & Autonomy',exact:true}).click();await page.locator(`[data-approve="${id}"]`).click();await page.locator('#security-password').fill(password);await page.getByRole('button',{name:'Confirm exact request',exact:true}).click();await page.locator(`[data-execute="${id}"]`).click();await page.locator('#access-status').filter({hasText:'executed once'}).waitFor();expect(f.effects).toHaveLength(1);expect(await page.locator('#security-password').inputValue()).toBe('');expect(j.status).toBe('completed');return {actualApprovalUI:true,freshPasswordCleared:true,approvedUpstreamEffects:1};});
+}),60000);
+caseTest('APPR-006 Recheck grants before execute: emergency Space pause removes a real worker and persists',()=>probe('APPR-006',async()=>{
+ const {fixture}=await import('../phase2/fixture.js'),{openStore}=await import('../../../store.js');const f=await fixture();try{
+  expect((await f.exec('sleep 300 > /dev/null 2>&1 & echo synthetic-child-started')).exitCode).toBe(0);expect(f.worker().State.Running).toBe(true);
+  await f.runtime.pauseSecurity({scope:'space',id:f.job.spaceId,paused:true});expect(()=>f.worker()).toThrow();expect(f.job.status).toBe('interrupted');expect(()=>createJob(f.store.state,{agentId:f.job.agentId,spaceId:f.job.spaceId,prompt:'Paused task'})).toThrow();
+  const reopened=openStore(f.store.directory);try{expect(reopened.security.isPaused(f.job.agentId,f.job.spaceId)).toBe(true);}finally{reopened.close();}
+  return {realOSWorkerRemoved:true,descendantTerminatedWithWorker:true,newTaskDenied:true,pausePersisted:true};
+ }finally{await f.close();}
+}),60000);
+caseTest('APPR-004 Expiry and revocation: consumed approvals remain unusable after store reload',()=>probe('APPR-004',async f=>{
+ const x=f.resources()[0];f.grant([[x.r,x.action]]);const j=f.job(),args={resourceId:x.r.id,action:x.action,parameters:x.parameters},id=f.pending(await f.invoke(j,'odwyn_action',args));await f.approve(id);await f.invoke(j,'odwyn_action',{...args,approvalId:id});f.store.save();
+ const {openStore}=await import('../../../store.js'),reopened=openStore(f.directory);try{expect(reopened.approvals.list().find(a=>a.id===id).status).toBe('succeeded');await expect(reopened.approvals.execute(j,x.action,x.r.id,{tool:'odwyn_action',arguments:args},id,()=>{throw new Error('Replay reached execution');})).rejects.toThrow('consumed');}finally{reopened.close();}expect(f.effects).toHaveLength(1);return {persistedReceipt:true,restartReplayDenied:true,upstreamEffects:1};
+}));
+
+caseTest('APPR-001 High-risk blocked without approval: low-risk Ask writes only after bound approval',()=>probe('APPR-001',async f=>{
+ const r=f.p.createResource({spaceId:f.space.id,type:'memory',name:'Disposable notes'});f.grant([[r,'memory.write']],'ask');const j=f.job(),args={resourceId:r.id,note:'Synthetic approved memory'},id=f.pending(await f.invoke(j,'odwyn_remember',args));
+ const count=()=>{const db=new Database(join(f.directory,'odwyn.db'),{readonly:true});try{return db.query('SELECT COUNT(*) AS count FROM space_memory').get().count;}finally{db.close();}};expect(count()).toBe(0);await f.approve(id);expect((await f.invoke(j,'odwyn_remember',{...args,approvalId:id})).success).toBe(true);expect(count()).toBe(1);return {lowRiskAskSupported:true,unapprovedMemoryWrites:0,approvedMemoryWrites:1};
+}));
+caseTest('APPR-003 Payload binding: changed upstream target version fails without replay',()=>probe('APPR-003',async f=>{
+ const x=f.resources()[0];f.grant([[x.r,x.action]]);const j=f.job(),args={resourceId:x.r.id,action:x.action,parameters:{...x.parameters,expectedVersion:'stale-version'}},id=f.pending(await f.invoke(j,'odwyn_action',args));await f.approve(id);
+ expect((await f.invoke(j,'odwyn_action',{...args,approvalId:id})).success).toBe(false);expect(f.store.approvals.list().find(a=>a.id===id).status).toBe('indeterminate');expect((await f.invoke(j,'odwyn_action',{...args,approvalId:id})).success).toBe(false);expect(f.effects).toHaveLength(0);return {actualUpstreamPreconditionRejected:true,ambiguousFailureCannotReplay:true,forbiddenEffects:0};
+}));
+caseTest('UX-002 Effective permission preview: exact Deny overrides inherited Auto and all pause scopes resume',()=>probe('UX-002',async f=>{
+ const r=f.p.createResource({spaceId:f.space.id,type:'memory',name:'Inherited notes'});f.p.putAccess(f.a,{revision:f.p.revision,spaceIds:[f.space.id],defaultSpaceId:f.space.id,confirmWildcard:true,grants:[{spaceId:f.space.id,resourceId:'*',action:'memory.read',mode:'auto'},{spaceId:f.space.id,resourceId:r.id,action:'memory.read',mode:'deny',expiresAt:'2030-01-01T00:00:00.123Z'}]});
+ return ui(f,async page=>{await page.locator('#agents-open').click();await page.locator('.agent-menu summary').first().click();await page.getByRole('button',{name:'Customize agent',exact:true}).first().click();await page.getByRole('button',{name:'Access & Autonomy',exact:true}).click();await page.locator('#access-confirm-wildcard').check();await page.locator('#access-save').click();await page.locator('#security-password').fill(password);await page.getByRole('button',{name:'Confirm exact request',exact:true}).click();await page.locator('#access-status').filter({hasText:'Saved'}).waitFor();expect(f.p.simulate({agentId:f.a,spaceId:f.space.id,resourceId:r.id,action:'memory.read'}).mode).toBe('deny');expect(f.p.access(f.a).grants.find(g=>g.resourceId===r.id&&g.action==='memory.read').expiresAt).toBe('2030-01-01T00:00:00.123Z');
+ for(const [pause,resume] of [['access-pause-space','access-resume-space'],['access-pause-all','access-resume-all']]){await page.locator('#'+pause).click();await page.locator('#access-status').filter({hasText:'Automation paused'}).waitFor();expect(f.p.isPaused(f.a,f.space.id)).toBe(true);await page.locator('#'+resume).click();await page.locator('#access-status').filter({hasText:'resumed'}).waitFor();expect(f.p.isPaused(f.a,f.space.id)).toBe(false);}await page.locator('[data-access-action="memory.read"] select').selectOption('auto');await page.locator('#access-save').click();await page.locator('#security-password').fill(password);await page.getByRole('button',{name:'Confirm exact request',exact:true}).click();await page.locator('#access-status').filter({hasText:'Saved'}).waitFor();expect(f.p.simulate({agentId:f.a,spaceId:f.space.id,resourceId:r.id,action:'memory.read'}).mode).toBe('auto');await page.locator('#access-revoke').click();await page.locator('#security-password').fill(password);await page.getByRole('button',{name:'Confirm exact request',exact:true}).click();await page.locator('#access-status').filter({hasText:'revoked'}).waitFor();expect(f.p.simulate({agentId:f.a,spaceId:f.space.id,resourceId:r.id,action:'memory.read'}).mode).toBe('deny');expect(f.p.access(f.a).grants.find(g=>g.resourceId===r.id&&g.action==='memory.read').expiresAt).toBeNull();return {explicitResourceDenyWinsInheritedAuto:true,spaceAndGlobalPauseReversible:true,revokeOverridesWildcard:true,revokeDenyDoesNotExpire:true};});
+}),60000);
+
+caseTest('UX-001 Arbitrary name UX: default Space binds new routines and immutable conversations',()=>probe('UX-001',async f=>{
+ f.p.putAccess(f.a,{revision:f.p.revision,spaceIds:[f.space.id],defaultSpaceId:f.space.id,grants:[]});const routine=f.app.runtime.schedule({agentId:f.a,prompt:'Synthetic routine',at:new Date(Date.now()+60000).toISOString()});expect(routine.spaceId).toBe(f.space.id);
+ const j=createJob(f.store.state,{agentId:f.a,prompt:'Default Space task'});expect(j.spaceId).toBe(f.space.id);expect(()=>createJob(f.store.state,{agentId:f.a,conversationId:j.conversationId,spaceId:f.p.legacySpaceId,prompt:'Attempt changed Space'})).toThrow();return {routineDefaultSpaceBound:true,newTaskDefaultSpaceBound:true,conversationSpaceImmutable:true};
+}),60000);
+
+caseTest('APPR-006 Recheck grants before execute: emergency pause aborts a held real action HTTP request',()=>probe('APPR-006',async f=>{
+ let started,closed;const received=new Promise(r=>started=r),disconnected=new Promise(r=>closed=r),sink=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(req){started();await new Promise(r=>req.signal.addEventListener('abort',()=>{closed();r();},{once:true}));return new Response('aborted');}});
+ try{const x=f.resources()[0];f.grant([[x.r,x.action]]);const j=f.job(),args={resourceId:x.r.id,action:x.action,parameters:x.parameters},id=f.pending(await f.invoke(j,'odwyn_action',args));await f.approve(id);f.app.runtime.actionGateway.resolve=async()=>({url:new URL('http://127.0.0.1:'+sink.port+'/actions'),address:'127.0.0.1',family:4});const execution=f.invoke(j,'odwyn_action',{...args,approvalId:id});await received;expect(f.app.runtime.executions.size).toBe(1);const controller=[...f.app.runtime.executions][0].controller;await f.app.runtime.pauseSecurity({scope:'all',id:'all',paused:true});expect(controller.signal.aborted).toBe(true);const result=await Promise.race([execution,new Promise(r=>setTimeout(()=>r(null),1500))]);expect(result).not.toBeNull();expect(result.success).toBe(false);await Promise.race([disconnected,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Real upstream connection remained open')),1500))]);expect(f.effects).toHaveLength(0);return {realHTTPConnectionAborted:true,stoppedTaskCannotDisclose:true,forbiddenEffects:0};}finally{sink.stop(true);}
+}),30000);
+
+caseTest('APPR-003 Payload binding: connector substitution cannot reuse an approved envelope',()=>probe('APPR-003',async f=>{
+ const x=f.resources()[0];f.grant([[x.r,x.action]]);const j=f.job(),args={resourceId:x.r.id,action:x.action,parameters:x.parameters},id=f.pending(await f.invoke(j,'odwyn_action',args));await f.approve(id);
+ const other=f.store.connectors.create({spaceId:f.space.id,type:'action-gateway-v1',name:'Other disposable connector',endpoint:'https://other.invalid/actions',credential:'synthetic-other-key'});
+ // Adversarial disposable storage mutation: no owner resource-update route exists.
+ const db=new Database(join(f.directory,'odwyn.db'));try{const envelope=f.store.approvals.request(id);db.query('UPDATE resources SET metadata=? WHERE id=?').run(JSON.stringify({...x.r.metadata,connectionId:other.id}),x.r.id);db.query('UPDATE security_meta SET revision=? WHERE id=1').run(envelope.policyRevision);}finally{db.close();}
+ expect((await f.invoke(j,'odwyn_action',{...args,approvalId:id})).success).toBe(false);expect(f.effects).toHaveLength(0);return {connectorSubstitutionDenied:true,unchangedRevisionStillBindsConnector:true,forbiddenEffects:0};
+}));

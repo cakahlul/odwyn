@@ -114,7 +114,8 @@ test('Odwyn opens the previous database and renames only the default agent', () 
     expect(store.state.customization.name).toBe('Odwyn');
     expect(store.state.agents.map(a=>a.customization.name)).toEqual(['Odwyn','Pip']);
     expect(store.state.preferences).toBe(original.preferences);
-    expect(store.state.conversations).toEqual(original.conversations);
+    expect(store.state.conversations.map(({spaceId,...conversation})=>conversation)).toEqual(original.conversations);
+    expect(store.state.conversations.every(c=>c.spaceId===store.security.legacySpaceId)).toBe(true);
     expect(existsSync(join(dir,'odwyn.db'))).toBe(false);
     store.save(); store.close(); store = openStore(dir);
     expect(store.state.agents[0].id).toBe('primary');

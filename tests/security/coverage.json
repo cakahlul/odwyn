@@ -1,0 +1,292 @@
+[
+  {
+    "caseId": "BASE-001",
+    "testFile": "tests/security/phase0/baseline.test.js",
+    "testName": "BASE-001 execution entry-point inventory"
+  },
+  {
+    "caseId": "BASE-002",
+    "testFile": "tests/security/phase0/baseline.test.js",
+    "testName": "BASE-002 legacy shared boundary characterization"
+  },
+  {
+    "caseId": "BASE-003",
+    "testFile": "tests/security/phase0/baseline.test.js",
+    "testName": "BASE-003 repository regression browser smoke and dependency baseline"
+  },
+  {
+    "caseId": "AUTH-001",
+    "testFile": "tests/security/phase1/acceptance.test.js",
+    "testName": "AUTH-001 Zero-grant custom agent"
+  },
+  {
+    "caseId": "AUTH-002",
+    "testFile": "tests/security/phase1/acceptance.test.js",
+    "testName": "AUTH-002 Rename and provider independence"
+  },
+  {
+    "caseId": "AUTH-003",
+    "testFile": "tests/security/phase1/acceptance.test.js",
+    "testName": "AUTH-003 Owner-defined Spaces"
+  },
+  {
+    "caseId": "AUTH-004",
+    "testFile": "tests/security/phase1/acceptance.test.js",
+    "testName": "AUTH-004 Resource-scoped repository"
+  },
+  {
+    "caseId": "AUTH-005",
+    "testFile": "tests/security/phase1/acceptance.test.js",
+    "testName": "AUTH-005 Agent/Space spoofing"
+  },
+  {
+    "caseId": "AUTH-006",
+    "testFile": "tests/security/phase1/acceptance.test.js",
+    "testName": "AUTH-006 Explicit deny wins"
+  },
+  {
+    "caseId": "AUTH-007",
+    "testFile": "tests/security/phase1/acceptance.test.js",
+    "testName": "AUTH-007 Unknown capability"
+  },
+  {
+    "caseId": "AUTH-008",
+    "testFile": "tests/security/phase1/acceptance.test.js",
+    "testName": "AUTH-008 Live revocation"
+  },
+  {
+    "caseId": "AUTH-009",
+    "testFile": "tests/security/phase1/acceptance.test.js",
+    "testName": "AUTH-009 Self-grant prohibited"
+  },
+  {
+    "caseId": "AUTH-010",
+    "testFile": "tests/security/phase1/acceptance.test.js",
+    "testName": "AUTH-010 Policy stale revision"
+  },
+  {
+    "caseId": "AUTH-011",
+    "testFile": "tests/security/phase1/acceptance.test.js",
+    "testName": "AUTH-011 Mode never grants access"
+  },
+  {
+    "caseId": "AUTH-012",
+    "testFile": "tests/security/phase1/acceptance.test.js",
+    "testName": "AUTH-012 Property-based monotonicity"
+  },
+  {
+    "caseId": "EXEC-001",
+    "testFile": "tests/security/phase2/acceptance.test.js",
+    "testName": "EXEC-001 Host secrets cannot be read"
+  },
+  {
+    "caseId": "EXEC-002",
+    "testFile": "tests/security/phase2/acceptance.test.js",
+    "testName": "EXEC-002 Symlink and traversal"
+  },
+  {
+    "caseId": "EXEC-003",
+    "testFile": "tests/security/phase2/acceptance.test.js",
+    "testName": "EXEC-003 Network default deny"
+  },
+  {
+    "caseId": "EXEC-004",
+    "testFile": "tests/security/phase2/acceptance.test.js",
+    "testName": "EXEC-004 Metadata/internal networks"
+  },
+  {
+    "caseId": "EXEC-005",
+    "testFile": "tests/security/phase2/acceptance.test.js",
+    "testName": "EXEC-005 Resource budgets"
+  },
+  {
+    "caseId": "EXEC-006",
+    "testFile": "tests/security/phase2/acceptance.test.js",
+    "testName": "EXEC-006 Kill switch descendants"
+  },
+  {
+    "caseId": "EXEC-007",
+    "testFile": "tests/security/phase2/acceptance.test.js",
+    "testName": "EXEC-007 Scoped push permitted"
+  },
+  {
+    "caseId": "EXEC-008",
+    "testFile": "tests/security/phase2/acceptance.test.js",
+    "testName": "EXEC-008 Protected refs blocked"
+  },
+  {
+    "caseId": "EXEC-009",
+    "testFile": "tests/security/phase2/acceptance.test.js",
+    "testName": "EXEC-009 Dependency script exfiltration"
+  },
+  {
+    "caseId": "EXEC-010",
+    "testFile": "tests/security/phase2/acceptance.test.js",
+    "testName": "EXEC-010 No host socket or credentials"
+  },
+  {
+    "caseId": "DATA-001",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-001 Browser cookie isolation"
+  },
+  {
+    "caseId": "DATA-002",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-002 MCP server allowlist"
+  },
+  {
+    "caseId": "DATA-003",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-003 Credential redaction"
+  },
+  {
+    "caseId": "DATA-004",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-004 File ID and path isolation"
+  },
+  {
+    "caseId": "DATA-005",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-005 FTS/memory isolation"
+  },
+  {
+    "caseId": "DATA-006",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-006 Room privilege intersection"
+  },
+  {
+    "caseId": "DATA-007",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-007 Workflow agent escalation"
+  },
+  {
+    "caseId": "DATA-008",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-008 Routines and recovery context"
+  },
+  {
+    "caseId": "DATA-009",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-009 Search and file API direct access"
+  },
+  {
+    "caseId": "DATA-010",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-010 Explicit cross-Space export"
+  },
+  {
+    "caseId": "DATA-011",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-011 Session switch defense"
+  },
+  {
+    "caseId": "APPR-001",
+    "testFile": "tests/security/phase4/acceptance.test.js",
+    "testName": "APPR-001 High-risk blocked without approval"
+  },
+  {
+    "caseId": "APPR-002",
+    "testFile": "tests/security/phase4/acceptance.test.js",
+    "testName": "APPR-002 Single-use approval"
+  },
+  {
+    "caseId": "APPR-003",
+    "testFile": "tests/security/phase4/acceptance.test.js",
+    "testName": "APPR-003 Payload binding"
+  },
+  {
+    "caseId": "APPR-004",
+    "testFile": "tests/security/phase4/acceptance.test.js",
+    "testName": "APPR-004 Expiry and revocation"
+  },
+  {
+    "caseId": "APPR-005",
+    "testFile": "tests/security/phase4/acceptance.test.js",
+    "testName": "APPR-005 Authenticated owner only"
+  },
+  {
+    "caseId": "APPR-006",
+    "testFile": "tests/security/phase4/acceptance.test.js",
+    "testName": "APPR-006 Recheck grants before execute"
+  },
+  {
+    "caseId": "UX-001",
+    "testFile": "tests/security/phase4/acceptance.test.js",
+    "testName": "UX-001 Arbitrary name UX"
+  },
+  {
+    "caseId": "UX-002",
+    "testFile": "tests/security/phase4/acceptance.test.js",
+    "testName": "UX-002 Effective permission preview"
+  },
+  {
+    "caseId": "AUD-001",
+    "testFile": "tests/security/phase4/acceptance.test.js",
+    "testName": "AUD-001 Policy audit and sanitization"
+  },
+  {
+    "caseId": "MIG-001",
+    "testFile": "tests/security/phase5/acceptance.test.js",
+    "testName": "MIG-001 Legacy settings fail closed"
+  },
+  {
+    "caseId": "MIG-002",
+    "testFile": "tests/security/phase5/acceptance.test.js",
+    "testName": "MIG-002 Migration interruption and rollback"
+  },
+  {
+    "caseId": "REG-001",
+    "testFile": "tests/security/phase5/acceptance.test.js",
+    "testName": "REG-001 Full existing app regression"
+  },
+  {
+    "caseId": "E2E-001",
+    "testFile": "tests/security/phase5/acceptance.test.js",
+    "testName": "E2E-001 Real runtime 3-space journey"
+  },
+  {
+    "caseId": "E2E-002",
+    "testFile": "tests/security/phase5/acceptance.test.js",
+    "testName": "E2E-002 Real sandbox and upstream deny"
+  },
+  {
+    "caseId": "ATTACK-001",
+    "testFile": "tests/security/phase5/acceptance.test.js",
+    "testName": "ATTACK-001 Prompt injection across tools"
+  },
+  {
+    "caseId": "ATTACK-002",
+    "testFile": "tests/security/phase5/acceptance.test.js",
+    "testName": "ATTACK-002 Tool output spoofing"
+  },
+  {
+    "caseId": "REC-001",
+    "testFile": "tests/security/phase5/acceptance.test.js",
+    "testName": "REC-001 Restart + retry double-execution"
+  },
+  {
+    "caseId": "OPS-001",
+    "testFile": "tests/security/phase5/acceptance.test.js",
+    "testName": "OPS-001 Disable integration emergency"
+  },
+  {
+    "caseId": "OPS-002",
+    "testFile": "tests/security/phase5/acceptance.test.js",
+    "testName": "OPS-002 Production-mode fail closed"
+  },
+  {
+    "caseId": "AUTH-008",
+    "testFile": "tests/security/phase1/gateways.test.js",
+    "testName": "AUTH-008 repository revocation interrupts real HTTP and MCP reads before disclosure"
+  },
+  {
+    "caseId": "DATA-001",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-001 Browser cookie isolation: broker and kernel deny alternate egress"
+  },
+  {
+    "caseId": "OPS-002",
+    "testFile": "tests/security/phase5/setup.test.js",
+    "testName": "OPS-002 Production-mode fail closed: installer verifies actual disposable workers before configuration"
+  }
+]

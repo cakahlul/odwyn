@@ -1,0 +1,29 @@
+# Phase 3 implementation and verification plan
+
+Dependency: cumulative Phase 2 PASS, `20261013T024903Z-1267`, exit 0. Scope is DATA-001–011, with no persona-based permissions, production credentials, paid operations or deployment.
+
+1. Read both security contracts and the stable registry, inspect existing store/runtime/provider/browser/workflow/HTTP boundaries. Keep all 55 registry IDs and supplied verifier unchanged.
+2. Write runnable disposable Bun cases for every DATA ID and map them in `tests/security/coverage.json`. Initial execution was genuinely red: ten failures and one pass, preserved in `artifacts/security/phase3-red/phase3.junit.xml`. Required isolation cases need real Chromium and the Phase 2 Linux worker; unavailable infrastructure produces BLOCKED, never skips.
+3. Reuse SQLite for immutable classification, resource provenance, scoped notes, bounded owner exports, workflow output origins, Room proposal origins and hashed expiring task tokens. Apply classification before FTS lookup and provider context construction. Recheck current grants when sharing derived output and on recovery.
+4. Reuse native crypto and the installed MCP SDK for reviewed server-side connector brokerage. Encrypt connector/provider keys with a separate private key; bind ciphertext to its principal/configuration. Keep tokens outside workers and browser profiles, and redact known secrets before model/event disclosure. Unsupported manifests and alternate transports deny.
+5. Reuse existing Browser/proxy code for private task/Space/resource profiles and pinned, exact read-only destinations. Block script/service-worker/socket/write paths. Keep screenshots unavailable because text redaction cannot sanitize pixels. Shared owner browser downloads remain classified Legacy Workspace.
+6. Export new-Space files only from their task's actual isolated workspace, using non-following bounded reads. Require precise file grants and check known credential bytes before persisting artifacts. Preserve the explicitly granted Legacy basename path for compatibility.
+7. Add regression probes for provider-controlled message IDs, note read/write separation, in-flight principal changes, native provider encryption/reload, real credentialed Git, credential artifact quarantine, bounded cross-Space workflow exports, shared browser attribution, visual output and legacy key migration/key loss.
+8. Run the cumulative Phase 0–3 gate on frozen executable source. It must verify real JUnit for all 36 mandatory IDs, all supplementary tests, structured proof/execution records and the existing 90 repository regressions. Preserve failed attempts. Record sanitized upstream/kernel observations and rollback in PHASE3_REPORT.md.
+
+## Interface and compatibility decisions
+
+- Owner-only Basic-authenticated, same-origin administration: `GET /api/security/connectors`, `POST /api/security/connectors`, `DELETE /api/security/connectors/:id`; `POST /api/security/exports`, `DELETE /api/security/exports/:id`. Task bearer tokens cannot administer policy or read `/api/state`.
+- Connector creation: `{spaceId,type,name,endpoint,credential}`; reviewed `mcp-document-v1` or `git-https-v1`, exact credential-free HTTPS endpoint. Public connector records omit credentials and endpoint authentication. Connector resources bind `{connectionId,upstreamId}`; Git resources bind `{endpoint,connectionId}`.
+- `odwyn_mcp`: `{resourceId,operation:'document.read'}` only. The broker fixes the upstream document ID from owner metadata, invokes only `read_document`, and denies native/dynamic tool catalogs, redirects and alternate SSE transports.
+- Browser resources: `{readUrls:[exact HTTPS URLs]}`. `odwyn_browser` accepts resource ID plus read/navigate and a reviewed URL. No agent-selected credentials/headers, broad origin permission, uploads, downloads, arbitrary UI or screenshot export.
+- File resources: `{path:basename,workspaceId:isolatedWorkspaceResourceId}` for new Spaces. SQL records bind stored files to their immutable source task/Space/resource. Explicit owner uploads can select a Space; unlabelled legacy files migrate to Legacy Workspace.
+- Owner bounded export: `{messageId,destinationSpaceId,fields,purpose}` from a JSON message containing named text fields; maximum ten fields and 4,000 characters each. `odwyn_export_read` accepts only `{exportId}`. New source text or revocation invalidates the export and dependent disclosures; raw unrelated workflow outputs are never automatically attached.
+- Task tokens are server-issued opaque random credentials, stored only as hashes with a 15-minute expiry and current task-liveness checks. They permit only scoped GET history/file APIs. There is no model tool for obtaining a token or escalating to owner authority.
+- Provider configurations retain their existing public shape and behavior. Native API keys exist only in trusted server memory and encrypted provider-credential records. Provider-managed OAuth files remain outside workers; their host storage hardening is Phase 5 work.
+
+## Rollout and rollback
+
+New grants remain empty. Existing data stays in place; an atomic schema migration creates a private WAL-complete `pre-data-security-*` SQLite backup. Restore encrypted databases with the matching `broker.key`; a missing or unreadable key fails closed rather than generating a replacement. Offline rollback restores the pre-migration backup with the matching earlier application. Historical plaintext rollback backups require protected offline retention; do not silently delete the owner's recovery copy.
+
+No Phase 4/5 capabilities or release verdict follow from Phase 3. Native Chromium profile/network probes are separate from the proven Linux worker kernel boundary. Full host-process browser containment, rootless Linux, CI execution and live provider/connector checks are not established by this workstation run.

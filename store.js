@@ -1,3 +1,8 @@
+import {securityBackup,openMigration} from './security/migration.js';
+import { openPolicy, statePolicy } from './security/policy.js';
+import {openApprovals} from './security/approvals.js';
+import {openData,stateData} from './security/data.js';
+import {openConnectors} from './security/connectors.js';
 import { defaults, ownerPreferenceKeys } from './public/profile.js';
 import { Database } from 'bun:sqlite';
 import { mkdirSync, chmodSync, existsSync } from 'node:fs';
@@ -23,13 +28,22 @@ export function openStore(directory) {
   for (const item of [...state.conversations, ...state.jobs, ...state.schedules]) item.agentId ||= state.agents[0].id;
   for (const conversation of state.conversations) for (const message of conversation.messages) message.agentId ||= state.jobs.find(j => j.id === message.jobId)?.agentId || conversation.agentId;
   db.exec('CREATE VIRTUAL TABLE IF NOT EXISTS chat_chunks USING fts5(messageId UNINDEXED, conversationId UNINDEXED, text)');
+  let security;
+  try { security=openPolicy(db,state,directory); } catch(error) { db.close(); throw error; }
+  if(!db.query("SELECT name FROM sqlite_master WHERE name='classified_messages'").get()){
+    securityBackup(db,directory,'pre-data-security-');
+  }
+  const plaintextProviderKeys=[state.provider,state.globalProvider,...state.agents.map(a=>a.provider)].some(c=>c?.apiKey);
+  if(!db.query("SELECT name FROM sqlite_master WHERE name='approval_requests'").get()){securityBackup(db,directory,'pre-approval-security-');}
+  let data,connectors,approvals,migration;try{db.transaction(()=>{data=openData(db,state,security);connectors=openConnectors(db,security,directory);connectors.hydrateProviders(state);approvals=openApprovals(db,security,connectors);migration=openMigration(db,state,directory);security.configureRedactor(text=>connectors.redact(text));})();}catch(error){db.close();throw error;}
   const indexed = new Map();
   const removeChunks = db.query('DELETE FROM chat_chunks WHERE messageId = ?');
   const insertChunk = db.query('INSERT INTO chat_chunks(messageId, conversationId, text) VALUES (?, ?, ?)');
   const query = db.query('INSERT INTO state VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET value=excluded.value');
   const save = db.transaction(() => {
+    data.sync();
     state.agents[0].customization = state.customization;
-    query.run(JSON.stringify(state));
+    query.run(connectors.serialize(state));
     for (const conversation of state.conversations) for (const message of conversation.messages) {
       if (indexed.get(message.id) === message.text) continue;
       removeChunks.run(message.id);
@@ -37,16 +51,17 @@ export function openStore(directory) {
       indexed.set(message.id, message.text);
     }
   });
-  const search = (text, agentId) => {
+  const search = (text, agentId, spaceId, task) => {
     // ponytail: lexical search; add semantic retrieval only if keyword recall proves insufficient.
     const terms = text.match(/[\p{L}\p{N}_]+/gu)?.slice(0, 12).map(word => `"${word}"`).join(' OR ');
     if (!terms) return [];
-    const conversations = agentId ? state.conversations.filter(c => c.kind === 'room' ? c.memberIds.includes(agentId) : c.agentId === agentId) : state.conversations;
-    return db.query("SELECT messageId, conversationId, text FROM chat_chunks WHERE chat_chunks MATCH ? AND conversationId IN (SELECT json_extract(value, '$.id') FROM json_each(?)) ORDER BY rank LIMIT 5").all(terms, JSON.stringify(conversations.map(c => ({ id:c.id })))).map(chunk => {
+    const conversations = state.conversations.filter(c => (!spaceId || c.spaceId === spaceId) && (!agentId || (c.kind === 'room' ? c.memberIds.includes(agentId) : c.agentId === agentId)));
+    const authorized=conversations.flatMap(c=>c.messages).filter(m=>!task||data.readable(task,m.id)).map(m=>m.id);
+    return db.query("SELECT messageId, conversationId, text FROM chat_chunks WHERE chat_chunks MATCH ? AND messageId IN (SELECT value FROM json_each(?)) ORDER BY rank LIMIT 5").all(terms, JSON.stringify(authorized)).map(chunk => {
       const conversation = state.conversations.find(c => c.id === chunk.conversationId);
       const message = conversation?.messages.find(m => m.id === chunk.messageId);
       return { ...chunk, title: conversation?.title, role: message?.role, at: message?.at };
-    });
+    }).filter(chunk=>!task||data.readable(task,chunk.messageId));
   };
   const deleteConversation = db.transaction(id => {
     const conversation = state.conversations.find(c=>c.id===id);
@@ -62,7 +77,8 @@ export function openStore(directory) {
       save();
     } catch(error) { state.conversations = conversations; state.jobs = jobs; state.workflowRuns = workflowRuns; throw error; }
   });
-  return { directory, state, save, search, deleteConversation, close: () => db.close() };
+  if(plaintextProviderKeys){save();db.exec('PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE)');}
+  return { directory, state, security, data, connectors, approvals, migration, save, search, deleteConversation, close: () => db.close() };
 }
 
 export function findAgent(state, id = state.agents[0].id) {
@@ -113,7 +129,8 @@ function roomDetails(state, input) {
 
 export function createRoom(state, input) {
   const details = roomDetails(state,input);
-  const room = {id:randomUUID(),kind:'room',...details,agentId:details.memberIds[0],createdAt:new Date().toISOString(),messages:[]};
+  const spaceId=input.spaceId??state[statePolicy]?.legacySpaceId;for(const id of details.memberIds)state[statePolicy]?.visible(id,spaceId);
+  const room = {id:randomUUID(),kind:'room',spaceId,...details,agentId:details.memberIds[0],createdAt:new Date().toISOString(),messages:[]};
   state.conversations.unshift(room); return room;
 }
 
@@ -139,12 +156,17 @@ export function createJob(state, input, recordMessage = true) {
   if (input.conversationId && !conversation) throw new Error('Conversation not found.');
   const agent = findAgent(state, input.agentId ?? conversation?.lastAgentId ?? conversation?.agentId);
   if (conversation?.kind === 'room' && !conversation.memberIds.includes(agent.id)) throw new Error('This agent is not in the room.');
+  const policy=state[statePolicy], spaceId=input.spaceId ?? conversation?.spaceId ?? policy?.defaultSpace(agent.id);
+  if (conversation && input.spaceId && input.spaceId !== conversation.spaceId) throw new Error('Conversation Space cannot change.');
+  state[stateData]?.sync();for(const id of attachments)state[stateData]?.assertFileSpace(id,spaceId);
+  const taskId=randomUUID(), securityContext=policy?.bind(taskId,agent.id,spaceId);
   const now = new Date().toISOString();
   if (!conversation) {
-    conversation = { id: randomUUID(), agentId: agent.id, title: prompt.slice(0, 70), threadId: null, createdAt: now, messages: [] };
+    conversation = { id: randomUUID(), agentId: agent.id, spaceId, title: prompt.slice(0, 70), threadId: null, createdAt: now, messages: [] };
     state.conversations.unshift(conversation);
   }
-  const job = { id: randomUUID(), agentId: agent.id, conversationId: conversation.id, prompt, attachments, interactionMode, status: 'queued', createdAt: now, events: [], toolCount: 0, files: [], scheduleId: input.scheduleId || null };
+  const job = { id: taskId, agentId: agent.id, spaceId, conversationId: conversation.id, prompt, attachments, interactionMode, status: 'queued', createdAt: now, events: [], toolCount: 0, files: [], scheduleId: input.scheduleId || null };
+  if(securityContext) Object.defineProperty(job,'securityContext',{value:securityContext,enumerable:true});
   conversation.lastAgentId = agent.id;
   if (recordMessage) conversation.messages.push({ id: randomUUID(), agentId:agent.id, role: 'user', text: prompt, attachments, at: now, jobId: job.id });
   state.jobs.unshift(job);
@@ -169,7 +191,7 @@ export function enqueueSchedules(state, now = new Date(), submit = input=>create
   for (const schedule of state.schedules) {
     if (!schedule.enabled || new Date(schedule.nextAt) > now) continue;
     if (state.jobs.some(j => j.scheduleId === schedule.id && ['queued','running','waiting','takeover','stopping','interrupted'].includes(j.status))) continue;
-    try { submit({ prompt: schedule.prompt, agentId: schedule.agentId, interactionMode: schedule.interactionMode, scheduleId: schedule.id }); delete schedule.error; }
+    try { submit({ prompt: schedule.prompt, agentId: schedule.agentId, spaceId:schedule.spaceId, interactionMode: schedule.interactionMode, scheduleId: schedule.id }); delete schedule.error; }
     catch(error) { schedule.enabled=false; schedule.error=error.message; count++; continue; }
     schedule.lastAt = now.toISOString();
     if (schedule.intervalMinutes) schedule.nextAt = new Date(now.valueOf() + schedule.intervalMinutes * 60_000).toISOString();

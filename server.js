@@ -1,6 +1,7 @@
 import { resolve, join } from 'node:path';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
+import {approvalActions} from './security/policy.js';
 import { authorize, allowedOrigin, textInput } from './security.js';
 import { openStore, findAgent, deleteAgent, createRoom, updateRoom } from './store.js';
 import { AIProvider, validateProvider, publicProvider, providerModels } from './providers.js';
@@ -42,9 +43,16 @@ export function createApp(options = {}) {
   let runtime;
   const browser = options.browser || new Browser({ directory, executablePath: (process.env.ODWYN_BROWSER_EXECUTABLE ?? process.env.SIDEKICK_BROWSER_EXECUTABLE) || undefined, headless: (process.env.ODWYN_HEADLESS ?? process.env.SIDEKICK_HEADLESS) !== 'false',
     findFile: id => store.state.files.find(file => file.id === id),
-    onFile: file => { store.state.files.push(file); const job = store.state.jobs.find(job => job.id === file.jobId); if (job) job.files.push(file.id); runtime.changed(); },
+    onFile: file => {
+      const path=join(directory,'files',file.id);
+      try { store.connectors.assertNoSecret(readFileSync(path)); } catch { rmSync(path,{force:true}); return; }
+      file.spaceId=store.security.legacySpaceId;
+      const job=store.state.jobs.find(job=>job.id===file.jobId);
+      if(job&&store.security.identity(job).spaceId===file.spaceId)job.files.push(file.id);else file.jobId=null;
+      store.state.files.push(file);runtime.changed();
+    },
   });
-  runtime = new Runtime({ store, codex, browser, workspace, model: store.state.provider.model });
+  runtime = new Runtime({ store, codex, browser, workspace, model: store.state.provider.model,execution:options.execution||{image:process.env.ODWYN_SANDBOX_IMAGE,snapshotRoot:process.env.ODWYN_SANDBOX_SNAPSHOTS},browserExecution:options.browserExecution||{image:process.env.ODWYN_BROWSER_IMAGE} });
   const logins = new Map();
   function watchLogin(agent, provider) {
     provider.on('notification', ({ method, params }) => {
@@ -108,10 +116,23 @@ export function createApp(options = {}) {
     catch { throw new Error('Invalid JSON request.'); }
   }
 
+  function freshOwner(value){const supplied=Buffer.from(typeof value==='string'?value:''),expected=Buffer.from(password);if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected))throw new Error('Fresh owner password required.');}
   const app = {
     runtime, browser, codex,
     async fetch(req, server) {
       const url = new URL(req.url); const pathname = url.pathname;
+      if(req.headers.get('authorization')?.startsWith('Bearer ')){
+        try{
+          if(req.method!=='GET')throw new Error('Task administration denied.');
+          const job=store.data.authenticate(req.headers.get('authorization').slice(7));
+          const file=pathname.match(/^\/api\/files\/([a-f0-9-]{36})$/);
+          if(file){const saved=store.data.file(job,file[1]);const bytes=Bun.file(join(directory,'files',saved.id));if(!await bytes.exists()||bytes.size>20*1024*1024)throw new Error('Task file unavailable.');store.connectors.assertNoSecret(Buffer.from(await bytes.arrayBuffer()));return new Response(bytes,{headers:{...headers,'content-type':'application/octet-stream','content-disposition':`attachment; filename*=UTF-8''${encodeURIComponent(saved.name)}`}});}
+          const history=pathname.match(/^\/api\/conversations\/([a-f0-9-]{36})$/);
+          if(history)return response({messages:store.data.history(job,history[1])});
+          if(pathname === '/api/search'){const resourceId=url.searchParams.get('resourceId');store.security.authorize(job,'memory.read',resourceId);return response({matches:store.search(textInput(url.searchParams.get('query'),500),job.agentId,job.spaceId,job)});}
+          throw new Error('Task endpoint denied.');
+        }catch{return response({error:'Task access denied.'},req.method==='GET'?403:401);}
+      }
       if (!authorize(req.headers.get('authorization'), user, password)) {
         if (rateLimited(`auth:${server?.requestIP(req)?.address || 'local'}`, 20)) return response({ error: 'Too many sign-in attempts. Try again in one minute.' }, 429);
         return response({ error: 'Authentication required.' }, 401, { 'www-authenticate': 'Basic realm="Odwyn", charset="UTF-8"' });
@@ -121,16 +142,57 @@ export function createApp(options = {}) {
         if (rateLimited('writes', 120)) return response({ error: 'Too many requests. Try again shortly.' }, 429);
       }
       try {
+        if(pathname === '/api/security/reauth' && req.method==='POST'){
+          const body=await json(req);if(Object.keys(body).some(k=>!['password','approvalId'].includes(k)))throw new Error('Invalid reauthentication fields.');
+          if(rateLimited('stepup',20))return response({error:'Too many reauthentication attempts.'},429);
+          const supplied=Buffer.from(typeof body.password==='string'?body.password:''),expected=Buffer.from(password);
+          if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected))return response({error:'Fresh owner authentication required.'},403);
+          const token=store.approvals.reauth(body.approvalId);return response({ok:true},200,{'set-cookie':`odwyn_stepup=${token}; HttpOnly; SameSite=Strict; Path=/api/approvals; Max-Age=60${url.protocol==='https:'?'; Secure':''}`});
+        }
+        if(pathname === '/api/approvals' && req.method==='GET')return response({approvals:store.approvals.list()});
+        const executeApprovalMatch=pathname.match(/^\/api\/approvals\/([a-f0-9-]{36})\/execute$/);
+        if(executeApprovalMatch&&req.method==='POST'){const body=await json(req);if(Object.keys(body).length)throw new Error('Execution uses only the immutable server envelope.');return response(await runtime.executeApproved(executeApprovalMatch[1]));}
+        const approvalMatch=pathname.match(/^\/api\/approvals\/([a-f0-9-]{36})\/decision$/);
+        if(approvalMatch&&req.method==='POST'){const body=await json(req);if(Object.keys(body).some(k=>k!=='decision'))throw new Error('Only an approval decision is accepted.');const token=req.headers.get('cookie')?.match(/(?:^|;\s*)odwyn_stepup=([A-Za-z0-9_-]+)/)?.[1];const result=store.approvals.decision(approvalMatch[1],body.decision,token);runtime.changed();return response(result);}
+        if(pathname === '/api/security/migration' && req.method==='GET')return response(store.migration.report());
+        if(pathname === '/api/security/migration' && req.method==='POST')return response(store.migration.review(await json(req)));
+        if(pathname === '/api/security/pause' && req.method==='POST')return response(await runtime.pauseSecurity(await json(req)));
+        if(pathname === '/api/security/presets'&&req.method==='GET')return response(store.security.presets());
+        if(pathname === '/api/security/presets'&&req.method==='PUT')return response(store.security.putPreset(await json(req)));
+        if(pathname === '/api/audit'&&req.method==='GET')return response({events:store.connectors.sanitize(store.security.audit())});
+        if(pathname === '/api/resources'&&req.method==='GET')return response(store.connectors.sanitize(store.security.listResources()));
+        if(pathname === '/api/connectors' && req.method==='GET')return response({connectors:store.connectors.list()});
+        if(pathname === '/api/connectors' && req.method==='POST'){const {ownerPassword,...body}=await json(req);freshOwner(ownerPassword);return response(store.connectors.create(body),201);}
+        const connectionMatch=pathname.match(/^\/api\/connectors\/([a-f0-9-]{36})$/);
+        if(connectionMatch && req.method==='DELETE'){store.connectors.disable(connectionMatch[1]);runtime.changed();return response({ok:true,alert:'Connection disabled; held results and subsequent calls are denied at the next safe boundary.'});}
+        if(pathname === '/api/data/exports' && req.method==='POST')return response(store.data.export(await json(req)),201);
+        const exportMatch=pathname.match(/^\/api\/data\/exports\/([a-f0-9-]{36})$/);
+        if(exportMatch && req.method==='DELETE'){store.data.revokeExport(exportMatch[1]);return response({ok:true});}
         if (pathname === '/api/images' && req.method === 'GET') {
           if (req.headers.get('sec-fetch-site') === 'cross-site') return response({ error:'Request origin rejected.' }, 403);
           if (rateLimited('images', 120)) return response({ error:'Too many image requests.' }, 429);
           const image = await fetchImage(url.searchParams.get('url'));
           return new Response(image.body, { headers:{ ...headers, 'content-type':image.type, 'cache-control':'private, max-age=3600' } });
         }
+        if (pathname === '/api/capabilities' && req.method === 'GET') return response({schemaVersion:1,capabilities:store.security.catalog()});
+        if (pathname === '/api/spaces') {
+          if(req.method==='GET')return response(store.security.listSpaces());
+          if(req.method==='POST'){const result=store.security.createSpace(await json(req));runtime.changed();return response(result,201);}
+          return response({error:'Method not allowed.'},405);
+        }
+        if (pathname === '/api/resources' && req.method === 'POST') {const result=store.security.createResource(await json(req));runtime.changed();return response(result,201);}
+        if (pathname === '/api/policy/preview' && req.method==='POST'){const body=await json(req);if(Object.keys(body).some(k=>!['agentId','access'].includes(k)))throw new Error('Invalid preview.');return response(store.security.preview(body.agentId,body.access));}
+        if (pathname === '/api/policy/simulate' && req.method === 'POST') return response(store.security.simulate(await json(req)));
+        const accessMatch=pathname.match(/^\/api\/agents\/([a-f0-9-]{36})\/access$/);
+        if(accessMatch){
+          if(req.method==='GET')return response(store.security.access(accessMatch[1]));
+          if(req.method==='PUT'){const {ownerPassword,...body}=await json(req);if(body.confirmWildcard===true||body.grants?.some(g=>approvalActions.includes(g.action)&&g.mode!=='deny'))freshOwner(ownerPassword);const result=store.security.putAccess(accessMatch[1],body);runtime.changed();return response(result);}
+          return response({error:'Method not allowed.'},405);
+        }
         if (pathname === '/api/state' && req.method === 'GET') {
           if (url.searchParams.get('revision') === String(runtime.revision)) return new Response(null, { status: 204, headers });
           // ponytail: a JSON state row suits one owner; use indexed tables when history gets large.
-          return response({ revision: runtime.revision, ...store.state, agents:store.state.agents.map(agent => ({ ...agent, provider:publicProvider(agent.provider), runtime:{ ...runtime.accounts.get(agent.id), login:logins.get(agent.id) || null } })), globalProvider:publicProvider(store.state.globalProvider), globalRuntime:{...runtime.accounts.get(globalConnection().id),login:logins.get(globalConnection().id) || null}, provider: publicProvider(store.state.provider), runtime: { account: runtime.account, connectionError: runtime.connectionError, model: store.state.provider.model, activeJobId: runtime.active?.id || null, takeover: runtime.takeover, browserOpen: !!browser.context, rateLimits: runtime.rateLimits || null, login:logins.get(store.state.agents[0].id) || null } });
+          return response({ revision: runtime.revision, ...store.state, security:{spaces:store.security.listSpaces(),memberships:Object.fromEntries(store.state.agents.map(a=>[a.id,store.security.access(a.id).spaceIds])),defaults:Object.fromEntries(store.state.agents.map(a=>[a.id,store.security.defaultSpace(a.id)]))}, agents:store.state.agents.map(agent => ({ ...agent, provider:publicProvider(agent.provider), runtime:{ ...runtime.accounts.get(agent.id), login:logins.get(agent.id) || null } })), globalProvider:publicProvider(store.state.globalProvider), globalRuntime:{...runtime.accounts.get(globalConnection().id),login:logins.get(globalConnection().id) || null}, provider: publicProvider(store.state.provider), runtime: { account: runtime.account, connectionError: runtime.connectionError, model: store.state.provider.model, activeJobId: runtime.active?.id || null, takeover: runtime.takeover, browserOpen: !!browser.context, rateLimits: runtime.rateLimits || null, login:logins.get(store.state.agents[0].id) || null } });
         }
         // JSON escaping expands file contents; importSkill enforces the 30 KB source limit.
         if (pathname === '/api/skills/import' && req.method === 'POST') return response(importSkill((await json(req,200_000)).source));
@@ -305,12 +367,14 @@ export function createApp(options = {}) {
         }
         if (pathname === '/api/files' && req.method === 'POST') {
           const form = await req.formData(); const file = form.get('file');
+          const spaceId=form.get('spaceId')||store.security.legacySpaceId;if(!store.security.listSpaces().some(s=>s.id===spaceId))throw new Error('Choose an owner Space.');
           if (!(file instanceof File) || !file.size || file.size > 20 * 1024 * 1024) throw new Error('Choose a file up to 20 MB.');
           const id = randomUUID(); const name = file.name.replace(/[\x00-\x1f\/\\]/g, '_').slice(0, 180) || 'upload';
           mkdirSync(join(directory, 'files'), { recursive: true, mode: 0o700 });
           const bytes = Buffer.from(await file.arrayBuffer());
+          store.connectors.assertNoSecret(bytes);
           writeFileSync(join(directory, 'files', id), bytes, { mode: 0o600 });
-          const saved = { id, name, kind: 'upload', mimeType:imageMime(bytes) || 'application/octet-stream', size:bytes.length, createdAt: new Date().toISOString() }; store.state.files.push(saved); runtime.changed(); return response(saved, 201);
+          const saved = { id, name, spaceId, kind: 'upload', mimeType:imageMime(bytes) || 'application/octet-stream', size:bytes.length, createdAt: new Date().toISOString() }; store.state.files.push(saved); runtime.changed(); return response(saved, 201);
         }
         const fileMatch = pathname.match(/^\/api\/files\/([a-f0-9-]{36})(\/preview)?$/);
         if (fileMatch && req.method === 'GET') {
@@ -327,12 +391,12 @@ export function createApp(options = {}) {
         }
         if (pathname.startsWith('/api/')) return response({ error: 'Endpoint not found.' }, 404);
         if (!['GET','HEAD'].includes(req.method)) return response({ error: 'Method not allowed.' }, 405);
-        const files = { '/': 'index.html', '/app.js': 'app.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
+        const files = { '/': 'index.html', '/app.js': 'app.js', '/security-ui.js':'security-ui.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
         if (!files[pathname]) return response({ error: 'Not found.' }, 404);
         return new Response(Bun.file(join(root, 'public', files[pathname])), { headers });
       } catch (error) { return response({ error: error.message || 'Something went wrong. Try again.' }, 400); }
     },
-    async close() { clearInterval(accountTimer); runtime.close(); for (const provider of runtime.providers.values()) provider.stop(); await browser.close(); store.close(); },
+    async close() { clearInterval(accountTimer); await runtime.close(); for (const provider of runtime.providers.values()) provider.stop(); await browser.close(); store.close(); },
   };
   const accountTimer = setInterval(() => { for (const agent of store.state.agents) if (agent.provider.configured || agent === store.state.agents[0]) void runtime.refreshAccount(agent.id); }, 30_000); accountTimer.unref();
   void runtime.refreshAccount();
@@ -343,6 +407,7 @@ if (import.meta.main) {
   const app = createApp();
   const server = Bun.serve({ hostname: '127.0.0.1', port: Number(process.env.PORT || 4317), maxRequestBodySize: 21 * 1024 * 1024, idleTimeout: 120, fetch: app.fetch });
   console.log(`Odwyn: http://127.0.0.1:${server.port}`);
+  if(!app.runtime.store.security.catalog().find(c=>c.action==='sandbox.exec')?.available||!app.runtime.store.security.catalog().find(c=>c.action==='browser.read')?.available)console.log('Some agent tools need isolated setup. Run bun run setup; chat remains available and unconfigured tools are denied.');
   let stopping = false;
   const shutdown = async () => { if (stopping) return; stopping = true; server.stop(true); await app.close(); process.exit(0); };
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);

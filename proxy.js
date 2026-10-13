@@ -40,11 +40,12 @@ export async function fetchImage(raw, resolve = resolvePublic) {
 }
 
 // Resolve once, connect to that IP. Browser DNS cannot rebind into the VPS network.
-export async function startProxy() {
+export async function startProxy({resolve=resolvePublic,authorize=()=>true}={}) {
   const sockets = new Set();
   const server = http.createServer(async (req, res) => {
     try {
-      const { url, address, family } = await resolvePublic(req.url);
+      if(!authorize(req.url,req.method))throw new Error('Proxy policy denied.');
+      const { url, address, family } = await resolve(req.url);
       if (url.protocol !== 'http:') throw new Error('HTTPS requires CONNECT.');
       const headers = { ...req.headers, host: url.host };
       delete headers['proxy-authorization']; delete headers['proxy-connection'];
@@ -59,7 +60,8 @@ export async function startProxy() {
   });
   server.on('connect', async (req, socket, head) => {
     try {
-      const { url, address, family } = await resolvePublic(`https://${req.url}`);
+      if(!authorize(`https://${req.url}`,'CONNECT'))throw new Error('Proxy policy denied.');
+      const { url, address, family } = await resolve(`https://${req.url}`);
       const upstream = net.connect({ host: address, family, port: Number(url.port || 443) });
       sockets.add(upstream);
       upstream.setTimeout(120_000, () => upstream.destroy());
