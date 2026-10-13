@@ -7,6 +7,8 @@ export const currencies = ['source', ...Intl.supportedValuesOf('currency')];
 export const effortLevels = {codex:['default','none','minimal','low','medium','high','xhigh','max'],claude:['default','low','medium','high','max'],openai:['default','none','minimal','low','medium','high','xhigh','max']};
 export const defaults = { palette:'paper', motion:'system', shape:'squircle', bodyColor:'#f26945', eyeColor:'#292b28', mouthColor:'#292b28', eyes:'bars', mouth:'smile', accessory:'none', name:'Odwyn', specialization:'', ownerName:'', tone:'warm', language:'auto', detail:'adaptive', userContext:'' };
 export const agentColor = profile => /^#[0-9a-f]{6}$/i.test(profile?.bodyColor) ? profile.bodyColor : defaults.bodyColor;
+export const profileTextLimit = 100_000;
+
 export const ownerPreferenceKeys = ['ownerName','language','detail','userContext'];
 export function resolveProfile(profile, appearance = {}, owner = {}) {
   return {...defaults,...profile,...(profile?.overrideWorkspace ? {} : {...appearance,...Object.fromEntries(ownerPreferenceKeys.filter(key=>owner[key] !== undefined).map(key=>[key,owner[key]]))})};
@@ -109,7 +111,7 @@ export function validateProfile(input) {
     if (typeof value !== 'string') throw new Error(`Choose ${key}.`);
     if (key === 'palette' && !Object.hasOwn(palettes,value) || choices[key] && !Object.hasOwn(choices[key],value)) throw new Error(`Invalid ${key}.`);
     if (key.endsWith('Color') && !/^#[0-9a-f]{6}$/i.test(value)) throw new Error('Use a six-digit hex color.');
-    const multiline = ['specialization','userContext'].includes(key), limit = multiline ? 500 : 40;
+    const multiline = ['specialization','userContext'].includes(key), limit = multiline ? profileTextLimit : 40;
     if (value.length > limit || (!multiline && /[\x00-\x1f\x7f]/.test(value)) || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value)) throw new Error(`${key} must be at most ${limit} characters.`);
     result[key] = value.trim();
   }

@@ -15,7 +15,7 @@ test('new customization preferences preserve legacy profiles and reject invalid 
   for (const key of ['motion','language','detail','tone','shape','eyes','mouth','accessory']) expect(()=>validateProfile({...defaults,[key]:'__proto__'})).toThrow();
   expect(validateProfile({...defaults,overrideWorkspace:true}).overrideWorkspace).toBe(true);
   expect(()=>validateProfile({...defaults,overrideWorkspace:'true'})).toThrow();
-  expect(()=>validateProfile({...defaults,userContext:'x'.repeat(501)})).toThrow();
+  expect(()=>validateProfile({...defaults,userContext:'x'.repeat(100_001)})).toThrow();
   expect(()=>validateProfile({...defaults,userContext:'bad\u0000context'})).toThrow();
 });
 

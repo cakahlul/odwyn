@@ -27,7 +27,7 @@ test('API protects files and browser control, persists uploads and validates sch
     expect((await request('/api/customization','PUT',profile)).status).toBe(200);
     expect((await request('/api/customization','PUT',{...profile,bodyColor:'red" onload="alert(1)'})).status).toBe(400);
     expect((await request('/api/customization','PUT',{...profile,name:'',palette:'__proto__'})).status).toBe(400);
-    expect((await request('/api/customization','PUT',{...profile,specialization:'x'.repeat(501)})).status).toBe(400);
+    expect((await request('/api/customization','PUT',{...profile,specialization:'x'.repeat(100_001)})).status).toBe(400);
     expect((await (await request('/api/state')).json()).customization).toEqual(profile);
     const persisted = openStore(directory); expect(persisted.state.customization).toEqual(profile); persisted.close();
     const primary = app.runtime.state.agents[0];
@@ -213,4 +213,41 @@ test('agent deletion preserves history, updates rooms, removes routines and prot
     expect((await request(`/api/agents/${primary}`,'DELETE')).status).toBe(400);
     const reopened=openStore(directory); expect(reopened.state.agents).toHaveLength(2); expect(reopened.state.customization.name).toBe('Scout'); expect(reopened.state.conversations.find(c=>c.id===chat.id).messages.find(m=>m.id==='old-reply').agentProfile.name).toBe('Original'); reopened.close();
   } finally {await app.close();rmSync(directory,{recursive:true});}
+});
+
+
+test('long focus, owner background and memory survive saves without truncation', async () => {
+  const directory = mkdtempSync(join(tmpdir(),'odwyn-long-profile-'));
+  const codex = new EventEmitter(); codex.request = async () => ({account:null}); codex.stop = () => {};
+  const browser = {frame:async()=>null,close:async()=>{},serial:async fn=>fn(),start:async()=>{}};
+  const app = createApp({directory,user:'owner',password:'test-password-long-enough',origin:'https://assistant.test',codex,browser});
+  const request = (path,body) => app.fetch(new Request(`https://assistant.test${path}`,{method:path==='/api/agents'?'POST':'PUT',headers:{authorization:'Basic '+Buffer.from('owner:test-password-long-enough').toString('base64'),origin:'https://assistant.test','content-type':'application/json'},body:JSON.stringify(body)}));
+  const long = 'Line "with quotes"\n\t'.repeat(6000).slice(0,99_999)+'x';
+  const profile = {...defaults,specialization:long,userContext:long};
+  try {
+    expect(long.length).toBe(100_000);
+    expect((await request('/api/customization',profile)).status).toBe(200);
+    const added = await request('/api/agents',{...profile,name:'Long-form agent'});
+    expect(added.status).toBe(201);
+    const agent = await added.json();
+    expect((await request('/api/preferences',{text:long,userContext:long})).status).toBe(200);
+    for (const key of ['specialization','userContext']) {
+      expect((await request('/api/customization',{...profile,[key]:long+'x'})).status).toBe(400);
+      expect((await request('/api/customization',{...profile,[key]:'bad\u0000text'})).status).toBe(400);
+    }
+    expect((await request('/api/preferences',{text:long+'x'})).status).toBe(400);
+    expect((await request('/api/preferences',{text:'Changed',userContext:long+'x'})).status).toBe(400);
+    const reopened = openStore(directory);
+    try {
+      expect(reopened.state.customization.specialization).toBe(long);
+      expect(reopened.state.customization.userContext).toBe(long);
+      expect(reopened.state.agents.find(item=>item.id===agent.id).customization).toEqual({...profile,name:'Long-form agent'});
+      expect(reopened.state.owner.userContext).toBe(long);
+      expect(reopened.state.preferences).toBe(long);
+    } finally { reopened.close(); }
+    const html = await (await app.fetch(new Request('https://assistant.test/',{headers:{authorization:'Basic '+Buffer.from('owner:test-password-long-enough').toString('base64')}}))).text();
+    for (const id of ['agent-specialization','user-context-input','global-userContext','preferences']) {
+      expect(html.match(new RegExp(`<textarea[^>]*id="${id}"[^>]*>`))?.[0]).toContain('maxlength="100000"');
+    }
+  } finally { await app.close(); rmSync(directory,{recursive:true}); }
 });

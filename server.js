@@ -8,7 +8,7 @@ import { AIProvider, validateProvider, publicProvider, providerModels } from './
 import { Browser } from './browser.js';
 import { Runtime } from './runtime.js';
 import { validateWorkflow, validateSkill, importSkill } from './workflows.js';
-import { validateProfile, defaults, ownerPreferenceKeys, currencies, validateAppearance } from './public/profile.js';
+import { validateProfile, defaults, profileTextLimit, ownerPreferenceKeys, currencies, validateAppearance } from './public/profile.js';
 import { fetchImage } from './proxy.js';
 import { imageMime } from './files.js';
 
@@ -267,7 +267,7 @@ export function createApp(options = {}) {
           runtime.changed(); return response({ ok: true });
         }
         if (pathname === '/api/agents' && req.method === 'POST') {
-          const input = await json(req), customization = validateProfile(input);
+          const input = await json(req, 1_300_000), customization = validateProfile(input);
           if (customization.skillIds?.some(id=>!store.state.skills.some(skill=>skill.id===id))) throw new Error('Choose existing skills.');
           const config = input.provider === undefined || input.provider.inherit === true ? { ...store.state.globalProvider } : validateProvider(input.provider,store.state.globalProvider);
           if (input.provider?.inherit !== undefined && typeof input.provider.inherit !== 'boolean') throw new Error('Choose a provider source.');
@@ -287,7 +287,7 @@ export function createApp(options = {}) {
         }
         if (pathname === '/api/customization' && req.method === 'PUT') {
           const agent = findAgent(store.state, url.searchParams.get('agentId') ?? undefined);
-          const input = await json(req), customization = validateProfile(input);
+          const input = await json(req, 1_300_000), customization = validateProfile(input);
           if (customization.skillIds?.some(id=>!store.state.skills.some(skill=>skill.id===id))) throw new Error('Choose existing skills.');
           let changedAgents = [];
           if (input.provider !== undefined) {
@@ -304,7 +304,7 @@ export function createApp(options = {}) {
           store.state.appearance = validateAppearance(input); runtime.changed(); return response(store.state.appearance);
         }
         if (pathname === '/api/preferences' && req.method === 'PUT') {
-          const input = await json(req); if (typeof input.text !== 'string' || input.text.length > 8000) throw new Error('Memory must be at most 8,000 characters.');
+          const input = await json(req, 1_300_000); if (typeof input.text !== 'string' || input.text.length > profileTextLimit) throw new Error(`Memory must be at most ${profileTextLimit.toLocaleString('en-US')} characters.`);
           if (input.currency !== undefined && !currencies.includes(input.currency)) throw new Error('Choose a supported currency.');
           const appearance = input.appearance === undefined ? undefined : validateAppearance(input.appearance);
           const owner = validateProfile({...defaults,...store.state.owner,...Object.fromEntries(ownerPreferenceKeys.filter(key=>Object.hasOwn(input,key)).map(key=>[key,input[key]]))});
