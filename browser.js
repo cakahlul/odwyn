@@ -159,9 +159,14 @@ export class Browser {
   }
 
   async untilDialog(page, fn) {
+    const context = this.context, generation = this.generation;
     let listener;
     const dialog = new Promise(resolve => { listener = () => resolve(); page.once('dialog',listener); });
-    try { await Promise.race([fn(),dialog]); } finally { page.off('dialog',listener); }
+    try { await Promise.race([fn(),dialog]); }
+    catch (error) {
+      // A login popup can close itself after a successful click or keypress.
+      if (!error.message.includes('Target page, context or browser has been closed') || !page.isClosed() || !this.openers.has(page) || this.context !== context || this.generation !== generation || this.page !== this.openers.get(page) || this.page.isClosed()) throw error;
+    } finally { page.off('dialog',listener); }
   }
 
   action(input, allowed = () => true) {

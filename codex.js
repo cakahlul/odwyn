@@ -6,10 +6,11 @@ import { homedir } from 'node:os';
 import { agentModeInstructions } from './public/profile.js';
 
 export class Codex extends EventEmitter {
-  constructor({ home, workspace, command = 'codex', model = (process.env.ODWYN_MODEL ?? process.env.SIDEKICK_MODEL) || 'gpt-6.1-sol', effort = 'default', mcpHome = process.env.CODEX_HOME || join(homedir(), '.codex') }) {
+  constructor({ home, workspace, isolated = false, command = 'codex', model = (process.env.ODWYN_MODEL ?? process.env.SIDEKICK_MODEL) || 'gpt-6.1-sol', effort = 'default', mcpHome = process.env.CODEX_HOME || join(homedir(), '.codex') }) {
     super(); this.home = home; this.workspace = workspace; this.command = command; this.model = model; this.effort = effort;
     this.child = null; this.ready = null; this.pending = new Map(); this.nextId = 1;
     this.mcpHome = mcpHome;
+    this.isolated = isolated;
   }
 
   start() {
@@ -18,7 +19,7 @@ export class Codex extends EventEmitter {
     const args = ['app-server', '--listen', 'stdio://', '-c', `model=${JSON.stringify(this.model)}`, '-c', 'project_doc_max_bytes=0', '-c', 'web_search="disabled"', '-c', `developer_instructions=${JSON.stringify(agentModeInstructions)}`];
     if (this.effort && this.effort !== 'default') args.push('-c',`model_reasoning_effort=${JSON.stringify(this.effort)}`);
     for (const feature of ['shell_tool','unified_exec','apps','plugins','multi_agent','code_mode','view_image','skill_search','skill_mcp_dependency_install','shell_snapshot','sleep_tool','send_message_to_user_async','default_mode_request_user_input']) args.push('-c', `features.${feature}=false`);
-    const child = spawn(this.command, args, { cwd: this.workspace, env: { ...process.env, CODEX_HOME: this.home }, stdio: ['pipe','pipe','pipe'] });
+    const child = spawn(this.command, args, { cwd: this.workspace, env: { ...process.env, ...(this.isolated ? {OPENAI_API_KEY:undefined,CODEX_API_KEY:undefined} : {}), CODEX_HOME: this.home }, stdio: ['pipe','pipe','pipe'] });
     this.child = child;
     let buffer = '';
     child.stdout.setEncoding('utf8');

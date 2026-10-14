@@ -3,15 +3,15 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 
-export async function runBaseline(report) {
+export async function runBaseline(report, files = readdirSync('test', {recursive:true}).filter(file => /\.test\.[jt]sx?$/.test(file)).sort().map(file => join('test', file))) {
   if (!report) throw new Error('BLOCKED: report directory required');
   const directory = mkdtempSync(join(tmpdir(), 'odwyn-security-regression-'));
   mkdirSync(join(directory, 'codex'));
   const env = {PATH: process.env.PATH, TMPDIR: tmpdir(), ODWYN_DATA_DIR: join(directory, 'data'),
-    ODWYN_CODEX_HOME: join(directory, 'codex'), ODWYN_PROVIDER: 'codex'};
+    ODWYN_CODEX_HOME: join(directory, 'codex'), ODWYN_PROVIDER: 'codex',
+    ...Object.fromEntries(['DOCKER_HOST','DOCKER_CONTEXT','XDG_RUNTIME_DIR','ODWYN_SECURITY_ISOLATION_RUNNER','ODWYN_SECURITY_SANDBOX_IMAGE','ODWYN_SECURITY_BROWSER_IMAGE'].filter(key=>process.env[key]!==undefined).map(key=>[key,process.env[key]])),ODWYN_SECURITY_REPORT_DIR:resolve(report)};
   const outfile = resolve(report, 'regression.junit.xml');
   const junitDirectory = resolve(report, 'regression'); mkdirSync(junitDirectory, {recursive:true});
-  const files = readdirSync('test', {recursive:true}).filter(file => /\.test\.[jt]sx?$/.test(file)).sort().map(file => join('test', file));
   if (!files.length) throw new Error('BLOCKED: repository regression files missing');
   const started = Date.now();
   try {
@@ -20,9 +20,9 @@ export async function runBaseline(report) {
       // Bun 1.3.9 on macOS can close a guarded FD across files; fresh processes
       // preserve every original assertion without sharing native handle state.
       const output = await new Promise((resolveRun, reject) => {
-        const child = spawn(process.execPath, ['test', file, '--reporter=junit', `--reporter-outfile=${join(junitDirectory, `${index}.xml`)}`], {env, stdio: ['ignore','pipe','pipe'], detached: true});
+        const child = spawn(process.execPath, ['--no-env-file','test', file, '--reporter=junit', `--reporter-outfile=${join(junitDirectory, `${index}.xml`)}`], {env, stdio: ['ignore','pipe','pipe'], detached: true});
         let log = '', timedOut = false;
-        const timer = setTimeout(() => {timedOut = true; try {process.kill(-child.pid, 'SIGKILL');} catch {}}, 240_000);
+        const timer = setTimeout(() => {timedOut = true; try {process.kill(-child.pid, 'SIGKILL');} catch {}}, file.startsWith('tests/security/') ? 900_000 : 240_000);
         child.stdout.on('data', chunk => {log += chunk;}); child.stderr.on('data', chunk => {log += chunk;});
         child.once('error', error => {clearTimeout(timer); reject(error);});
         child.once('close', (code, signal) => {
@@ -32,6 +32,7 @@ export async function runBaseline(report) {
         });
       });
       executions.push({file, ...output});
+      console.log(`${output.exitCode === 0 ? 'PASS' : 'FAIL'}: ${file}`);
     }
     const output = {log: executions.map(run => run.log).join('\n'),
       exitCode: executions.find(run => run.exitCode !== 0)?.exitCode ?? 0,

@@ -51,8 +51,9 @@ For review findings or lists intended for owner selection, use an odwyn fenced J
 for(const tool of tools)if(tool.inputSchema.properties.resourceId)tool.inputSchema.properties.approvalId=string;
 
 export class Runtime {
-  constructor({ store, codex, browser, workspace, model, repositoryResolver, execution, browserExecution, gitCredentialResolver }) {
+  constructor({ store, codex, browser, workspace, workspaceId, model, repositoryResolver, execution, browserExecution, gitCredentialResolver }) {
     this.store = store; this.state = store.state; this.codex = codex; this.browser = browser; this.workspace = workspace; this.model = model;
+    this.workspaceId = workspaceId;
     this.sandbox=new Sandbox(store.security,execution);store.security.configureExecution(this.sandbox.configured);
     this.executions=new Set();
     this.gitGateway=new GitGateway(store.security,this.sandbox,{resolver:repositoryResolver,credentialResolver:gitCredentialResolver||((resourceId,context)=>store.connectors.credential(resourceId,context,'repository.branch.push'))});
@@ -575,7 +576,7 @@ export class Runtime {
         else {if(context.spaceId!==this.store.security.legacySpaceId)throw new Error('File must belong to a task isolated workspace.');file=saveGeneratedFile(this.workspace,args.path,join(this.store.directory,'files'),job.id,validateBytes);}
         Object.assign(file,{resourceId:resource.id,spaceId:context.spaceId});this.state.files.push(file); job.files.push(file.id);
         this.event(job,'File attached',file.name);
-        result = {fileId:file.id,name:file.name,url:`/api/files/${file.id}`};
+        result = {fileId:file.id,name:file.name,url:`/api/files/${file.id}${this.workspaceId ? '?workspace='+encodeURIComponent(this.workspaceId) : ''}`};
 
       } else if (params.tool === 'odwyn_browser') {
         result=await this.scopedBrowsers.action(job,args,()=>this.active===job&&job.status!=='stopping'&&!this.takeover);

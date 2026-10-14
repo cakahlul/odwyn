@@ -140,6 +140,13 @@
       "anchor": "export async function setup(",
       "plannedHook": "Owner CLI backend readiness, immutable image provisioning and private atomic configuration; no grants",
       "gap": "Release gate and live host verification are separate; missing isolation remains denied"
+    },
+    {
+      "category": "admin",
+      "file": "server.js",
+      "anchor": "const workspaceId = url.searchParams.get('workspace')",
+      "plannedHook": "Authenticate owner before routing requests to independent workspace storage; task tokens validate in the selected home",
+      "gap": "Shared settings are explicit owner actions; account sign-ins and permissions remain workspace scoped"
     }
   ],
   "httpLiterals": [
@@ -175,7 +182,9 @@
     "/api/security/reauth",
     "/api/skills/import",
     "/api/spaces",
-    "/api/state"
+    "/api/state",
+    "/api/workspaces",
+    "/api/workspaces/share"
   ],
   "httpPatterns": [
     "/^\\/api\\/(workflows|skills)(?:\\/([a-f0-9-]{36}))?(?:\\/(run))?$/",

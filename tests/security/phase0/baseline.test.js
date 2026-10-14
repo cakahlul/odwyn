@@ -50,7 +50,7 @@ test('BASE-003 repository regression browser smoke and dependency baseline', asy
   // Run the existing suite, including real Chromium UI tests and local Codex MCP.
   // Restrict inherited credentials/configuration to disposable paths in helper.
   const { runBaseline } = await import('../run-baseline.js');
-  const result = await runBaseline(report);
+  const result = await runBaseline(report && join(report, 'baseline-regression'));
   evidence('baseline.json', result);
   expect(result.exitCode).toBe(0);
   expect(result.junitComplete).toBe(true);

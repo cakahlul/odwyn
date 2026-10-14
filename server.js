@@ -28,8 +28,8 @@ export function createApp(options = {}) {
   const store = openStore(directory);
   const workspace = join(directory, 'workspace');
   mkdirSync(workspace, { recursive: true, mode: 0o700 });
-  const type = (process.env.ODWYN_PROVIDER ?? process.env.SIDEKICK_PROVIDER) || 'codex';
-  store.state.provider ||= { ...validateProvider({ type, model: (process.env.ODWYN_MODEL ?? process.env.SIDEKICK_MODEL) || providerModels[type], baseUrl: (process.env.ODWYN_API_BASE_URL ?? process.env.SIDEKICK_API_BASE_URL), apiKey: (process.env.ODWYN_API_KEY ?? process.env.SIDEKICK_API_KEY) }), configured: !!(process.env.ODWYN_PROVIDER ?? process.env.SIDEKICK_PROVIDER) };
+  const type = options.workspaceId ? 'codex' : (process.env.ODWYN_PROVIDER ?? process.env.SIDEKICK_PROVIDER) || 'codex';
+  store.state.provider ||= options.workspaceId ? {...validateProvider({type,model:providerModels[type]}),configured:false} : { ...validateProvider({ type, model: (process.env.ODWYN_MODEL ?? process.env.SIDEKICK_MODEL) || providerModels[type], baseUrl: (process.env.ODWYN_API_BASE_URL ?? process.env.SIDEKICK_API_BASE_URL), apiKey: (process.env.ODWYN_API_KEY ?? process.env.SIDEKICK_API_KEY) }), configured: !!(process.env.ODWYN_PROVIDER ?? process.env.SIDEKICK_PROVIDER) };
   for (const agent of store.state.agents) agent.provider ||= { ...store.state.provider };
   store.state.globalProvider ||= { ...store.state.provider };
   for (const agent of store.state.agents) {
@@ -38,8 +38,8 @@ export function createApp(options = {}) {
     if (!agent.providerOverride) agent.provider = { ...store.state.globalProvider };
   }
   store.state.provider = store.state.agents[0].provider;
-  const home = resolve((process.env.ODWYN_CODEX_HOME ?? process.env.SIDEKICK_CODEX_HOME) || join(directory, 'codex'));
-  const codex = new AIProvider({ config: store.state.provider, home, workspace, codex: options.codex, ...options.providerOptions });
+  const home = options.workspaceId ? join(directory, 'codex') : resolve((process.env.ODWYN_CODEX_HOME ?? process.env.SIDEKICK_CODEX_HOME) || join(directory, 'codex'));
+  const codex = new AIProvider({ config: store.state.provider, home, workspace, isolated:!!options.workspaceId, codex: options.codex, ...options.providerOptions });
   let runtime;
   const browser = options.browser || new Browser({ directory, executablePath: (process.env.ODWYN_BROWSER_EXECUTABLE ?? process.env.SIDEKICK_BROWSER_EXECUTABLE) || undefined, headless: (process.env.ODWYN_HEADLESS ?? process.env.SIDEKICK_HEADLESS) !== 'false',
     findFile: id => store.state.files.find(file => file.id === id),
@@ -52,7 +52,7 @@ export function createApp(options = {}) {
       store.state.files.push(file);runtime.changed();
     },
   });
-  runtime = new Runtime({ store, codex, browser, workspace, model: store.state.provider.model,execution:options.execution||{image:process.env.ODWYN_SANDBOX_IMAGE,snapshotRoot:process.env.ODWYN_SANDBOX_SNAPSHOTS},browserExecution:options.browserExecution||{image:process.env.ODWYN_BROWSER_IMAGE} });
+  runtime = new Runtime({ store, codex, browser, workspace, workspaceId:options.workspaceId, model: store.state.provider.model,execution:options.execution||{image:process.env.ODWYN_SANDBOX_IMAGE,snapshotRoot:process.env.ODWYN_SANDBOX_SNAPSHOTS},browserExecution:options.browserExecution||{image:process.env.ODWYN_BROWSER_IMAGE} });
   const logins = new Map();
   function watchLogin(agent, provider) {
     provider.on('notification', ({ method, params }) => {
@@ -61,7 +61,7 @@ export function createApp(options = {}) {
   }
   watchLogin(store.state.agents[0], codex);
   function addProvider(agent) {
-    const provider = new AIProvider({ config:agent.provider, home, workspace, ...options.providerOptions });
+    const provider = new AIProvider({ config:agent.provider, home, workspace, isolated:!!options.workspaceId, ...options.providerOptions });
     runtime.addProvider(agent.id, provider); watchLogin(agent, provider); if (agent.provider.configured) void runtime.refreshAccount(agent.id);
   }
   for (const agent of store.state.agents.slice(1)) addProvider(agent);
@@ -117,11 +117,54 @@ export function createApp(options = {}) {
   }
 
   function freshOwner(value){const supplied=Buffer.from(typeof value==='string'?value:''),expected=Buffer.from(password);if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected))throw new Error('Fresh owner password required.');}
+  const stepupCookie = options.workspaceId ? `odwyn_stepup_${options.workspaceId}` : 'odwyn_stepup';
+  const homes = new Map();
+  let workspaceWrites = Promise.resolve();
+  if (!options.workspaceId) {
+    store.state.workspaces ||= [{id:'default',name:'Home'}];
+    store.state.workspaceSharing ||= {};
+    store.save();
+  }
+  const settings = kind => kind === 'provider' ? store.state.globalProvider : kind === 'preferences' ? {owner:store.state.owner,text:store.state.preferences,currency:store.state.currency} : store.state.appearance;
+  function checkSettings(kinds) {
+    if (options.checkSettings) return options.checkSettings(kinds);
+    if (kinds.includes('provider') && store.state.workspaceSharing.provider && [...homes.values()].some(home => home.providerBusy())) throw new Error('Stop tasks and finish sign-ins in all workspaces before changing the shared provider.');
+  }
+  async function settingsChanged(kinds,source=app) {
+    if (options.settingsChanged) return options.settingsChanged(app,kinds);
+    for (const kind of kinds.filter(kind => store.state.workspaceSharing[kind])) {
+      const value = structuredClone(source.settings(kind));
+      for (const target of homes.values()) if (target !== source) await target.applySettings(kind,value);
+    }
+  }
+  function openHome(row) {
+    const child = createApp({...options,browser:undefined,codex:undefined,directory:join(directory,'workspaces',row.id),workspaceId:row.id,
+      checkSettings,settingsChanged:(source,kinds)=>settingsChanged(kinds,source)});
+    homes.set(row.id,child); return child;
+  }
   const app = {
     runtime, browser, codex,
+    settings,
+    providerBusy:() => !!(runtime.active || runtime.starting || [...logins.values()].some(login=>login?.loginId)),
+    async applySettings(kind,value) {
+      value = structuredClone(value);
+      if (kind === 'provider') {
+        const changed = await changeGlobalProvider(value);
+        runtime.changed();
+        for (const agent of changed) void runtime.refreshAccount(agent.id);
+        return;
+      } else if (kind === 'preferences') { store.state.owner=value.owner; store.state.preferences=value.text; store.state.currency=value.currency; }
+      else store.state.appearance=value;
+      runtime.changed();
+    },
     async fetch(req, server) {
       const url = new URL(req.url); const pathname = url.pathname;
+      const workspaceId = url.searchParams.get('workspace') || 'default';
       if(req.headers.get('authorization')?.startsWith('Bearer ')){
+        if (!options.workspaceId && workspaceId !== 'default') {
+          const child=homes.get(workspaceId);
+          return child ? child.fetch(req,server) : response({error:'Task access denied.'},403);
+        }
         try{
           if(req.method!=='GET')throw new Error('Task administration denied.');
           const job=store.data.authenticate(req.headers.get('authorization').slice(7));
@@ -142,18 +185,44 @@ export function createApp(options = {}) {
         if (rateLimited('writes', 120)) return response({ error: 'Too many requests. Try again shortly.' }, 429);
       }
       try {
+        if (!options.workspaceId && workspaceId !== 'default' && !pathname.startsWith('/api/workspaces')) {
+          const child=homes.get(workspaceId);
+          return child ? child.fetch(req,server) : response({error:'Workspace not found.'},404);
+        }
+        if (!options.workspaceId && pathname === '/api/workspaces' && req.method === 'GET') return response({workspaces:store.state.workspaces,sharing:store.state.workspaceSharing});
+        if (!options.workspaceId && pathname === '/api/workspaces' && req.method === 'POST') {
+          const input = await json(req), name = textInput(input.name,70).trim();
+          if (!name) throw new Error('Enter a workspace name.');
+          const row = {id:randomUUID(),name};
+          const child = openHome(row);
+          try { for (const kind of Object.keys(store.state.workspaceSharing).filter(kind=>store.state.workspaceSharing[kind])) await child.applySettings(kind,settings(kind)); }
+          catch(error) { homes.delete(row.id); await child.close(); throw error; }
+          store.state.workspaces.push(row); runtime.changed(); return response(row,201);
+        }
+        if (!options.workspaceId && pathname === '/api/workspaces/share' && req.method === 'POST') {
+          const {kind,enabled,ownerPassword} = await json(req);
+          if (!['appearance','preferences','provider'].includes(kind) || typeof enabled !== 'boolean') throw new Error('Choose a setting and sharing mode.');
+          const source = homes.get(workspaceId); if (!source) return response({error:'Workspace not found.'},404);
+          if (kind === 'provider') freshOwner(ownerPassword);
+          if (enabled) {
+            if (kind === 'provider' && [...homes.values()].some(home=>home.providerBusy())) throw new Error('Stop tasks and finish sign-ins in all workspaces before sharing the provider.');
+            const value = structuredClone(source.settings(kind));
+            for (const target of homes.values()) if (target !== source) await target.applySettings(kind,value);
+          }
+          store.state.workspaceSharing[kind]=enabled; runtime.changed(); return response({ok:true});
+        }
         if(pathname === '/api/security/reauth' && req.method==='POST'){
           const body=await json(req);if(Object.keys(body).some(k=>!['password','approvalId'].includes(k)))throw new Error('Invalid reauthentication fields.');
           if(rateLimited('stepup',20))return response({error:'Too many reauthentication attempts.'},429);
           const supplied=Buffer.from(typeof body.password==='string'?body.password:''),expected=Buffer.from(password);
           if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected))return response({error:'Fresh owner authentication required.'},403);
-          const token=store.approvals.reauth(body.approvalId);return response({ok:true},200,{'set-cookie':`odwyn_stepup=${token}; HttpOnly; SameSite=Strict; Path=/api/approvals; Max-Age=60${url.protocol==='https:'?'; Secure':''}`});
+          const token=store.approvals.reauth(body.approvalId);return response({ok:true},200,{'set-cookie':`${stepupCookie}=${token}; HttpOnly; SameSite=Strict; Path=/api/approvals; Max-Age=60${url.protocol==='https:'?'; Secure':''}`});
         }
         if(pathname === '/api/approvals' && req.method==='GET')return response({approvals:store.approvals.list()});
         const executeApprovalMatch=pathname.match(/^\/api\/approvals\/([a-f0-9-]{36})\/execute$/);
         if(executeApprovalMatch&&req.method==='POST'){const body=await json(req);if(Object.keys(body).length)throw new Error('Execution uses only the immutable server envelope.');return response(await runtime.executeApproved(executeApprovalMatch[1]));}
         const approvalMatch=pathname.match(/^\/api\/approvals\/([a-f0-9-]{36})\/decision$/);
-        if(approvalMatch&&req.method==='POST'){const body=await json(req);if(Object.keys(body).some(k=>k!=='decision'))throw new Error('Only an approval decision is accepted.');const token=req.headers.get('cookie')?.match(/(?:^|;\s*)odwyn_stepup=([A-Za-z0-9_-]+)/)?.[1];const result=store.approvals.decision(approvalMatch[1],body.decision,token);runtime.changed();return response(result);}
+        if(approvalMatch&&req.method==='POST'){const body=await json(req);if(Object.keys(body).some(k=>k!=='decision'))throw new Error('Only an approval decision is accepted.');const token=req.headers.get('cookie')?.split(';').map(value=>value.trim()).find(value=>value.startsWith(stepupCookie+'='))?.slice(stepupCookie.length+1);const result=store.approvals.decision(approvalMatch[1],body.decision,token);runtime.changed();return response(result);}
         if(pathname === '/api/security/migration' && req.method==='GET')return response(store.migration.report());
         if(pathname === '/api/security/migration' && req.method==='POST')return response(store.migration.review(await json(req)));
         if(pathname === '/api/security/pause' && req.method==='POST')return response(await runtime.pauseSecurity(await json(req)));
@@ -312,7 +381,7 @@ export function createApp(options = {}) {
         }
         if (pathname === '/api/appearance' && req.method === 'PUT') {
           const input = await json(req);
-          store.state.appearance = validateAppearance(input); runtime.changed(); return response(store.state.appearance);
+          store.state.appearance = validateAppearance(input); runtime.changed(); await settingsChanged(['appearance']); return response(store.state.appearance);
         }
         if (pathname === '/api/preferences' && req.method === 'PUT') {
           const input = await json(req, 1_300_000); if (typeof input.text !== 'string' || input.text.length > profileTextLimit) throw new Error(`Memory must be at most ${profileTextLimit.toLocaleString('en-US')} characters.`);
@@ -320,12 +389,13 @@ export function createApp(options = {}) {
           const appearance = input.appearance === undefined ? undefined : validateAppearance(input.appearance);
           const owner = validateProfile({...defaults,...store.state.owner,...Object.fromEntries(ownerPreferenceKeys.filter(key=>Object.hasOwn(input,key)).map(key=>[key,input[key]]))});
           const config = input.provider === undefined ? null : validateProvider(input.provider,store.state.globalProvider);
+          checkSettings(config ? ['provider'] : []);
           const changedAgents = config ? await changeGlobalProvider(config) : [];
           store.state.owner = Object.fromEntries(ownerPreferenceKeys.map(key=>[key,owner[key]]));
           store.state.preferences = input.text.trim();
           if (input.currency !== undefined) store.state.currency = input.currency;
           if (appearance !== undefined) store.state.appearance = appearance;
-          runtime.changed(); await Promise.all(changedAgents.map(agent => runtime.refreshAccount(agent.id))); return response({ ok: true });
+          runtime.changed(); await settingsChanged(['preferences',...(appearance ? ['appearance'] : []),...(config ? ['provider'] : [])]); await Promise.all(changedAgents.map(agent => runtime.refreshAccount(agent.id))); return response({ ok: true });
         }
         if (pathname === '/api/provider/models' && req.method === 'POST') {
           const input = await json(req), global = url.searchParams.get('scope') === 'global';
@@ -336,12 +406,15 @@ export function createApp(options = {}) {
         }
         if (pathname === '/api/provider' && req.method === 'PUT') {
           const input = await json(req), global = url.searchParams.get('scope') === 'global';
+          if (global) checkSettings(['provider']);
           if (input.inherit !== undefined && typeof input.inherit !== 'boolean') throw new Error('Choose a provider source.');
           const agent = global ? null : findAgent(store.state,url.searchParams.get('agentId') ?? undefined);
           const config = !global && input.inherit ? { ...store.state.globalProvider } : validateProvider(input,global ? store.state.globalProvider : agent.provider);
           const changedAgents = global ? await changeGlobalProvider(config) : await changeProviders(config,[agent]);
           if (agent) agent.providerOverride = !input.inherit;
-          runtime.changed(); await Promise.all(changedAgents.map(agent => runtime.refreshAccount(agent.id)));
+          runtime.changed();
+          if (global) await settingsChanged(['provider']);
+          await Promise.all(changedAgents.map(agent => runtime.refreshAccount(agent.id)));
           return response(publicProvider(config));
         }
         if (pathname === '/api/account/refresh' && req.method === 'POST') { const agent = url.searchParams.get('scope') === 'global' ? globalConnection(true) : findAgent(store.state, url.searchParams.get('agentId') ?? undefined); await runtime.refreshAccount(agent.id); return response({ ok: true }); }
@@ -402,15 +475,26 @@ export function createApp(options = {}) {
         }
         if (pathname.startsWith('/api/')) return response({ error: 'Endpoint not found.' }, 404);
         if (!['GET','HEAD'].includes(req.method)) return response({ error: 'Method not allowed.' }, 405);
-        const files = { '/': 'index.html', '/app.js': 'app.js', '/security-ui.js':'security-ui.js', '/workspace-settings.js':'workspace-settings.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
+        const files = { '/': 'index.html', '/app.js': 'app.js', '/security-ui.js':'security-ui.js', '/workspace-settings.js':'workspace-settings.js', '/workspace-homes.js':'workspace-homes.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
         if (!files[pathname]) return response({ error: 'Not found.' }, 404);
         return new Response(Bun.file(join(root, 'public', files[pathname])), { headers });
       } catch (error) { return response({ error: error.message || 'Something went wrong. Try again.' }, 400); }
     },
-    async close() { clearInterval(accountTimer); await runtime.close(); for (const provider of runtime.providers.values()) provider.stop(); await browser.close(); store.close(); },
+    async close() { await workspaceWrites; for (const child of homes.values()) if (child !== app) await child.close(); clearInterval(accountTimer); await runtime.close(); for (const provider of runtime.providers.values()) provider.stop(); await browser.close(); store.close(); },
   };
   const accountTimer = setInterval(() => { for (const agent of store.state.agents) if (agent.provider.configured || agent === store.state.agents[0]) void runtime.refreshAccount(agent.id); }, 30_000); accountTimer.unref();
   void runtime.refreshAccount();
+  if (!options.workspaceId) {
+    homes.set('default',app);
+    for (const row of store.state.workspaces.filter(row=>row.id!=='default')) openHome(row);
+    // Serialize settings writes so linked workspaces cannot diverge on concurrent saves.
+    const fetch = app.fetch;
+    app.fetch = (req,server) => {
+      const path = new URL(req.url).pathname;
+      if (['GET','HEAD'].includes(req.method) || !['/api/workspaces','/api/workspaces/share','/api/preferences','/api/appearance','/api/provider'].includes(path)) return fetch(req,server);
+      const result = workspaceWrites.then(()=>fetch(req,server)); workspaceWrites=result.catch(()=>{}); return result;
+    };
+  }
   return app;
 }
 

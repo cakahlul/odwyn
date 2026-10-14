@@ -21,6 +21,9 @@
 }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--paper); }
+.workspace-home-picker { display:flex; align-items:center; gap:4px; flex-shrink:0; }
+.workspace-home-picker select { width:120px; padding:6px 8px; color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); }
+@media(max-width:760px) { .workspace-home-picker select { width:80px; } .workspace-home-picker .icon-button { width:28px; min-width:28px; } }
 button,input,textarea,select { font:inherit; }
 button,a,input,textarea,select { -webkit-tap-highlight-color:transparent; }
 button { cursor:pointer; color:inherit; }

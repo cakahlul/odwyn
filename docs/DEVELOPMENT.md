@@ -31,11 +31,19 @@ bun run check:browser
 
 These use disposable fixtures or mocked providers. Settings checks cover shared management, legacy browsing scopes, resets, access separation, and four viewport widths. Browser page tests use real Chromium to check local interactions and blocked outbound requests; they do not prove container isolation.
 
-Some macOS Bun runs can reuse guarded native file descriptors across test files. The security baseline runner executes regression files in separate processes to avoid that issue.
+Combined Bun runs can reuse native browser/SQLite handles across test files, causing timeouts, socket errors, and database failures. `bun run test` uses the existing security baseline runner to execute every regression and security test file in a separate process, with actual JUnit and logs retained under `artifacts/tests/`. Focused `bun test <file>` checks remain available.
 
 ## Full security verification
 
-`bun test` includes acceptance suites that require a report directory and, for worker isolation, pinned disposable images and a supported Linux/Docker runner. Read [isolated execution](../execution/README.md) for the environment and commands. An unavailable worker environment is a blocked check, not a passing isolation test.
+The full suite includes acceptance checks requiring pinned disposable images and a supported Linux/Docker runner. `bun run test` creates its own report directory; it preserves explicitly configured `ODWYN_SECURITY_*` worker variables. Read [isolated execution](../execution/README.md) for the environment and commands. An unavailable worker environment is a blocked check, not a passing isolation test.
+
+On an authorized disposable worker runner, execute every test without filtering:
+
+```sh
+ODWYN_SECURITY_SANDBOX_IMAGE=sha256:<terminal-image-id> \
+ODWYN_SECURITY_BROWSER_IMAGE=sha256:<browser-image-id> \
+ODWYN_SECURITY_ISOLATION_RUNNER=1 bun run test
+```
 
 `bun run check:codex` uses real subscription inference and consumes allowance. It uses a temporary test home; `ODWYN_SMOKE_CODEX_HOME` selects the signed-in source home. Review [scripts/check-codex.js](../scripts/check-codex.js) before running it.
 

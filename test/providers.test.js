@@ -120,7 +120,7 @@ test('OpenAI-compatible owner questions, resource denials, resume and cancel', a
     const body = JSON.parse(options.body); requests.push({ url, options, body });
     if (hanging) return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => { aborted = true; reject(new Error('Aborted')); }, { once: true }));
     if (requests.length === 1) return completion(null, call('odwyn_ask', { question: 'Budget?' }));
-    if (requests.length === 2) return completion(null, call('odwyn_browser', { action: 'screenshot', reason: 'Inspect the page' }));
+    if (requests.length === 2) return completion(null, call('odwyn_browser', { action: 'read', reason: 'Inspect the page' }));
     if (requests.length === 3) return completion(null, call('odwyn_search', { query: 'Serpong' }));
     if (requests.length === 4) return completion(null, call('odwyn_terminal', { command: 'printf api-terminal', reason: 'Check terminal access' }));
     return completion('Result saved.');

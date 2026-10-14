@@ -1,4 +1,4 @@
-import { $, esc, icon, api, handleError } from './ui.js';
+import {workspaceUrl, $, esc, icon, api, handleError } from './ui.js';
 
 let frame = null; let frameBusy = false; let getState; let emptyMarkup;
 const minimizedPreviews = new Set();
@@ -31,7 +31,7 @@ export async function refreshFrame() {
   if (frameBusy || document.hidden || (document.body.classList.contains('browser-closed') && !$('#conversation-browser')?.open)) return;
   frameBusy = true;
   try {
-    const response = await fetch('/api/browser/frame', { signal: AbortSignal.timeout(50_000) });
+    const response = await fetch(workspaceUrl('/api/browser/frame'), { signal: AbortSignal.timeout(50_000) });
     if (!response.ok) throw new Error('Browser preview unavailable');
     frame = await response.json();
     updateConversationFrame();

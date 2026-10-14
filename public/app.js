@@ -1,14 +1,15 @@
+import {setupWorkspaceHomes} from './workspace-homes.js';
 import {setupWorkspaceSettings} from './workspace-settings.js';
 import {setupSecurity} from './security-ui.js';
 import { renderWorkflows, setupWorkflows } from './workflows-ui.js';
-import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date } from './ui.js';
+import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date, workspaceUrl, workspaceId, storageKey } from './ui.js';
 import { renderHome, renderChat, insertMessages, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
 import { setupBrowser, updateBrowser } from './browser-ui.js';
 import { setupCustomization, applyProfile, openCustomization, fillWorkspaceAppearance, readWorkspaceAppearance } from './customize.js';
 import { defaults, agentColor, choices, ownerPreferenceKeys, avatarSvg, currencies, effortLevels } from './profile.js';
 
 // Carry browser preferences forward from the previous product name.
-for (const [storage, keys] of [[localStorage, ['agent','closed-agents','bubble-positions']], [sessionStorage, ['drafts']]]) {
+if (workspaceId === 'default') for (const [storage, keys] of [[localStorage, ['agent','closed-agents','bubble-positions']], [sessionStorage, ['drafts']]]) {
   for (const key of keys) {
     const previous = storage.getItem(`sidekick-${key}`);
     if (previous !== null && storage.getItem(`odwyn-${key}`) === null) storage.setItem(`odwyn-${key}`, previous);
@@ -24,7 +25,7 @@ function setSidebarCollapsed(collapsed) {
   button.querySelector('img').src = `/icons/lucide/panel-left-${collapsed ? 'open' : 'close'}.svg`;
   button.querySelector('span').textContent = collapsed ? 'Expand' : 'Collapse';
 }
-setSidebarCollapsed(localStorage.getItem('odwyn-sidebar-collapsed') === 'true' || (localStorage.getItem('odwyn-sidebar-collapsed') === null && matchMedia('(max-width:760px)').matches));
+setSidebarCollapsed(localStorage.getItem(storageKey('odwyn-sidebar-collapsed')) === 'true' || (localStorage.getItem(storageKey('odwyn-sidebar-collapsed')) === null && matchMedia('(max-width:760px)').matches));
 document.addEventListener('pointerdown',event => {
   if (document.documentElement.dataset.navigation === 'dock' && document.documentElement.dataset.dockAutoHide === 'true' && !event.target.closest('.dock-region') && document.activeElement.closest('.dock-region')) document.activeElement.blur();
 });
@@ -33,7 +34,7 @@ $('.dock-region').onclick = event => {
 };
 $('#sidebar-collapse').onclick = () => {
   const collapsed = !document.documentElement.classList.contains('sidebar-collapsed');
-  setSidebarCollapsed(collapsed);localStorage.setItem('odwyn-sidebar-collapsed',String(collapsed));
+  setSidebarCollapsed(collapsed);localStorage.setItem(storageKey('odwyn-sidebar-collapsed'),String(collapsed));
 };
 
 const navigationDock = $('#workspace-navigation'), dockItems = [...navigationDock.querySelectorAll('.dock-item')];
@@ -58,10 +59,10 @@ navigationDock.addEventListener('focusout',() => magnifyDock());
 for (const key of ['language','detail']) $(`#global-${key}`).innerHTML = Object.entries(choices[key]).map(([value,label])=>`<option value="${value}">${label}</option>`).join('');
 
 let state = null, conversationId = null, view = 'home', filter = 'all', signature = '', busy = false, attachments = [], pendingAttachments = [], providerAgentId = null, providerGlobal = false, providerAdding = false;
-let workspace = null, agentId = localStorage.getItem('odwyn-agent'), switching = false, dockSignature = '';
-const drafts = new Map(JSON.parse(sessionStorage.getItem('odwyn-drafts') || '[]'));
-const closedAgents = new Set(JSON.parse(localStorage.getItem('odwyn-closed-agents') || '[]'));
-const bubblePositions = JSON.parse(localStorage.getItem('odwyn-bubble-positions') || '{}');
+let workspace = null, agentId = localStorage.getItem(storageKey('odwyn-agent')), switching = false, dockSignature = '';
+const drafts = new Map(JSON.parse(sessionStorage.getItem(storageKey('odwyn-drafts')) || '[]'));
+const closedAgents = new Set(JSON.parse(localStorage.getItem(storageKey('odwyn-closed-agents')) || '[]'));
+const bubblePositions = JSON.parse(localStorage.getItem(storageKey('odwyn-bubble-positions')) || '{}');
 let transitionAgentId = null, drag = null, suppressBubbleClick = null;
 let renamingConversationId = null;
 let editingRoomId = null, roomListSignature = '', roomMembersSignature = '';
@@ -222,7 +223,7 @@ function placeBubble(bubble,x,y) {
 
 function saveBubblePosition(bubble) {
   bubblePositions[bubble.dataset.bubble] = {x:parseFloat(bubble.style.left)/Math.max(1,innerWidth-bubble.offsetWidth),y:parseFloat(bubble.style.top)/Math.max(1,innerHeight-bubble.offsetHeight)};
-  localStorage.setItem('odwyn-bubble-positions',JSON.stringify(bubblePositions));
+  localStorage.setItem(storageKey('odwyn-bubble-positions'),JSON.stringify(bubblePositions));
 }
 
 $('#agent-dock').addEventListener('pointerdown',event => {
@@ -273,22 +274,19 @@ async function switchAgent(nextId, { closing = false, sharedChat = null, keepDra
   if (!workspace || nextId === agentId || switching || busy || nextId && !workspace.agents.some(a => a.id === nextId)) return;
   if (nextId) closedAgents.delete(nextId);
   if (closing && agentId) closedAgents.add(agentId);
-  localStorage.setItem('odwyn-closed-agents',JSON.stringify([...closedAgents]));
+  localStorage.setItem(storageKey('odwyn-closed-agents'),JSON.stringify([...closedAgents]));
   switching = true; transitionAgentId = agentId; renderDock();
   const panel = $('#agent-workspace'); panel.inert = true;
   try {
-    if (agentId) {
-      drafts.set(agentId, { view, conversationId, filter, prompt:$('#prompt').value, height:$('#prompt').style.height, attachments, mode:$('#interaction-mode').value, scroll:$('#view').scrollTop, mainScroll:panel.scrollTop, paused:document.body.classList.contains('mascot-paused') });
-      sessionStorage.setItem('odwyn-drafts',JSON.stringify([...drafts]));
-    }
+    saveDraft();
     const currentDraft = drafts.get(agentId);
     await animateAgent(agentId,false);
-    agentId = nextId; localStorage.setItem('odwyn-agent',nextId || 'minimized');
+    agentId = nextId; localStorage.setItem(storageKey('odwyn-agent'),nextId || 'minimized');
     transitionAgentId = nextId;
     if (sharedChat || keepDraft) {
       const previous = keepDraft ? currentDraft : drafts.get(nextId);
       drafts.set(nextId,{...previous,view:'chat',conversationId:sharedChat,...(keepDraft || previous?.conversationId === sharedChat ? {} : {prompt:'',attachments:[],mode:'confirm',height:''})});
-      sessionStorage.setItem('odwyn-drafts',JSON.stringify([...drafts]));
+      sessionStorage.setItem(storageKey('odwyn-drafts'),JSON.stringify([...drafts]));
     }
     selectState(); const draft = restoreDraft();
     signature = ''; render(); setNavigation(false);
@@ -304,9 +302,16 @@ async function switchAgent(nextId, { closing = false, sharedChat = null, keepDra
 function closeAgent(id) {
   if (busy || switching) return;
   if (id === agentId) { void switchAgent(null,{closing:true}); return; }
-  closedAgents.add(id); localStorage.setItem('odwyn-closed-agents',JSON.stringify([...closedAgents])); signature = ''; render();
+  closedAgents.add(id); localStorage.setItem(storageKey('odwyn-closed-agents'),JSON.stringify([...closedAgents])); signature = ''; render();
   $('#agent-announcement').textContent = 'Conversation closed. Available in history.';
 }
+
+function saveDraft() {
+  if (!agentId) return;
+  drafts.set(agentId, { view, conversationId, filter, prompt:$('#prompt').value, height:$('#prompt').style.height, attachments, mode:$('#interaction-mode').value, scroll:$('#view').scrollTop, mainScroll:$('#agent-workspace').scrollTop, paused:document.body.classList.contains('mascot-paused') });
+  sessionStorage.setItem(storageKey('odwyn-drafts'),JSON.stringify([...drafts]));
+}
+addEventListener('pagehide',saveDraft);
 
 function restoreDraft() {
   const draft = drafts.get(agentId);
@@ -323,7 +328,7 @@ function renderAttachments() {
     const image = file.mimeType?.startsWith('image/');
     const type = file.name.includes('.') ? file.name.split('.').at(-1).toUpperCase() : image ? file.mimeType.split('/')[1].toUpperCase() : 'FILE';
     const size = file.size ? (file.size < 1024 * 1024 ? `${Math.ceil(file.size / 1024)} KB` : `${(file.size / (1024 * 1024)).toFixed(1)} MB`) : '';
-    const thumbnail = file.uploading ? `<span class="attachment-loading" role="status" aria-label="Uploading ${esc(file.name)}">Uploading…</span>` : image ? `<img src="/api/files/${esc(file.id)}/preview" alt="Preview of ${esc(file.name)}">` : `<span class="attachment-file-icon">${icon('paperclip')}</span>`;
+    const thumbnail = file.uploading ? `<span class="attachment-loading" role="status" aria-label="Uploading ${esc(file.name)}">Uploading…</span>` : image ? `<img src="${esc(workspaceUrl(`/api/files/${file.id}/preview`))}" alt="Preview of ${esc(file.name)}">` : `<span class="attachment-file-icon">${icon('paperclip')}</span>`;
     const content = `${thumbnail}<span class="attachment-info"><strong title="${esc(file.name)}">${esc(file.name)}</strong><small>${file.uploading ? 'Uploading' : esc([type,size].filter(Boolean).join(' · '))}</small></span>`;
     return `<div class="attachment-chip">${image && !file.uploading ? `<button type="button" class="attachment-preview" data-preview-file="${esc(file.id)}" aria-label="Preview ${esc(file.name)}">${content}</button>` : `<div class="attachment-preview">${content}</div>`}${file.uploading ? '' : `<button type="button" class="attachment-remove" data-remove-attachment="${esc(file.id)}" aria-label="Remove ${esc(file.name)}">${icon('close')}</button>`}</div>`;
   }).join('');
@@ -422,12 +427,12 @@ function render() {
 
 async function refresh() {
   try {
-    const response = await fetch(`/api/state${state ? `?revision=${state.revision}` : ''}`);
+    const response = await fetch(workspaceUrl(`/api/state${state ? `?revision=${state.revision}` : ''}`));
     if (response.status === 204) return;
     if (!response.ok) throw new Error('Connection lost. Reload to sign in.');
     workspace = await response.json();
     if (agentId === 'minimized') agentId = null;
-    else if (agentId !== null && !workspace.agents.some(a => a.id === agentId) || !state && agentId === null && localStorage.getItem('odwyn-agent') !== 'minimized') agentId = workspace.agents[0].id;
+    else if (agentId !== null && !workspace.agents.some(a => a.id === agentId) || !state && agentId === null && localStorage.getItem(storageKey('odwyn-agent')) !== 'minimized') agentId = workspace.agents[0].id;
     selectState(); render();
   } catch (error) { $('#connection-label').textContent = 'Reconnecting…'; $('.connection').classList.remove('connected'); if (!state) handleError(error); }
 }
@@ -641,7 +646,7 @@ async function deleteConversation(id) {
   try {
     await api(`/api/conversations/${id}`,{},'DELETE');
     for (const [key,draft] of drafts) if (draft.conversationId===id) drafts.delete(key);
-    sessionStorage.setItem('odwyn-drafts',JSON.stringify([...drafts])); roomRecipients.delete(id);
+    sessionStorage.setItem(storageKey('odwyn-drafts'),JSON.stringify([...drafts])); roomRecipients.delete(id);
     if (conversationId===id) { $('#prompt').value=''; $('#prompt').style.height=''; attachments=[]; renderAttachments(); }
     $('#rename-dialog').close(); $('#room-header').close();
     await refresh(); navigate(); toast('Conversation deleted. Agents and files kept.');
@@ -805,7 +810,7 @@ document.addEventListener('click', event => {
     $('#image-preview-image').alt = `Preview of ${file.name}`;
     $('#image-preview-image').hidden = false;
     $('#image-preview-status').textContent = 'Loading image…';
-    $('#image-preview-image').src = `/api/files/${encodeURIComponent(file.id)}/preview`;
+    $('#image-preview-image').src = workspaceUrl(`/api/files/${encodeURIComponent(file.id)}/preview`);
     $('#image-preview').showModal(); return;
   }
   if (target.dataset.mentionCommand) { navigate('workflows');return; }
@@ -817,8 +822,8 @@ document.addEventListener('click', event => {
       if (confirm(`Delete ${agent.customization?.name || defaults.name}? Its routines will be removed. Chat history and files stay saved.`)) void perform(async () => {
         await api(`/api/agents/${id}`,{},'DELETE');
         drafts.delete(id); closedAgents.delete(id); delete bubblePositions[id];
-        sessionStorage.setItem('odwyn-drafts',JSON.stringify([...drafts])); localStorage.setItem('odwyn-closed-agents',JSON.stringify([...closedAgents])); localStorage.setItem('odwyn-bubble-positions',JSON.stringify(bubblePositions));
-        await refresh(); localStorage.setItem('odwyn-agent',agentId || 'minimized');
+        sessionStorage.setItem(storageKey('odwyn-drafts'),JSON.stringify([...drafts])); localStorage.setItem(storageKey('odwyn-closed-agents'),JSON.stringify([...closedAgents])); localStorage.setItem(storageKey('odwyn-bubble-positions'),JSON.stringify(bubblePositions));
+        await refresh(); localStorage.setItem(storageKey('odwyn-agent'),agentId || 'minimized');
         toast('Agent deleted. Chat history and files kept.');
       });
     } else void switchAgent(id).then(() => { setNavigation(false); if (action === 'customize') openCustomization(); else openAgentProvider(); });
@@ -869,6 +874,7 @@ new ResizeObserver(() => {
 }).observe($('#composer-area'));
 
 $('#view').innerHTML = '<div class="loading-state" role="status"><img src="/mark.svg" width="48" height="48" alt=""><p>Making room for your day…</p></div>';
+setupWorkspaceHomes();
 await refresh();
 if (state && agentId) { restoreDraft(); signature = ''; render(); }
 const initial = location.hash.slice(1).split('/');

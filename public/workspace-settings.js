@@ -1,7 +1,7 @@
-import {$,esc,api} from './ui.js';
+import {workspaceUrl,$,esc,api} from './ui.js';
 import {freshPassword} from './security-ui.js';
 const options=rows=>rows.map(r=>`<option value="${esc(r.id??r.name)}">${esc(r.name)}</option>`).join('');
-const get=async path=>{const response=await fetch(path),value=await response.json();if(!response.ok)throw new Error(value.error||'Could not load Workspace Settings.');return value;};
+const get=async path=>{const response=await fetch(workspaceUrl(path)),value=await response.json();if(!response.ok)throw new Error(value.error||'Could not load Workspace Settings.');return value;};
 const resourceTypes={memory:'Notes and recall',workspace:'Isolated workspace',repository:'Repository',browser:'Browsing',file:'File artifact',connector:'Scoped MCP document',payment:'Payment target',destination:'Message destination',environment:'Production environment',routine:'Routine',room:'Room'};
 const adapters={'mcp-document-v1':'Scoped MCP document','git-https-v1':'Scoped Git','action-gateway-v1':'Approved action gateway'};
 export function setupWorkspaceSettings(refresh){
@@ -28,7 +28,7 @@ export function setupWorkspaceSettings(refresh){
  function drawResources(){const spaceId=$('#workspace-resource-space').value;fillSelect('#workspace-resource',resources.filter(r=>r.spaceId===spaceId));fillSelect('#workspace-resource-workspace',resources.filter(r=>r.spaceId===spaceId&&r.type==='workspace'));$('#workspace-resource-workspace').insertAdjacentHTML('afterbegin','<option value="">No workspace</option>');fillSelect('#workspace-resource-connection',connections.filter(r=>r.spaceId===spaceId).map(r=>({...r,name:r.name+(r.enabled?'':' (disabled)')})));$('#workspace-resource-connection').insertAdjacentHTML('afterbegin','<option value="">No connection</option>');availability();}
  function drawConnections(){fillSelect('#workspace-connection',connections.filter(r=>r.spaceId===$('#workspace-connection-space').value).map(r=>({...r,name:r.name+(r.enabled?'':' (disabled)')})));availability();}
  async function load(){[spaces,resources,connections,presets,catalog]=await Promise.all([get('/api/spaces'),get('/api/resources'),get('/api/connectors').then(r=>r.connectors),get('/api/security/presets'),get('/api/capabilities').then(r=>r.capabilities)]);draw();}
- function showSection(next){reset();section=next;document.querySelectorAll('[data-settings-panel]').forEach(panel=>panel.hidden=panel.dataset.settingsPanel!==section);document.querySelectorAll('[data-settings-section]').forEach(button=>button.dataset.settingsSection===section?button.setAttribute('aria-current','page'):button.removeAttribute('aria-current'));$('#preferences-form > .form-footer').hidden=isManagement();$('#workspace-management-status').hidden=!isManagement();$('.settings-scroll').scrollTop=0;status('');if(isManagement())run(load)();}
+ function showSection(next){reset();section=next;document.querySelectorAll('[data-settings-panel]').forEach(panel=>panel.hidden=panel.dataset.settingsPanel!==section);document.querySelectorAll('[data-settings-section]').forEach(button=>button.dataset.settingsSection===section?button.setAttribute('aria-current','page'):button.removeAttribute('aria-current'));$('#preferences-form > .form-footer').hidden=isManagement()||section==='sharing';$('#workspace-management-status').hidden=!isManagement();$('.settings-scroll').scrollTop=0;status('');if(isManagement())run(load)();}
  document.querySelectorAll('[data-settings-section]').forEach(button=>button.onclick=()=>{if(!busy)showSection(button.dataset.settingsSection);});
  $('#settings-dialog').addEventListener('settings-open',()=>showSection('appearance'));
  $('#settings-dialog').addEventListener('close',reset);

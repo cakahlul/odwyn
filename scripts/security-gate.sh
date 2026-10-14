@@ -47,7 +47,7 @@ python3 scripts/verify-security-catalog.py --phase "$phase" --repo-root "$REPO" 
 test_status=0
 for (( i=0; i<=phase; i++ )); do
   echo "RUN security phase $i"
-  bun test "tests/security/phase$i" --reporter=junit --reporter-outfile="$REPORT_DIR/phase$i.junit.xml" 2>&1 | tee "$REPORT_DIR/phase$i.log" || test_status=1
+  bun --no-env-file test "tests/security/phase$i" --reporter=junit --reporter-outfile="$REPORT_DIR/phase$i.junit.xml" 2>&1 | tee "$REPORT_DIR/phase$i.log" || test_status=1
 done
 
 # Correlate actual executed JUnit test names with all mandatory catalog IDs,

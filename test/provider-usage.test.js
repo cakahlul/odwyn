@@ -29,7 +29,7 @@ test('provider usage refreshes, stays per-agent, handles failures, and appears i
     await app.runtime.refreshAccount();
     expect(requests).toContain('account/rateLimits/read');
     expect(app.runtime.accounts.get(agent.id).usage.limits).toHaveLength(2);
-    await page.goto(server.url.href);await page.locator('#settings-open').click();
+    await page.goto(server.url.href);await page.locator('#settings-open').click();await page.locator('[data-settings-section=provider]').click();
     await page.getByText('35% used',{exact:false}).waitFor();
     expect(await page.locator('#provider-usage meter').count()).toBe(2);
     expect(await page.locator('#provider-usage').textContent()).toContain('codex · 5-hour');
@@ -48,7 +48,7 @@ test('provider usage refreshes, stays per-agent, handles failures, and appears i
     await page.getByText('50% used',{exact:false}).waitFor();
     expect(app.runtime.accounts.get(agent.id).usageError).toBeNull();
     const config=validateProvider({type:'claude'});provider.configure(config);agent.provider=config;state.provider=config;state.globalProvider=config;
-    await app.runtime.refreshAccount();await page.reload();await page.locator('#settings-open').click();
+    await app.runtime.refreshAccount();await page.reload();await page.locator('#settings-open').click();await page.locator('[data-settings-section=provider]').click();
     await page.getByText('No limits reported yet.',{exact:false}).waitFor();
     provider.updateUsage({limits:[{id:'five_hour',name:'5-hour limit',status:'allowed',resetsAt:1900000000,usedPercent:null}],lastRun:{inputTokens:123,outputTokens:45}});
     await page.getByText('Usage percentage unavailable',{exact:false}).waitFor();

@@ -1,5 +1,5 @@
-import {$,esc,api,handleError} from './ui.js';
-const get=async path=>{const r=await fetch(path);const value=await r.json();if(!r.ok)throw new Error(value.error||'Could not load security settings.');return value;};
+import {workspaceUrl,$,esc,api,handleError} from './ui.js';
+const get=async path=>{const r=await fetch(workspaceUrl(path));const value=await r.json();if(!r.ok)throw new Error(value.error||'Could not load security settings.');return value;};
 const options=(rows,key='id',label='name')=>rows.map(r=>`<option value="${esc(r[key])}">${esc(r[label])}</option>`).join('');
 export function setupSecurity(getState){
  let agent,access,spaces,resources,catalog,presets,requestedAgent;

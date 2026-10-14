@@ -1,6 +1,9 @@
 import { Marked, Renderer } from '/vendor/marked.js';
 
 export const $ = selector => document.querySelector(selector);
+export const workspaceId = typeof location === 'undefined' ? 'default' : new URLSearchParams(location.search).get('workspace') || 'default';
+export const workspaceUrl = path => workspaceId === 'default' ? path : `${path}${path.includes('?') ? '&' : '?'}workspace=${encodeURIComponent(workspaceId)}`;
+export const storageKey = key => workspaceId === 'default' ? key : `${key}:${workspaceId}`;
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 const paths = {
   home: '<path d="m3 10 9-7 9 7v11h-6v-7H9v7H3V10Z"/>',
@@ -35,7 +38,7 @@ export const activeStatuses = ['queued','running','waiting','takeover','stopping
 export const statusLabels = { queued:'In line', running:'Working', waiting:'Needs you', takeover:'You’re in control', completed:'Done', failed:'Blocked', interrupted:'Interrupted', cancelled:'Stopped', resumed:'Resumed', stopping:'Stopping' };
 export const badge = status => `<span class="badge badge-${esc(status)}"><span></span>${esc(statusLabels[status] || status)}</span>`;
 export async function api(path, body, method = 'POST') {
-  const response = await fetch(path, { method, headers: body instanceof FormData ? {} : { 'content-type':'application/json' }, body: body instanceof FormData ? body : JSON.stringify(body || {}) });
+  const response = await fetch(workspaceUrl(path), { method, headers: body instanceof FormData ? {} : { 'content-type':'application/json' }, body: ['GET','HEAD'].includes(method) ? undefined : body instanceof FormData ? body : JSON.stringify(body || {}) });
   const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Request failed.'); return result;
 }
 let toastTimer;

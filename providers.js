@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { join } from 'node:path';
 import { Codex } from './codex.js';
 import { effortLevels } from './public/profile.js';
 import { textInput } from './security.js';
@@ -38,9 +39,10 @@ function codexLimits(data) {
 
 // Adapt the two additional providers to the existing task/tool protocol.
 export class AIProvider extends EventEmitter {
-  constructor({ config, home, workspace, codex, fetch = globalThis.fetch, query, claudeCommand = (process.env.ODWYN_CLAUDE_COMMAND ?? process.env.SIDEKICK_CLAUDE_COMMAND) || 'claude', claudeAuth }) {
+  constructor({ config, home, workspace, isolated = false, codex, fetch = globalThis.fetch, query, claudeCommand = (process.env.ODWYN_CLAUDE_COMMAND ?? process.env.SIDEKICK_CLAUDE_COMMAND) || 'claude', claudeAuth }) {
     super(); this.config = config; this.workspace = workspace; this.fetch = fetch; this.query = query; this.claudeCommand = claudeCommand; this.claudeAuth = claudeAuth;
-    this.codex = codex || new Codex({ home, workspace, model: config.model, effort:config.effort });
+    this.env = isolated ? {...process.env,CLAUDE_CONFIG_DIR:join(home,'claude'),ANTHROPIC_API_KEY:undefined,ANTHROPIC_AUTH_TOKEN:undefined,CLAUDE_CODE_OAUTH_TOKEN:undefined} : process.env;
+    this.codex = codex || new Codex({ home, workspace, isolated, ...(isolated ? {mcpHome:home} : {}), model: config.model, effort:config.effort });
     this.pending = new Map(); this.token = {}; this.thread = null; this.run = null;
     for (const event of ['notification', 'request', 'disconnect', 'protocolError']) this.codex.on(event, (...args) => {
       if (this.config.type !== 'codex') return;
@@ -83,7 +85,7 @@ export class AIProvider extends EventEmitter {
         stream = (this.query || query)({prompt:(async function* () {})(), options:{
           cwd:this.workspace, pathToClaudeCodeExecutable:Bun.which(this.claudeCommand) || this.claudeCommand,
           abortController:controller, tools:[], settingSources:[], mcpServers:{}, strictMcpConfig:true,
-          settings:{disableAllHooks:true}, env:{...process.env, CLAUDECODE:undefined},
+          settings:{disableAllHooks:true}, env:{...this.env, CLAUDECODE:undefined},
         }});
         return (await stream.supportedModels()).map(model => ({id:model.value, name:model.displayName || model.value}));
       } finally { clearTimeout(timer); stream?.close(); }
@@ -111,7 +113,7 @@ export class AIProvider extends EventEmitter {
         login.stream = (this.query || query)({prompt:(async function* () {})(),options:{
           cwd:this.workspace, pathToClaudeCodeExecutable:Bun.which(this.claudeCommand) || this.claudeCommand,
           abortController:controller, tools:[], settingSources:[], mcpServers:{}, strictMcpConfig:true,
-          settings:{disableAllHooks:true}, env:{...process.env,CLAUDECODE:undefined},
+          settings:{disableAllHooks:true}, env:{...this.env,CLAUDECODE:undefined},
         }});
         // ponytail: OAuth controls exist in the pinned SDK runtime; check them when upgrading the SDK.
         const result = await login.stream.claudeAuthenticate(true), url = new URL(result.manualUrl);
@@ -136,7 +138,7 @@ export class AIProvider extends EventEmitter {
     if (method === 'account/read') {
       if (this.config.type === 'openai') return { account: { type: 'openai', planType: 'API' } };
       try {
-        const status = this.claudeAuth ? await this.claudeAuth() : JSON.parse((await promisify(execFile)(this.claudeCommand, ['auth', 'status', '--json'], { cwd: this.workspace, timeout: 15_000, maxBuffer: 100_000 })).stdout);
+        const status = this.claudeAuth ? await this.claudeAuth() : JSON.parse((await promisify(execFile)(this.claudeCommand, ['auth', 'status', '--json'], { cwd: this.workspace, env:this.env, timeout: 15_000, maxBuffer: 100_000 })).stdout);
         return { account: status.loggedIn ? { type: 'claude', planType: 'Claude Code', email: status.email } : null };
       } catch { throw new Error('Claude Code sign-in status is unavailable. Check installation, then connect again.'); }
     }
@@ -246,7 +248,7 @@ export class AIProvider extends EventEmitter {
         settings: { disableAllHooks: true }, extraArgs: { 'disable-slash-commands': null },
         allowedTools: run.thread.dynamicTools.map(t => `mcp__odwyn__${t.name}`),
         canUseTool: async () => ({ behavior: 'deny', message: 'Use Odwyn tools only.' }),
-        env: { ...process.env, CLAUDECODE: undefined, MCP_TOOL_TIMEOUT: '3600000' },
+        env: { ...this.env, CLAUDECODE: undefined, MCP_TOOL_TIMEOUT: '3600000' },
       },
     });
     run.stream = stream; let itemId = randomUUID(), text = '', resultSeen = false;

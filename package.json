@@ -6,7 +6,7 @@
   "scripts": {
     "setup": "bun scripts/setup.js",
     "start": "bun server.js",
-    "test": "bun test",
+    "test": "bun scripts/test.js",
     "check:workflows": "bun scripts/check-workflows.js",
     "check:browser": "bun scripts/check-browser.js",
     "check:settings": "bun scripts/check-settings.js",

@@ -1,7 +1,25 @@
 import { test, expect } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
+
+test('Phase 0 catalog rejects missing IDs and downgraded phases or proof requirements', () => {
+  const directory=mkdtempSync(join(tmpdir(),'odwyn-catalog-'));
+  const catalog=JSON.parse(readFileSync('docs/security/SECURITY_ACCEPTANCE_CASES.json','utf8'));
+  const coverage=JSON.parse(readFileSync('tests/security/coverage.json','utf8'));
+  const catalogFile=join(directory,'docs/security/SECURITY_ACCEPTANCE_CASES.json');
+  const run=()=>Bun.spawnSync(['python3',resolve('scripts/verify-security-catalog.py'),'--phase','5','--repo-root',directory],{env:{...process.env,PYTHONOPTIMIZE:'1'}});
+  try {
+    for(const path of ['docs/security/SECURITY_ACCEPTANCE_CASES.json','tests/security/coverage.json',...new Set(coverage.map(row=>row.testFile))]){
+      const target=join(directory,path);mkdirSync(dirname(target),{recursive:true});writeFileSync(target,readFileSync(path));
+    }
+    expect(run().exitCode).toBe(0);
+    for(const change of [copy=>copy.cases.pop(),copy=>copy.cases[0].phase=5,copy=>copy.cases.find(row=>row.id==='EXEC-001').layer='functional']){
+      const copy=structuredClone(catalog);change(copy);writeFileSync(catalogFile,JSON.stringify(copy));
+      expect(run().exitCode).not.toBe(0);
+    }
+  }finally{rmSync(directory,{recursive:true,force:true});}
+});
 
 test('Phase 0 supplied verifier rejects missing skipped failed and unproved executions', () => {
   const directory = mkdtempSync(join(tmpdir(), 'odwyn-verifier-'));
@@ -20,6 +38,13 @@ test('Phase 0 supplied verifier rejects missing skipped failed and unproved exec
     mkdirSync(join(artifacts, 'proof'));
     writeFileSync(join(artifacts, 'proof/FIXTURE-001.json'), JSON.stringify({caseId:'FIXTURE-001', verified:true, environment:'validator fixture only', observations:{fixture:true}}));
     expect(run().exitCode).toBe(0);
+    writeFileSync(join(artifacts, 'proof/FIXTURE-001.json'), JSON.stringify({caseId:'FIXTURE-001', verified:true, environment:'validator fixture only', observations:{probeExecuted:false}}));
+    expect(run().exitCode).toBe(2);
+    writeFileSync(join(artifacts, 'proof/FIXTURE-001.json'), JSON.stringify({caseId:'FIXTURE-001', verified:true, environment:'validator fixture only', observations:{fixture:true}}));
+    writeFileSync(join(artifacts, 'phase0.junit.xml'), `<testsuites><testsuite><testcase name="${name}"/><testcase name="${name}"/></testsuite></testsuites>`);
+    expect(run().exitCode).toBe(2);
+    writeFileSync(join(artifacts, 'phase0.junit.xml'), '<testsuites>');
+    expect(run().exitCode).toBe(2);
     writeFileSync(join(artifacts, 'phase0.junit.xml'), '<testsuites><testsuite><testcase name="wrong name"/></testsuite></testsuites>');
     expect(run().exitCode).toBe(2);
   } finally {rmSync(directory, {recursive:true, force:true});}
