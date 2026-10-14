@@ -239,6 +239,8 @@ export class Runtime {
   roomInput(id, input) {
     const attachments = validateAttachments(this.state,input.attachments);
     const room = findRoom(this.state,id), prompt = textInput(input.prompt || (attachments.length ? 'Describe the attached files.' : input.prompt));
+    if (Object.hasOwn(input,'spaceId') && input.spaceId !== room.spaceId) throw new Error('Room Space cannot change.');
+    for (const agentId of room.memberIds) this.store.security.visible(agentId,room.spaceId);
     const mentions = [...prompt.matchAll(/(?:^|\s)@("(?:\\.|[^"\\\n])*"|[\p{L}\p{N}_-]+)/gu)];
     const mentioned = mentions.map(match => {
       const name = (match[1].startsWith('"') ? JSON.parse(match[1]) : match[1]).toLowerCase();
@@ -338,6 +340,7 @@ export class Runtime {
       const access=this.store.security.visible(job.agentId,job.spaceId);
       if (job.workflowRunId && await this.startWorkflowStep(job)) return;
       const conversation = this.conversation(job);
+      if (conversation.kind === 'room') this.store.data.roomCheck(job,[]);
       this.store.data.sync();const permitted=new Set(this.store.data.history(job,conversation.id).map(m=>m.id));
       this.store.data.assertHandoff(job,this.store.data.history(job,conversation.id).filter(m=>m.role==='assistant'&&m.jobId).map(m=>m.jobId));
       const order = new Map(this.state.jobs.map((item,index) => [item.id,index]));
@@ -615,6 +618,7 @@ export class Runtime {
       else throw new Error('Unknown Odwyn tool.');
       result=this.store.connectors.sanitize(result);
       if(capability && !['odwyn_remember','odwyn_schedule'].includes(params.tool))this.store.data.note(job,args.resourceId,capability);
+      if (this.conversation(job).kind === 'room') this.store.data.roomCheck(job);
       if (workflowAction) {const {image,...output}=result;return output;}
       const image = result.image; delete result.image;
       const contentItems = [{ type: 'inputText', text: JSON.stringify(result) }];
@@ -667,8 +671,13 @@ export class Runtime {
         discussion.status = 'paused';
         for (const queued of round.filter(j=>j.status==='queued')) this.finish(queued,'cancelled');
       } else if (discussion.outcome && discussion.memberIds.every(id=>discussion.outcome.confirmations[id])) {
-        discussion.status = 'completed';
-        conversation.messages.push({id:randomUUID(),role:'assistant',agentId:discussion.memberIds[0],jobId:job.id,at:new Date().toISOString(),roomReport:true,text:`Discussion result:\n${discussion.outcome.result}\n\nNext plan:\n${discussion.outcome.nextPlan}`});
+        const outcome = this.store.data.proposal(job,discussion.outcome);
+        if (outcome) {
+          discussion.status = 'completed';
+          conversation.messages.push({id:randomUUID(),role:'assistant',agentId:discussion.memberIds[0],jobId:job.id,at:new Date().toISOString(),roomReport:true,text:`Discussion result:\n${outcome.result}\n\nNext plan:\n${outcome.nextPlan}`});
+        } else {
+          discussion.status = 'paused'; job.status = 'failed'; job.error = 'Room proposal disclosure denied.';
+        }
         for (const queued of round.filter(j=>j.status==='queued')) this.finish(queued,'cancelled');
       } else {
         const turns = this.state.jobs.filter(j=>j.roomRoundId===discussion.id).length;

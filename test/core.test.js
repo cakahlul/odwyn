@@ -25,9 +25,9 @@ test('rooms persist participants and keep ordinary chats separate', () => {
   try {
     const primary = store.state.agents[0].id;
     store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}},{id:'writer',customization:{...defaults,name:'Writer'}});
-    for (const memberIds of [[primary],[primary,primary],[primary,'missing'],null]) expect(()=>createRoom(store.state,{title:'Trip room',memberIds})).toThrow();
+    for (const memberIds of [[primary],[primary,primary],[primary,'missing'],null]) expect(()=>createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Trip room',memberIds})).toThrow();
     expect(store.state.conversations).toHaveLength(0);
-    const room = createRoom(store.state,{title:'  Trip room  ',memberIds:[primary,'scout']});
+    const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'  Trip room  ',memberIds:[primary,'scout']});
     expect(room.title).toBe('Trip room'); expect(room.kind).toBe('room');
     expect(()=>createJob(store.state,{conversationId:room.id,agentId:'writer',prompt:'Outside room'})).toThrow();
     expect(room.messages).toHaveLength(0);

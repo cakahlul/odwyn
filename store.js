@@ -118,24 +118,26 @@ export function findRoom(state, id) {
   return room;
 }
 
-function roomDetails(state, input) {
+function roomDetails(state, input, spaceId) {
   const title = textInput(input.title,70);
   if (/[\x00-\x1f\x7f]/.test(title)) throw new Error('Use a single line for the room name.');
   const memberIds = input.memberIds;
   if (!Array.isArray(memberIds) || memberIds.length < 2 || memberIds.length > 5 || memberIds.some(id => typeof id !== 'string' || !id) || new Set(memberIds).size !== memberIds.length) throw new Error('Choose 2 to 5 different agents.');
-  memberIds.forEach(id => findAgent(state,id));
+  for (const id of memberIds) { findAgent(state,id); state[statePolicy].visible(id,spaceId); }
   return {title,memberIds:[...memberIds]};
 }
 
 export function createRoom(state, input) {
-  const details = roomDetails(state,input);
-  const spaceId=input.spaceId??state[statePolicy]?.legacySpaceId;for(const id of details.memberIds)state[statePolicy]?.visible(id,spaceId);
+  const spaceId = input.spaceId;
+  const details = roomDetails(state,input,spaceId);
   const room = {id:randomUUID(),kind:'room',spaceId,...details,agentId:details.memberIds[0],createdAt:new Date().toISOString(),messages:[]};
   state.conversations.unshift(room); return room;
 }
 
 export function updateRoom(state, id, input) {
-  const room = findRoom(state,id), details = roomDetails(state,input);
+  const room = findRoom(state,id);
+  if (Object.hasOwn(input,'spaceId') && input.spaceId !== room.spaceId) throw new Error('Room Space cannot change.');
+  const details = roomDetails(state,input,room.spaceId);
   if (state.jobs.some(j => j.conversationId === id && ['queued','running','waiting','takeover','stopping'].includes(j.status))) throw new Error('Stop the room discussion before editing its participants.');
   Object.assign(room,details,{agentId:details.memberIds[0]});
   if (!details.memberIds.includes(room.lastAgentId)) room.lastAgentId = room.agentId;
@@ -155,7 +157,10 @@ export function createJob(state, input, recordMessage = true) {
   let conversation = input.conversationId && state.conversations.find(c => c.id === input.conversationId);
   if (input.conversationId && !conversation) throw new Error('Conversation not found.');
   const agent = findAgent(state, input.agentId ?? conversation?.lastAgentId ?? conversation?.agentId);
-  if (conversation?.kind === 'room' && !conversation.memberIds.includes(agent.id)) throw new Error('This agent is not in the room.');
+  if (conversation?.kind === 'room') {
+    if (!conversation.memberIds.includes(agent.id)) throw new Error('This agent is not in the room.');
+    for (const id of conversation.memberIds) state[statePolicy].visible(id,conversation.spaceId);
+  }
   const policy=state[statePolicy], spaceId=input.spaceId ?? conversation?.spaceId ?? policy?.defaultSpace(agent.id);
   if (conversation && input.spaceId && input.spaceId !== conversation.spaceId) throw new Error('Conversation Space cannot change.');
   state[stateData]?.sync();for(const id of attachments)state[stateData]?.assertFileSpace(id,spaceId);

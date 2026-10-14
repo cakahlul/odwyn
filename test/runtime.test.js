@@ -137,7 +137,7 @@ test('task cleanup blocks the next task, skips queued cancellations and owner ta
     }
     store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
     runtime.addProvider('scout',new FakeCodex()); await runtime.refreshAccount('scout');
-    const room = createRoom(store.state,{title:'Shared work',memberIds:[store.state.agents[0].id,'scout']});
+    const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Shared work',memberIds:[store.state.agents[0].id,'scout']});
     runtime.submitRoom(room.id,{prompt:'Discuss'}); await runtime.drain();
     runtime.finish(runtime.active,'completed');
     expect(resets).toBe(4);
@@ -156,7 +156,7 @@ test('rooms choose a relevant opener and follow replies instead of fixed partici
   const primary = store.state.agents[0].id, first = new FakeCodex(), scout = new FakeCodex(), writer = new FakeCodex();
   store.state.customization = {...defaults,name:'Pip',specialization:'Coding and debugging'};
   store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout',specialization:'Travel flights and itineraries'}},{id:'writer',customization:{...defaults,name:'Writer',specialization:'Writing and editing'}});
-  const room = createRoom(store.state,{title:'Group',memberIds:[primary,'writer','scout']});
+  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Group',memberIds:[primary,'writer','scout']});
   const runtime = new Runtime({store,codex:first,browser:{},workspace:dir});
   runtime.addProvider('scout',scout); runtime.addProvider('writer',writer);
   const handoff = async agentId => {
@@ -214,7 +214,7 @@ test('empty assistant output never persists while streamed text and turn fallbac
   const dir = mkdtempSync(join(tmpdir(),'odwyn-empty-messages-')), store = openStore(dir), codex = new FakeCodex();
   const primary = store.state.agents[0].id;
   store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
-  const room = createRoom(store.state,{title:'Empty output',memberIds:[primary,'scout']});
+  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Empty output',memberIds:[primary,'scout']});
   const runtime = new Runtime({store,codex,browser:{},workspace:dir});
   try {
     await runtime.refreshAccount();
@@ -241,7 +241,7 @@ test('empty assistant output never persists while streamed text and turn fallbac
 test('AI file attachments persist in ordinary chats and rooms with the producing agent', async () => {
   const dir = mkdtempSync(join(tmpdir(),'odwyn-file-runtime-')), store = openStore(dir), codex = new FakeCodex();
   const primary = store.state.agents[0].id; store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
-  const room = createRoom(store.state,{title:'Files room',memberIds:[primary,'scout']});
+  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Files room',memberIds:[primary,'scout']});
   const runtime = new Runtime({store,codex,browser:{},workspace:dir});
   try {
     await runtime.refreshAccount(); writeFileSync(join(dir,'report.csv'),'Name,Result\nTask,Done\n');
@@ -269,7 +269,7 @@ test('room goals continue automatically, require everyone to verify completion, 
   store.state.customization = {...defaults,name:'Pip'};
   const primary = store.state.agents[0].id;
   store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
-  const room = createRoom(store.state,{title:'Goal room',memberIds:[primary,'scout']});
+  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Goal room',memberIds:[primary,'scout']});
   const runtime = new Runtime({store,codex:first,browser:{},workspace:dir}); runtime.addProvider('scout',second);
   const complete = async (done = false) => {
     await runtime.drain(); const job = runtime.active, provider = runtime.providers.get(job.agentId);
@@ -344,7 +344,7 @@ test('room agents agree on one revised project recommendation and publish one co
   const dir = mkdtempSync(join(tmpdir(),'odwyn-room-agreement-')), store = openStore(dir);
   const first = new FakeCodex(), second = new FakeCodex(), primary = store.state.agents[0].id;
   store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
-  const room = createRoom(store.state,{title:'Tere Report',memberIds:[primary,'scout']});
+  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Tere Report',memberIds:[primary,'scout']});
   const runtime = new Runtime({store,codex:first,browser:{},workspace:dir}); runtime.addProvider('scout',second);
   const verify = async args => {
     const job = runtime.active, provider = runtime.providers.get(job.agentId);
@@ -392,7 +392,7 @@ test('room redirects interrupt a turn that is still starting before beginning th
   const dir = mkdtempSync(join(tmpdir(),'odwyn-room-start-')), store = openStore(dir), provider = new FakeCodex();
   const primary = store.state.agents[0].id;
   store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
-  const room = createRoom(store.state,{title:'Starting room',memberIds:[primary,'scout']});
+  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Starting room',memberIds:[primary,'scout']});
   const runtime = new Runtime({store,codex:provider,browser:{},workspace:dir});
   const original = provider.request.bind(provider); let release, started;
   const starting = new Promise(resolve=>started=resolve), gate = new Promise(resolve=>release=resolve);
@@ -435,7 +435,7 @@ test('room discussions share one owner message, take turns with context, and sto
   store.state.customization = {...defaults,name:'Pip'};
   const primary = store.state.agents[0].id;
   store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
-  const room = createRoom(store.state,{title:'Travel room',memberIds:[primary,'scout']});
+  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Travel room',memberIds:[primary,'scout']});
   let label='Search',browserCalls=0;
   const browser={last:{url:'https://example.com',elements:[]},inspectAction:async()=>({url:'https://example.com',element:{tag:'button',label}}),action:async()=>{browserCalls++;return {text:'Done'};}};
   const runtime = new Runtime({store,codex:first,browser,workspace:dir}); runtime.addProvider('scout',second);

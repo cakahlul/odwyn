@@ -288,5 +288,30 @@
     "caseId": "OPS-002",
     "testFile": "tests/security/phase5/setup.test.js",
     "testName": "OPS-002 Production-mode fail closed: installer verifies actual disposable workers before configuration"
+  },
+  {
+    "caseId": "DATA-006",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-006 Room privilege intersection: explicit Space binding and membership edits"
+  },
+  {
+    "caseId": "DATA-006",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-006 Room privilege intersection: provenance survives edits and live revocation"
+  },
+  {
+    "caseId": "DATA-006",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-006 Room privilege intersection: Legacy Workspace migration preserves history"
+  },
+  {
+    "caseId": "DATA-006",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-006 Room privilege intersection: in-flight membership revocation blocks tool results"
+  },
+  {
+    "caseId": "DATA-006",
+    "testFile": "tests/security/phase3/acceptance.test.js",
+    "testName": "DATA-006 Room privilege intersection: revocation before completion blocks agreed report"
   }
 ]

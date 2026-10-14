@@ -191,8 +191,17 @@ function openRoomEditor(room = null) {
   $('#room-dialog-title').textContent = room ? 'Edit conversation room' : 'Create a conversation room';
   $('#room-save').childNodes[0].textContent = room ? 'Save' : 'Create room';
   $('#room-name').value = room?.title || ''; $('#room-status').textContent = '';
-  $('#room-agent-options').innerHTML = workspace.agents.map(a=>`<label class="room-agent-option"><input type="checkbox" name="memberIds" value="${esc(a.id)}" ${room ? room.memberIds.includes(a.id) ? 'checked' : '' : a.id === agentId ? 'checked' : ''}>${avatarSvg(a.customization || defaults)}<span><strong>${esc(a.customization?.name || defaults.name)}</strong><small>${esc(providers[a.provider.type][0])} · ${a.runtime.account ? 'Ready' : 'Connect provider'}</small></span></label>`).join('');
+  $('#room-space').innerHTML = workspace.security.spaces.map(space=>`<option value="${esc(space.id)}">${esc(space.name)}</option>`).join('');
+  $('#room-space').value = room?.spaceId || workspace.security.defaults[agentId] || workspace.security.legacySpaceId;
+  $('#room-space').disabled = !!room;
+  renderRoomAgents(room);
   $('#room-dialog').showModal(); $('#room-name').focus();
+}
+
+function renderRoomAgents(room = null) {
+  const spaceId = $('#room-space').value;
+  $('#room-agent-options').innerHTML = workspace.agents.filter(a=>spaceId === workspace.security.legacySpaceId || workspace.security.memberships[a.id]?.includes(spaceId)).map(a=>`<label class="room-agent-option"><input type="checkbox" name="memberIds" value="${esc(a.id)}" ${room ? room.memberIds.includes(a.id) ? 'checked' : '' : a.id === agentId ? 'checked' : ''}>${avatarSvg(a.customization || defaults)}<span><strong>${esc(a.customization?.name || defaults.name)}</strong><small>${esc(providers[a.provider.type][0])} · ${a.runtime.account ? 'Ready' : 'Connect provider'}</small></span></label>`).join('');
+  if (!$('#room-agent-options').children.length) $('#room-agent-options').innerHTML = '<p class="field-hint">No agents belong to this Space. Assign membership in agent settings.</p>';
 }
 
 function positionBubbles() {
@@ -656,13 +665,14 @@ $('#room-details-open').onclick = () => $('#room-header').showModal();
 $('#edit-room').onclick = () => openRoomEditor(currentRoom());
 $('#room-dialog-close').onclick = () => $('#room-dialog').close();
 $('#room-dialog').onclose = () => { if (editingRoomId && currentRoom()) $('#room-details-open').focus(); };
+$('#room-space').onchange = () => renderRoomAgents();
 $('#room-form').oninput = () => { $('#room-status').textContent = ''; };
 $('#room-form').onsubmit = async event => {
   event.preventDefault(); const memberIds = new FormData(event.target).getAll('memberIds');
   if (memberIds.length < 2) { $('#room-status').textContent = 'Choose at least two agents.'; return; }
   $('#room-save').disabled = true; $('#room-status').textContent = 'Saving…';
   try {
-    const room = await api(editingRoomId ? `/api/rooms/${editingRoomId}` : '/api/rooms',{title:$('#room-name').value,memberIds},editingRoomId ? 'PATCH' : 'POST');
+    const room = await api(editingRoomId ? `/api/rooms/${editingRoomId}` : '/api/rooms',{title:$('#room-name').value,spaceId:$('#room-space').value,memberIds},editingRoomId ? 'PATCH' : 'POST');
     $('#room-dialog').close(); await refresh(); navigate('chat',room.id); toast(editingRoomId ? 'Room updated.' : 'Room ready. Send a message to start the discussion.');
   } catch (error) { $('#room-status').textContent = error.message; }
   finally { $('#room-save').disabled = false; }

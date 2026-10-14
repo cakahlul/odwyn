@@ -47,7 +47,7 @@ export function openData(db,state,policy){
       const conversation=state.conversations.find(v=>v.id===row.conversation_id);if(!conversation)return false;
       if(conversation.id!==job.conversationId && (conversation.kind==='room'?!conversation.memberIds.includes(c.agentId):conversation.agentId!==c.agentId))return false;
       if(!allowed(job,row.task_id))return false;
-      if(conversation.kind==='room' && row.task_id){const refs=sources(row.task_id);if(!conversation.memberIds.every(agentId=>refs.every(r=>policy.simulate({agentId,spaceId:c.spaceId,resourceId:r.resourceId,action:readAction(r.action)}).mode==='auto')))return false;}
+      if(conversation.kind==='room'){try{data.roomCheck({...job,conversationId:conversation.id},row.task_id?sources(row.task_id):[]);}catch{return false;}}
       return true;
     },
     history(job,conversationId){
@@ -63,6 +63,10 @@ export function openData(db,state,policy){
     workflowTasks(run,step){return data.workflowKeys(run,step).map(id=>{const row=db.query('SELECT task_id FROM workflow_output_sources WHERE run_id=? AND step_id=?').get(run.id,id);if(!row)throw new Error('Unclassified legacy workflow output requires owner review.');return row.task_id;});},
     roomCheck(job,refs=sources(job.id)){
       const c=policy.context(job),room=state.conversations.find(r=>r.id===job.conversationId&&r.kind==='room');
+      if(room){
+        if(room.spaceId!==c.spaceId || !room.memberIds.includes(c.agentId))throw new Error('Room Space or participant mismatch.');
+        for(const agentId of room.memberIds)policy.visible(agentId,c.spaceId);
+      }
       if(room&&!room.memberIds.every(agentId=>refs.every(r=>policy.simulate({agentId,spaceId:c.spaceId,resourceId:r.resourceId,action:readAction(r.action)}).mode==='auto')))throw new Error('Room disclosure requires participant permission intersection.');
     },
     propose(job,outcome){data.roomCheck(job);db.query('INSERT OR IGNORE INTO room_proposal_sources VALUES(?,?,?)').run(outcome.id,job.id,digest(JSON.stringify([outcome.result,outcome.nextPlan])));},

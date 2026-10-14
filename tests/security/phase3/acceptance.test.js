@@ -4,7 +4,7 @@ import {mkdtempSync,mkdirSync,writeFileSync,rmSync,readFileSync,existsSync,readd
 import {Database} from 'bun:sqlite';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {openStore,createJob,createRoom,enqueueSchedules} from '../../../store.js';
+import {openStore,createJob,createRoom,updateRoom,enqueueSchedules} from '../../../store.js';
 import {Runtime} from '../../../runtime.js';
 import {FixtureProvider} from '../fixtures.js';
 import {createApp} from '../../../server.js';
@@ -83,18 +83,18 @@ test('DATA-001 Browser cookie isolation: broker and kernel deny alternate egress
 }),120000);
 
 async function connectorFixture(f){
-  const secret='synthetic_token_'+randomUUID(),calls=[];let leaking=false;
+  const secret='synthetic_token_'+randomUUID(),calls=[];let leaking=false,hold=false,seen,release;
   const site=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(req){
     if(req.headers.get('authorization')!=='Bearer '+secret)return new Response('unauthorized',{status:401});
     const server=new McpServer({name:'synthetic-scoped-service',version:'1'}),transport=new WebStandardStreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true});
-    server.registerTool('read_document',{inputSchema:z.object({id:z.string()}).strict()},async({id})=>{calls.push({tool:'read_document',id});return {content:[{type:'text',text:leaking?JSON.stringify({text:secret,error:'Bearer '+secret,logs:secret}):'Synthetic allowed document'}]};});
+    server.registerTool('read_document',{inputSchema:z.object({id:z.string()}).strict()},async({id})=>{calls.push({tool:'read_document',id});if(hold){hold=false;seen?.();await new Promise(resolve=>{release=resolve;});}return {content:[{type:'text',text:leaking?JSON.stringify({text:secret,error:'Bearer '+secret,logs:secret}):'Synthetic allowed document'}]};});
     server.registerTool('write_document',{inputSchema:z.object({id:z.string()})},async({id})=>{calls.push({tool:'write_document',id});return {content:[{type:'text',text:'forbidden mutation'}]};});
     await server.connect(transport);try{return await transport.handleRequest(req);}finally{await server.close();}
   }});
   f.runtime.connectors.resolve=async raw=>({url:new URL(raw.replace('https://mcp.invalid',`http://mcp.invalid:${site.port}`)),address:'127.0.0.1',family:4});
   const connection=f.store.connectors.create({spaceId:f.A.id,type:'mcp-document-v1',name:'Disposable MCP',endpoint:'https://mcp.invalid/mcp',credential:secret});
   const resource=f.p.createResource({spaceId:f.A.id,type:'connector',name:'Document A',metadata:{connectionId:connection.id,upstreamId:'doc-a'}});
-  f.grant(f.a,[f.A,f.B],[[resource,'mcp.invoke']]);return {secret,calls,resource,connection,site,leak(){leaking=true;},close(){site.stop(true);}};
+  f.grant(f.a,[f.A,f.B],[[resource,'mcp.invoke']]);return {secret,calls,resource,connection,site,leak(){leaking=true;},hold(){hold=true;return new Promise(resolve=>{seen=resolve;});},release(){release?.();},close(){release?.();site.stop(true);}};
 }
 test('DATA-002 MCP server allowlist',()=>probe('DATA-002',async f=>{
   const c=await connectorFixture(f);try{
@@ -196,6 +196,96 @@ test('DATA-006 Room privilege intersection',()=>probe('DATA-006',async f=>{
   const next=createJob(f.store.state,{agentId:f.b,conversationId:room.id,prompt:'Continue'});f.runtime.active=next;next.status='running';await f.runtime.startJob(next);
   expect(JSON.stringify(f.provider.calls)).not.toContain('restrictedroomcanary');expect(f.store.data.history(next,room.id).some(m=>m.text==='Owner goal')).toBe(true);
   expect((await f.invoke(next,'odwyn_search',{resourceId:f.memoryA.id,query:'restrictedroomcanary'})).success).toBe(false);return {realProviderContextCaptured:true,restrictedTranscriptDisclosed:false,ownerGoalPreserved:true,privilegeUnionDenied:true};
+}));
+test('DATA-006 Room privilege intersection: explicit Space binding and membership edits',()=>probe('DATA-006',async f=>{
+  const input={title:'Scoped room',spaceId:f.A.id,memberIds:[f.a,f.b]},before=f.p.access(f.b);
+  expect(()=>createRoom(f.store.state,{...input,spaceId:undefined})).toThrow();
+  for(const spaceId of [null,'',randomUUID()])expect(()=>createRoom(f.store.state,{...input,spaceId})).toThrow();
+  const room=createRoom(f.store.state,input);
+  expect(room.spaceId).toBe(f.A.id);expect(f.p.access(f.b)).toEqual(before);
+  expect(()=>updateRoom(f.store.state,room.id,{...input,spaceId:f.B.id})).toThrow('Space cannot change');
+  updateRoom(f.store.state,room.id,{...input,title:'Updated room'});
+  const outsider=randomUUID();f.store.state.agents.push({id:outsider});f.grant(outsider,[f.B],[]);
+  expect(()=>createRoom(f.store.state,{...input,memberIds:[f.a,outsider]})).toThrow('Space membership denied');
+  expect(()=>updateRoom(f.store.state,room.id,{...input,memberIds:[f.a,outsider]})).toThrow('Space membership denied');
+  const queued=createJob(f.store.state,{agentId:f.a,conversationId:room.id,prompt:'Queued before revocation'});
+  f.grant(f.b,[f.B],[[f.memoryB,'memory.read']]);
+  expect(()=>updateRoom(f.store.state,room.id,{...input,title:'Revoked edit'})).toThrow('Space membership denied');
+  expect(()=>createJob(f.store.state,{agentId:f.a,conversationId:room.id,prompt:'Target only remaining member'})).toThrow('Space membership denied');
+  expect(room.title).toBe('Updated room');expect(room.memberIds).toEqual(input.memberIds);
+  f.runtime.active=queued;queued.status='running';await f.runtime.startJob(queued);
+  expect(queued.status).toBe('failed');expect(f.provider.calls.some(call=>call.method==='thread/start')).toBe(false);
+  return {explicitSpaceRequired:true,immutableRoomSpace:true,crossSpaceMembersDenied:true,retainedMembersRevalidated:true,targetedRevocationDenied:true,grantsUnchanged:true};
+}));
+test('DATA-006 Room privilege intersection: provenance survives edits and live revocation',()=>probe('DATA-006',async f=>{
+  f.grant(f.b,[f.A,f.B],[[f.memoryA,'memory.read']]);
+  const room=createRoom(f.store.state,{title:'Shared provenance',spaceId:f.A.id,memberIds:[f.a,f.b]});
+  const source=createJob(f.store.state,{agentId:f.a,conversationId:room.id,prompt:'Read shared notes'});
+  f.store.data.note(source,f.memoryA.id,'memory.read');
+  const message={id:randomUUID(),role:'assistant',agentId:f.a,jobId:source.id,text:'sharedsourcecanary'};room.messages.push(message);f.store.save();
+  const next=createJob(f.store.state,{agentId:f.b,conversationId:room.id,prompt:'Continue'});
+  expect(f.store.data.history(next,room.id)).toContainEqual(message);
+  f.store.data.assertHandoff(next,[source.id]);
+  const proposal={id:randomUUID(),result:'Shared result',nextPlan:'Review'};f.store.data.propose(source,proposal);
+  expect(f.store.data.proposal(next,proposal)).toEqual(proposal);
+  source.status=next.status='completed';
+  const third=randomUUID();f.store.state.agents.push({id:third});f.grant(third,[f.A],[]);
+  updateRoom(f.store.state,room.id,{title:room.title,memberIds:[f.a,f.b,third]});
+  expect(f.store.data.history(next,room.id)).not.toContainEqual(message);
+  expect(()=>f.store.data.roomCheck(next)).toThrow('permission intersection');
+  expect(f.store.data.proposal(next,proposal)).toBe(null);
+  f.grant(third,[f.A],[[f.memoryA,'memory.read']]);
+  expect(f.store.data.history(next,room.id)).toContainEqual(message);
+  f.grant(third,[],[]);
+  expect(()=>f.store.data.roomCheck(next,[])).toThrow('Space membership denied');
+  expect(f.store.data.history(next,room.id)).not.toContainEqual(message);
+  return {positiveSharedRead:true,provenanceInherited:true,newParticipantIntersectionEnforced:true,grantRevocationDenied:true,membershipRevocationWithoutSourcesDenied:true};
+}));
+test('DATA-006 Room privilege intersection: in-flight membership revocation blocks tool results',()=>probe('DATA-006',async f=>{
+  const c=await connectorFixture(f);try{
+    f.grant(f.b,[f.A],[[c.resource,'mcp.invoke']]);
+    const room=createRoom(f.store.state,{title:'Revocation room',spaceId:f.A.id,memberIds:[f.a,f.b]});
+    const job=createJob(f.store.state,{agentId:f.a,conversationId:room.id,prompt:'Read shared document'});
+    const seen=c.hold(),pending=f.invoke(job,'odwyn_mcp',{resourceId:c.resource.id,operation:'document.read'});
+    await seen;f.grant(f.b,[],[]);c.release();
+    const reply=await pending;
+    expect(c.calls).toHaveLength(1);expect(reply.success).toBe(false);
+    expect(JSON.stringify(reply)).not.toContain('Synthetic allowed document');
+    return {realMCPReadExecuted:true,inFlightMembershipRevoked:true,toolResultDisclosed:false};
+  }finally{c.close();}
+}));
+test('DATA-006 Room privilege intersection: revocation before completion blocks agreed report',()=>probe('DATA-006',async f=>{
+  f.grant(f.b,[f.A],[[f.memoryA,'memory.read']]);
+  const room=createRoom(f.store.state,{title:'Agreed room',spaceId:f.A.id,memberIds:[f.a,f.b]});
+  const job=createJob(f.store.state,{agentId:f.a,conversationId:room.id,prompt:'Shared task'});
+  f.store.data.note(job,f.memoryA.id,'memory.read');
+  const outcome={id:randomUUID(),result:'revokedreportcanary',nextPlan:'Review',confirmations:{[f.a]:'Verified',[f.b]:'Verified'}};
+  room.discussion={id:randomUUID(),status:'active',round:1,memberIds:room.memberIds,outcome};
+  job.roomRoundId=room.discussion.id;job.roomCycle=1;f.store.data.propose(job,outcome);
+  f.grant(f.b,[f.A],[]);f.runtime.finish(job,'completed');
+  expect(room.discussion.status).toBe('paused');
+  expect(room.messages.some(m=>m.text.includes('revokedreportcanary'))).toBe(false);
+  return {agreedProposalRevoked:true,reportDisclosed:false};
+}));
+test('DATA-006 Room privilege intersection: Legacy Workspace migration preserves history',()=>probe('DATA-006',async f=>{
+  const directory=join(f.directory,'legacy');mkdirSync(directory);
+  const db=new Database(join(directory,'sidekick.db'));
+  const old={agents:[{id:f.a},{id:f.b}],conversations:[{id:randomUUID(),kind:'room',title:'Legacy room',agentId:f.a,memberIds:[f.a,f.b],messages:[{id:randomUUID(),role:'assistant',agentId:f.b,text:'legacyroomhistory'}]}],jobs:[]};
+  db.exec('CREATE TABLE state(id INTEGER PRIMARY KEY,value TEXT NOT NULL)');db.query('INSERT INTO state VALUES(1,?)').run(JSON.stringify(old));db.close();
+  let store=openStore(directory);try{
+    const room=store.state.conversations[0],legacy=store.security.legacySpaceId;
+    expect(room).toEqual({...old.conversations[0],spaceId:legacy});
+    const custom=store.security.createSpace({name:'No automatic migration'});
+    expect(()=>updateRoom(store.state,room.id,{title:room.title,memberIds:room.memberIds,spaceId:custom.id})).toThrow('Space cannot change');
+    updateRoom(store.state,room.id,{title:'Legacy renamed',memberIds:room.memberIds});
+    const job=createJob(store.state,{agentId:f.a,conversationId:room.id,prompt:'Recall history'});store.save();
+    expect(store.data.history(job,room.id).some(m=>m.text==='legacyroomhistory')).toBe(true);
+    store.close();store=openStore(directory);
+    expect(store.state.conversations[0].spaceId).toBe(legacy);
+    expect(store.state.conversations[0].messages[0]).toEqual(old.conversations[0].messages[0]);
+    expect(store.security.access(f.a).grants).toEqual([]);
+  }finally{store.close();}
+  return {legacyRoomAndTranscriptPreserved:true,legacyBindingStableAcrossReload:true,implicitCustomMigrationDenied:true,noGrantsAdded:true};
 }));
 test('DATA-006 Room privilege intersection: provider IDs cannot relabel owner content',()=>probe('DATA-006',async f=>{
   const j=f.job();f.runtime.active=j;j.status='running';j.threadId=randomUUID();f.store.save();
