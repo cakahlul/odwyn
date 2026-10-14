@@ -204,7 +204,8 @@
     "/^\\/api\\/rooms\\/([a-f0-9-]{36})(?:\\/(messages|cancel))?$/",
     "/^\\/api\\/schedules\\/([a-f0-9-]{36})$/",
     "/^\\/api\\/security\\/presets\\/([^/]+)$/",
-    "/^\\/api\\/spaces\\/([a-f0-9-]{36})$/"
+    "/^\\/api\\/spaces\\/([a-f0-9-]{36})$/",
+    "/^\\/api\\/workspaces\\/(default|[a-f0-9-]{36})$/"
   ],
   "tools": [
     "odwyn_action",

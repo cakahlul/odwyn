@@ -121,7 +121,12 @@ export function createApp(options = {}) {
   const homes = new Map();
   let workspaceWrites = Promise.resolve();
   if (!options.workspaceId) {
-    store.state.workspaces ||= [{id:'default',name:'Home'}];
+    store.state.workspaces ||= [{id:'default',name:'Default'}];
+    if (!store.state.workspaceDefaultNameMigrated) {
+      const first=store.state.workspaces.find(row=>row.id==='default');
+      if (first?.name==='Home') first.name='Default';
+      store.state.workspaceDefaultNameMigrated=true;
+    }
     store.state.workspaceSharing ||= {};
     store.save();
   }
@@ -198,6 +203,23 @@ export function createApp(options = {}) {
           try { for (const kind of Object.keys(store.state.workspaceSharing).filter(kind=>store.state.workspaceSharing[kind])) await child.applySettings(kind,settings(kind)); }
           catch(error) { homes.delete(row.id); await child.close(); throw error; }
           store.state.workspaces.push(row); runtime.changed(); return response(row,201);
+        }
+        const workspaceMatch=pathname.match(/^\/api\/workspaces\/(default|[a-f0-9-]{36})$/);
+        if (!options.workspaceId && workspaceMatch && ['PUT','DELETE'].includes(req.method)) {
+          const id=workspaceMatch[1], row=store.state.workspaces.find(row=>row.id===id);
+          if (!row) return response({error:'Workspace not found.'},404);
+          const input=await json(req);
+          if (req.method==='PUT') {
+            const name=textInput(input.name,70).trim();if(!name)throw new Error('Enter a workspace name.');
+            row.name=name;runtime.changed();return response(row);
+          }
+          if (id==='default') throw new Error('The first workspace cannot be deleted.');
+          if (input.confirm!==true) throw new Error('Confirm permanent workspace deletion.');
+          const target=homes.get(id);
+          if (target.providerBusy() || target.runtime.executions.size) throw new Error('Stop tasks and finish sign-ins in this workspace before deleting it.');
+          homes.delete(id);await target.close();
+          store.state.workspaces=store.state.workspaces.filter(row=>row.id!==id);runtime.changed();
+          rmSync(join(directory,'workspaces',id),{recursive:true,force:true});return response({ok:true});
         }
         if (!options.workspaceId && pathname === '/api/workspaces/share' && req.method === 'POST') {
           const {kind,enabled,ownerPassword} = await json(req);
@@ -491,7 +513,7 @@ export function createApp(options = {}) {
     const fetch = app.fetch;
     app.fetch = (req,server) => {
       const path = new URL(req.url).pathname;
-      if (['GET','HEAD'].includes(req.method) || !['/api/workspaces','/api/workspaces/share','/api/preferences','/api/appearance','/api/provider'].includes(path)) return fetch(req,server);
+      if (['GET','HEAD'].includes(req.method) || !path.startsWith('/api/workspaces') && !['/api/preferences','/api/appearance','/api/provider'].includes(path)) return fetch(req,server);
       const result = workspaceWrites.then(()=>fetch(req,server)); workspaceWrites=result.catch(()=>{}); return result;
     };
   }

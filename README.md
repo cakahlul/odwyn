@@ -26,7 +26,7 @@ Save work you repeat as a workflow. Schedule a routine for the next check. Your 
 
 Run Odwyn on your computer or VPS. Connect Codex, Claude Code, or an OpenAI-compatible API. Choose which Spaces and resources each agent can use, and whether actions are blocked, automatic, or need your approval.
 
-Use the workspace picker at the top to switch homes, or its + button to create one. Each home has the same features and its own agents, chats, files, browser sessions, connections, and settings. Existing data stays in Home. Tasks and routines continue when you switch away.
+Use the workspace picker at the top to switch homes, or its + button to create one. Each home has the same features and its own agents, chats, files, browser sessions, connections, and settings. Existing data stays in Default. Tasks and routines continue when you switch away. In Settings → Workspaces, create, rename, or permanently delete a home after confirmation. Stop its tasks before deleting it. The first workspace can be renamed but cannot be deleted.
 
 In Settings → Sharing, enable **Share to all workspaces** for saved appearance, preferences and memory, or AI provider defaults. Future changes from any home stay linked, including newly created homes. Turning sharing off leaves independent copies. Provider sharing includes the API key, requires your owner password, and preserves agent overrides; account sign-ins remain separate.
 

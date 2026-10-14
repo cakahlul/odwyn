@@ -19,6 +19,7 @@ test('create and switch homes, preserve drafts, link settings, and scope downloa
   page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());page.setDefaultTimeout(7000);
   try {
     await page.goto(server.url.href);await page.locator('#workspace-home:not([disabled])').waitFor();
+    expect(await page.locator('#workspace-home option[value=default]').textContent()).toBe('Default');
     await page.locator('#new-chat').click();
     await page.locator('#prompt').fill('Home draft');
     await page.locator('#new-workspace').click();await page.locator('#workspace-home-name').fill('Research');
@@ -61,6 +62,16 @@ test('create and switch homes, preserve drafts, link settings, and scope downloa
       expect(await page.locator('#workspace-home').isVisible()).toBe(true);
       if(width===320)await page.screenshot({path:'/tmp/odwyn-workspace-mobile.png'});
     }
+    await page.locator('#settings-open').click();await page.locator('[data-settings-section=workspaces]').click();
+    await page.locator('#workspace-manage-home').selectOption('default');expect(await page.locator('#workspace-delete').isDisabled()).toBe(true);
+    await page.locator('#workspace-manage-home').selectOption(id);await page.locator('#workspace-rename-name').fill('Research lab');await page.locator('#workspace-rename-name').press('Enter');
+    await page.locator('#workspace-homes-status').filter({hasText:'Workspace renamed.'}).waitFor();
+    expect(await page.locator(`#workspace-home option[value="${id}"]`).textContent()).toBe('Research lab');
+    page.removeAllListeners('dialog');page.once('dialog',async dialog=>{expect(dialog.message()).toContain('Research lab');expect(dialog.message()).toContain('cannot be undone');await dialog.dismiss();});
+    await page.locator('#workspace-delete').click();expect(await page.locator('#workspace-home').inputValue()).toBe(id);
+    page.once('dialog',dialog=>dialog.accept());await page.locator('#workspace-delete').click();await page.waitForURL(url=>!url.search);
+    await page.locator('#workspace-home:not([disabled])').waitFor();expect(await page.locator('#workspace-home option').count()).toBe(1);
+    expect(await page.evaluate(id=>sessionStorage.getItem(`odwyn-drafts:${id}`),id)).toBeNull();
     expect(errors).toEqual([]);
   } finally {await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
 },30000);

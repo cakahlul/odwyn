@@ -312,6 +312,7 @@ function saveDraft() {
   sessionStorage.setItem(storageKey('odwyn-drafts'),JSON.stringify([...drafts]));
 }
 addEventListener('pagehide',saveDraft);
+addEventListener('workspace-deleted',event=>{if(event.detail===workspaceId)agentId=null;});
 
 function restoreDraft() {
   const draft = drafts.get(agentId);

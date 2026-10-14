@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
@@ -56,9 +56,34 @@ test('workspace homes isolate data and persist linked settings', async () => {
     expect((await request(other('/api/provider')+'&scope=global','PUT',{type:'openai',model:'blocked-model'})).status).toBe(400);
     expect((await (await request(other('/api/state'))).json()).globalProvider.model).toBe('test-model');
     app.runtime.active=null;
+    app.runtime.state.workspaces[0].name='Home';delete app.runtime.state.workspaceDefaultNameMigrated;app.runtime.changed();
     await app.close(); app = createApp(options);
     expect((await (await request('/api/workspaces')).json()).workspaces).toHaveLength(3);
     expect((await (await request(other('/api/state'))).json()).preferences).toBe('Separate again');
     expect((await (await request('/api/workspaces')).json()).sharing.provider).toBe(true);
+    expect((await (await request('/api/workspaces')).json()).workspaces[0].name).toBe('Default');
+    expect((await request('/api/workspaces/default','PUT',{name:'Home'})).status).toBe(200);
+    expect((await request(`/api/workspaces/${id}`,'PUT',{name:'Research lab'})).status).toBe(200);
+    expect((await request(`/api/workspaces/${id}`,'PUT',{name:' '})).status).toBe(400);
+    expect((await request('/api/workspaces/default','DELETE',{confirm:true})).status).toBe(400);
+    expect((await request(`/api/workspaces/${id}`,'DELETE',{})).status).toBe(400);
+    expect(existsSync(join(directory,'workspaces',id))).toBe(true);
+    const rejected=await app.fetch(new Request(options.origin+`/api/workspaces/${id}`,{method:'DELETE',headers:{...headers,origin:'https://evil.test'},body:JSON.stringify({confirm:true})}));
+    expect(rejected.status).toBe(403);
+    codex.request=async method=>method==='thread/start'?{thread:{id:'test-thread'}}:method==='turn/start'?{turn:{id:'test-turn'}}:{account:{type:'chatgpt'}};
+    await request(other('/api/provider')+'&scope=global','PUT',{type:'codex',model:'test-model'});
+    const running=await (await request(other('/api/jobs'),'POST',{prompt:'Keep running'})).json();
+    let active;
+    for(let i=0;i<30;i++){active=(await (await request(other('/api/state'))).json()).jobs.find(job=>job.id===running.id);if(active?.status==='running')break;if(active?.error)throw new Error(active.error);await Bun.sleep(10);}
+    expect(active?.status).toBe('running');
+    expect((await request(`/api/workspaces/${id}`,'DELETE',{confirm:true})).status).toBe(400);
+    expect(existsSync(join(directory,'workspaces',id))).toBe(true);
+    await request(other(`/api/jobs/${running.id}/cancel`),'POST',{});
+    expect((await request(`/api/workspaces/${id}`,'DELETE',{confirm:true})).status).toBe(200);
+    expect(existsSync(join(directory,'workspaces',id))).toBe(false);
+    expect((await request(other('/api/state'))).status).toBe(404);
+    await app.close();app=createApp(options);
+    const remaining=(await (await request('/api/workspaces')).json()).workspaces;
+    expect(remaining).toHaveLength(2);expect(remaining[0].name).toBe('Home');
   } finally { await app.close(); rmSync(directory,{recursive:true,force:true}); }
 });
