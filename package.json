@@ -9,6 +9,7 @@
     "test": "bun test",
     "check:workflows": "bun scripts/check-workflows.js",
     "check:browser": "bun scripts/check-browser.js",
+    "check:settings": "bun scripts/check-settings.js",
     "check:codex": "bun scripts/check-codex.js",
     "browser:install": "playwright install chromium"
   },

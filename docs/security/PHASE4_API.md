@@ -9,8 +9,15 @@ These handlers extend existing routing. Owner Basic authentication and configure
 | POST `/api/policy/preview` | `{agentId:UUID,access:Access}`; returns `{decisions:[{resourceId,action,mode,reason,revision}]}`. Transaction rolled back; no side effects. |
 | POST `/api/policy/simulate` | Existing `{agentId,spaceId,resourceId,action}`; current effective decision only. |
 | GET `/api/resources`, `/api/spaces` | Existing owner inventory; stable UUIDs, arbitrary owner names. |
-| GET/PUT `/api/security/presets` | List `{name,actions:string[]}[]`; PUT `{name,actions}` changes suggestions only, never scopes/grants. |
+| GET/PUT `/api/security/presets` | List `{name,actions:string[]}[]`; PUT `{name,actions,previousName?}` creates, edits or renames a template; changes suggestions only, never scopes/grants. |
 | POST `/api/connectors` | Existing connector schema plus fresh `ownerPassword`; credential encrypted by existing broker. No default endpoint. |
+| PUT/DELETE `/api/spaces/:id` | PUT `{name}` renames; DELETE removes an empty, unreferenced Space, memberships and default assignments. Legacy Workspace and Spaces referenced by history/files/exports/routines cannot be deleted. |
+| PUT/DELETE `/api/resources/:id` | PUT `{name?,metadata?}` retains type, Space and UUID. Changed metadata revokes exact and wildcard access to this resource. DELETE removes the resource and its grants; dependent file resources must first be unlinked. History remains. |
+| GET `/api/connectors` | Owner inventory includes endpoint and enabled state, never credentials. |
+| PUT `/api/connectors/:id` | `{name,endpoint,credential?,ownerPassword}`; blank credential should be omitted to retain it. Endpoint/credential changes revoke linked resource access; Git resource endpoints follow the connection. Type and Space stay fixed. |
+| DELETE `/api/connectors/:id` | Existing disable operation. |
+| DELETE `/api/connectors/:id/permanent` | Permanently removes an unlinked connection and encrypted credential. |
+| DELETE `/api/security/presets/:name` | Deletes a URL-encoded template name; existing agent grants stay unchanged. |
 | GET `/api/approvals` | `{approvals:[{id,status,digest,expiresAt,envelope,receipt}]}`; sanitized immutable preview. |
 | POST `/api/security/reauth` | Exactly `{password:string,approvalId:UUID}`; verifies current owner password and live pending request. Returns `{ok:true}` and action-bound HttpOnly, SameSite=Strict cookie, 60-second maximum, Secure on HTTPS. Token hash only in SQLite. |
 | POST `/api/approvals/:id/decision` | Exactly `{decision:"approve"|"deny"}`; approve consumes valid cookie proof bound to this request. Deny revokes pending/approved requests. |
@@ -36,3 +43,5 @@ Envelope: `{ownerId,agentId,taskId,spaceId,connectorId:UUID|null,resourceId,cano
 Other string fields are nonempty, maximum 200 characters; control characters/unknown keys rejected. HTTPS endpoint resolves to a pinned public address. Broker sends POST `{action,resourceId:<fixed upstream ID>,parameters,digest,idempotencyKey:<approval UUID>}` with credential, `Idempotency-Key` and `If-Match: expectedVersion`. No redirects, 15-second deadline, bounded 16,000-character JSON response. The adapter must atomically reject changed targets and durably deduplicate the idempotency key. HTTP 200 receipt must contain string `id` and exact `digest`/`idempotencyKey`; only sanitized receipt identifiers return. Cancellation drops the transport; prior upstream commit cannot be undone. Missing/rejected/ambiguous receipts consume the request permanently.
 
 Adapters require independent vendor review before connecting live services. These tests use synthetic credentials and local disposable HTTP sinks only; no live payment, send, merge or deploy is authorized.
+
+Resource configuration changes/deletion and connection configuration changes/permanent deletion require no queued, running, waiting, takeover or stopping tasks in the Space. Rename-only edits preserve grants. Workspace Settings contains shared management; agent Access & Autonomy contains memberships, permissions, template application and restrictions.

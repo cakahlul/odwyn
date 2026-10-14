@@ -184,14 +184,18 @@
     "/^\\/api\\/approvals\\/([a-f0-9-]{36})\\/decision$/",
     "/^\\/api\\/approvals\\/([a-f0-9-]{36})\\/execute$/",
     "/^\\/api\\/connectors\\/([a-f0-9-]{36})$/",
+    "/^\\/api\\/connectors\\/([a-f0-9-]{36})\\/permanent$/",
     "/^\\/api\\/conversations\\/([a-f0-9-]{36})$/",
     "/^\\/api\\/conversations\\/([a-f0-9-]{36})$/",
     "/^\\/api\\/data\\/exports\\/([a-f0-9-]{36})$/",
     "/^\\/api\\/files\\/([a-f0-9-]{36})$/",
     "/^\\/api\\/files\\/([a-f0-9-]{36})(\\/preview)?$/",
     "/^\\/api\\/jobs\\/([a-f0-9-]{36})\\/(answer|respond|cancel|retry|permissions)$/",
+    "/^\\/api\\/resources\\/([a-f0-9-]{36})$/",
     "/^\\/api\\/rooms\\/([a-f0-9-]{36})(?:\\/(messages|cancel))?$/",
-    "/^\\/api\\/schedules\\/([a-f0-9-]{36})$/"
+    "/^\\/api\\/schedules\\/([a-f0-9-]{36})$/",
+    "/^\\/api\\/security\\/presets\\/([^/]+)$/",
+    "/^\\/api\\/spaces\\/([a-f0-9-]{36})$/"
   ],
   "tools": [
     "odwyn_action",

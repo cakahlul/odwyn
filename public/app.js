@@ -1,3 +1,4 @@
+import {setupWorkspaceSettings} from './workspace-settings.js';
 import {setupSecurity} from './security-ui.js';
 import { renderWorkflows, setupWorkflows } from './workflows-ui.js';
 import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date } from './ui.js';
@@ -71,6 +72,7 @@ const currencyNames = new Intl.DisplayNames(['en'],{type:'currency'});
 $('#preferred-currency').innerHTML = currencies.map(code=>`<option value="${code}">${code === 'source' ? 'Original currency' : `${code} · ${esc(currencyNames.of(code))}`}</option>`).join('');
 hydrateIcons(); setupBrowser(() => state);
 const renderSecuritySpace=setupSecurity(() => state);
+setupWorkspaceSettings(refresh);
 setupCustomization(() => state, async (result, adding, onboarding) => { $('#provider-api-key').value = ''; signature = ''; await refresh(); if (adding) await switchAgent(result.id); if (onboarding && !workspace.globalProvider.configured) openSettings(); }, () => $('#provider-source').value === 'global' ? {inherit:true} : {...providerInput(),inherit:false});
 
 function selectState() {
@@ -526,7 +528,7 @@ let workspaceSetup = false;
 function openSettings(onboarding = false) {
   workspaceSetup = onboarding === true;
   $('#settings-title').textContent = workspaceSetup ? 'Set up your workspace' : 'Odwyn settings';
-  $('#preferences-form button.primary-button').innerHTML = workspaceSetup ? `Continue to first agent${icon('arrow-up-right')}` : `Save${icon('check')}`;
+  $('#preferences-form > .form-footer button.primary-button').innerHTML = workspaceSetup ? `Continue to first agent${icon('arrow-up-right')}` : `Save${icon('check')}`;
   providerGlobal = true; providerAdding = false;
   $('#settings-provider-editor').append($('#provider-editor'));
   $('#provider-editor').hidden = false;
@@ -536,6 +538,7 @@ function openSettings(onboarding = false) {
   for (const key of ownerPreferenceKeys) $(`#global-${key}`).value = workspace.owner?.[key] ?? defaults[key];
   $('#preferred-currency').value = workspace.currency || 'source';
   $('#preferences').value = workspace.preferences || ''; $('#settings-status').textContent = '';
+  $('#settings-dialog').dispatchEvent(new CustomEvent('settings-open'));
   $('#settings-dialog').showModal();
 }
 function openAgentProvider() {
@@ -757,7 +760,7 @@ $('#room-mentions').onclick = event => {
 };
 $('#preferences-form').onsubmit = async event => {
   event.preventDefault();
-  const continueSetup = workspaceSetup, button = $('#preferences-form button.primary-button');
+  const continueSetup = workspaceSetup, button = $('#preferences-form > .form-footer button.primary-button');
   button.disabled = true; $('#settings-status').textContent = 'Saving…';
   try {
     await api('/api/preferences',{ ...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$(`#global-${key}`).value])), provider:providerInput(), text:$('#preferences').value, currency:$('#preferred-currency').value, appearance:readWorkspaceAppearance() },'PUT');

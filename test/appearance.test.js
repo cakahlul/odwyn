@@ -50,9 +50,9 @@ test('workspace themes preview, customize, validate, persist and reset without c
     await page.locator('#dock-size').fill('125');await page.locator('#dock-auto-hide').check();
     await page.locator('input[name=workspaceNavigation][value=sidebar]').check();
     await page.locator('.settings-scroll').evaluate(node=>node.scrollTop=0);
-    const saveBox=await page.locator('#preferences-form button.primary-button').boundingBox();
+    const saveBox=await page.locator('#preferences-form > .form-footer button.primary-button').boundingBox();
     expect(saveBox.y+saveBox.height).toBeLessThanOrEqual(1000);
-    await page.locator('#preferences-form button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});
+    await page.locator('#preferences-form > .form-footer button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});
     const saved={palette:'graphite',navigation:'sidebar',dockSize:125,dockAutoHide:true,motion:'system',opacity:70,blur:28,depth:90,radius:22,customColors:{paper:'#17202b',surface:'#29394b',orange:'#f3a46c'}};
     expect(app.runtime.state.appearance).toEqual(saved);
     expect(decodeURIComponent(await page.locator('#workspace-favicon').getAttribute('href'))).toContain('.mark-body,.mark-edge{fill:#f3a46c}');
@@ -106,7 +106,7 @@ test('workspace themes preview, customize, validate, persist and reset without c
     expect(appearanceVars(saved).scheme).toBe('dark');
     expect(await page.locator(':root').getAttribute('data-navigation')).toBe('sidebar');
     await openSettings();await page.locator('input[name=workspaceNavigation][value=dock]').check();
-    await page.locator('#preferences-form button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});
+    await page.locator('#preferences-form > .form-footer button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});
     expect(await page.locator(':root').getAttribute('data-navigation')).toBe('dock');
     expect(app.runtime.state.appearance.navigation).toBe('dock');
     expect(await page.locator('#dock-size').inputValue()).toBe('125');
@@ -148,7 +148,7 @@ test('workspace themes preview, customize, validate, persist and reset without c
       await mobile.locator('#prompt').tap();
     } finally { await touch.close(); }
     await openSettings();await page.locator('#dock-size').fill('75');await page.locator('#dock-auto-hide').uncheck();
-    await page.locator('#preferences-form button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});
+    await page.locator('#preferences-form > .form-footer button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});
     expect((await page.locator('.workspace-dock').boundingBox()).width).toBeLessThan(large.width);
     expect(await page.locator('.dock-reveal-button').isVisible()).toBe(false);
     const fixedContent = await page.locator('.agent-workspace').boundingBox(), fixedDock = await page.locator('.workspace-dock').boundingBox();

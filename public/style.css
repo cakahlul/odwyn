@@ -482,10 +482,10 @@ button[data-mention-link]:hover { text-decoration:underline; }
 .profile-layout { display:grid; grid-template-columns:180px minmax(0,1fr); min-height:0; overflow-y:auto; }
 .profile-layout-single { grid-template-columns:minmax(0,1fr); }
 .profile-sidebar { padding:16px; background:var(--sidebar); border-right:1px solid var(--line); }
-.profile-steps { display:flex; flex-direction:column; gap:4px; }
-.profile-steps button { min-height:44px; padding:10px 12px; text-align:left; border:1px solid transparent; border-radius:6px; font-size:13px; color:var(--muted); }
-.profile-steps button:hover { background:var(--wash); color:var(--ink); }
-.profile-steps button[aria-current] { background:var(--surface); border-color:var(--line); color:var(--ink); font-weight:650; }
+:is(.profile-steps,.settings-steps) { display:flex; flex-direction:column; gap:4px; }
+:is(.profile-steps,.settings-steps) button { min-height:44px; padding:10px 12px; text-align:left; border:1px solid transparent; border-radius:6px; font-size:13px; color:var(--muted); }
+:is(.profile-steps,.settings-steps) button:hover { background:var(--wash); color:var(--ink); }
+:is(.profile-steps,.settings-steps) button[aria-current] { background:var(--surface); border-color:var(--line); color:var(--ink); font-weight:650; }
 .profile-controls { min-width:0; }
 .profile-content { padding:24px; }
 .profile-controls h3 { margin:0; font-size:18px; letter-spacing:-.3px; font-weight:600; }
@@ -542,8 +542,8 @@ button[data-mention-link]:hover { text-decoration:underline; }
   .profile-top h2 { font-size:22px; }
   .profile-layout { grid-template-columns:minmax(0,1fr); }
   .profile-sidebar { padding:12px 16px; border-right:0; border-bottom:1px solid var(--line); }
-  .profile-steps { flex-direction:row; gap:4px; }
-  .profile-steps button { flex:1; padding:10px 4px; text-align:center; font-size:12px; }
+  :is(.profile-steps,.settings-steps) { flex-direction:row; gap:4px; }
+  :is(.profile-steps,.settings-steps) button { flex:1; padding:10px 4px; text-align:center; font-size:12px; }
   .profile-preview { display:flex; align-items:center; gap:12px; text-align:left; margin:12px 0 0; padding:12px 0 0; }
   .profile-preview strong { margin:0; }
   #preview-mascot .agent-avatar { width:48px; height:48px; }
@@ -1247,3 +1247,19 @@ button.attachment-preview:hover { background:var(--paper); }
 .composer-tools {flex-wrap:wrap;}
 .task-space-picker {display:flex;align-items:center;gap:4px;font-size:12px;min-width:0;max-width:100%;}
 .task-space-picker select {max-width:160px;min-width:0;padding:3px 6px;font-size:12px;}
+
+#settings-dialog { width:min(920px,calc(100% - 32px)); }
+.settings-layout { display:grid; grid-template-columns:180px minmax(0,1fr); flex:1; min-height:0; overflow:hidden; }
+.settings-layout .settings-scroll { padding:20px; }
+.workspace-management-panel h3 { margin:0 0 10px; }
+.workspace-management-panel .access-buttons { flex-wrap:wrap; margin:14px 0; }
+.workspace-management-panel .management-editor { margin-top:20px; padding-top:16px; border-top:1px solid var(--line); }
+.workspace-management-panel .management-editor[hidden] { display:none; }
+#workspace-management-status { margin:12px 0 0; font-size:12px; overflow-wrap:anywhere; }
+@media(max-width:680px) {
+  .settings-layout { grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); }
+  .settings-layout .profile-sidebar { padding:8px; border-right:0; border-bottom:1px solid var(--line); }
+  .settings-steps { flex-direction:row; flex-wrap:wrap; }
+  .settings-steps button { flex:1 0 28%; }
+  .settings-layout .settings-scroll { padding:16px; }
+}

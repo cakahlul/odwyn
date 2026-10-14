@@ -159,11 +159,16 @@ export function createApp(options = {}) {
         if(pathname === '/api/security/pause' && req.method==='POST')return response(await runtime.pauseSecurity(await json(req)));
         if(pathname === '/api/security/presets'&&req.method==='GET')return response(store.security.presets());
         if(pathname === '/api/security/presets'&&req.method==='PUT')return response(store.security.putPreset(await json(req)));
+        const presetMatch=pathname.match(/^\/api\/security\/presets\/([^/]+)$/);
+        if(presetMatch&&req.method==='DELETE'){store.security.deletePreset(decodeURIComponent(presetMatch[1]));return response({ok:true});}
         if(pathname === '/api/audit'&&req.method==='GET')return response({events:store.connectors.sanitize(store.security.audit())});
         if(pathname === '/api/resources'&&req.method==='GET')return response(store.connectors.sanitize(store.security.listResources()));
         if(pathname === '/api/connectors' && req.method==='GET')return response({connectors:store.connectors.list()});
         if(pathname === '/api/connectors' && req.method==='POST'){const {ownerPassword,...body}=await json(req);freshOwner(ownerPassword);return response(store.connectors.create(body),201);}
         const connectionMatch=pathname.match(/^\/api\/connectors\/([a-f0-9-]{36})$/);
+        if(connectionMatch && req.method==='PUT'){const {ownerPassword,...body}=await json(req);freshOwner(ownerPassword);const result=store.connectors.update(connectionMatch[1],body);runtime.changed();return response(result);}
+        const permanentConnection=pathname.match(/^\/api\/connectors\/([a-f0-9-]{36})\/permanent$/);
+        if(permanentConnection&&req.method==='DELETE'){store.connectors.remove(permanentConnection[1]);runtime.changed();return response({ok:true});}
         if(connectionMatch && req.method==='DELETE'){store.connectors.disable(connectionMatch[1]);runtime.changed();return response({ok:true,alert:'Connection disabled; held results and subsequent calls are denied at the next safe boundary.'});}
         if(pathname === '/api/data/exports' && req.method==='POST')return response(store.data.export(await json(req)),201);
         const exportMatch=pathname.match(/^\/api\/data\/exports\/([a-f0-9-]{36})$/);
@@ -180,6 +185,12 @@ export function createApp(options = {}) {
           if(req.method==='POST'){const result=store.security.createSpace(await json(req));runtime.changed();return response(result,201);}
           return response({error:'Method not allowed.'},405);
         }
+        const spaceMatch=pathname.match(/^\/api\/spaces\/([a-f0-9-]{36})$/);
+        if(spaceMatch&&req.method==='PUT'){const result=store.security.updateSpace(spaceMatch[1],await json(req));runtime.changed();return response(result);}
+        if(spaceMatch&&req.method==='DELETE'){store.security.deleteSpace(spaceMatch[1]);runtime.changed();return response({ok:true});}
+        const resourceMatch=pathname.match(/^\/api\/resources\/([a-f0-9-]{36})$/);
+        if(resourceMatch&&req.method==='PUT'){const result=store.security.updateResource(resourceMatch[1],await json(req));runtime.changed();return response(store.connectors.sanitize(result));}
+        if(resourceMatch&&req.method==='DELETE'){store.security.deleteResource(resourceMatch[1]);runtime.changed();return response({ok:true});}
         if (pathname === '/api/resources' && req.method === 'POST') {const result=store.security.createResource(await json(req));runtime.changed();return response(result,201);}
         if (pathname === '/api/policy/preview' && req.method==='POST'){const body=await json(req);if(Object.keys(body).some(k=>!['agentId','access'].includes(k)))throw new Error('Invalid preview.');return response(store.security.preview(body.agentId,body.access));}
         if (pathname === '/api/policy/simulate' && req.method === 'POST') return response(store.security.simulate(await json(req)));
@@ -391,7 +402,7 @@ export function createApp(options = {}) {
         }
         if (pathname.startsWith('/api/')) return response({ error: 'Endpoint not found.' }, 404);
         if (!['GET','HEAD'].includes(req.method)) return response({ error: 'Method not allowed.' }, 405);
-        const files = { '/': 'index.html', '/app.js': 'app.js', '/security-ui.js':'security-ui.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
+        const files = { '/': 'index.html', '/app.js': 'app.js', '/security-ui.js':'security-ui.js', '/workspace-settings.js':'workspace-settings.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
         if (!files[pathname]) return response({ error: 'Not found.' }, 404);
         return new Response(Bun.file(join(root, 'public', files[pathname])), { headers });
       } catch (error) { return response({ error: error.message || 'Something went wrong. Try again.' }, 400); }

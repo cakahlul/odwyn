@@ -26,7 +26,7 @@ test('Claude Connect opens browser login, preserves typed codes across refresh, 
   try {
     expect((await request('/api/account/login/complete?scope=global',{code:'expired'})).status).toBe(400);
     app.runtime.active={agentId:agent.id};expect((await request('/api/account/login?scope=global',{})).status).toBe(400);app.runtime.active=null;
-    await page.goto(server.url.href);await page.locator('#settings-open').click();expect(await page.locator('#connect-account').textContent()).toBe('Connect');
+    await page.goto(server.url.href);await page.locator('#settings-open').click();await page.locator('[data-settings-section=provider]').click();expect(await page.locator('#connect-account').textContent()).toBe('Connect');
     await page.locator('#connect-account').click();const link=page.getByRole('link',{name:'Open Claude sign-in ↗'});await link.waitFor();expect(await link.getAttribute('href')).toBe('https://claude.com/cai/oauth/authorize?state=expected');expect(await link.getAttribute('rel')).toBe('noopener noreferrer');
     await page.locator('#provider-login-code').fill('draft-code');
     const update=page.waitForResponse(response=>response.url().includes('/api/state')&&response.status()===200);app.runtime.changed();await update;
@@ -52,12 +52,12 @@ test('first run saves full workspace settings before creating an agent with inhe
     expect(await page.locator('#customize-dialog').isVisible()).toBe(false);
     expect(await page.locator('#settings-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
     await page.locator('input[name=workspaceNavigation][value=sidebar]').check();await page.locator('input[name="workspacePalette"][value="fern"]').check();await page.locator('#settings-motion').selectOption('reduced');
-    await page.locator('#provider-type').selectOption('openai');await page.locator('#provider-model').fill('manual-model');await page.locator('#provider-base-url').fill('file:///tmp/provider');
+    await page.locator('[data-settings-section=provider]').click();await page.locator('#provider-type').selectOption('openai');await page.locator('#provider-model').fill('manual-model');await page.locator('#provider-base-url').fill('file:///tmp/provider');
     await page.getByRole('button',{name:'Continue to first agent'}).click();await page.getByText('Use an HTTP(S) API base URL without credentials, query, or fragment.',{exact:true}).waitFor();
     expect(await page.locator('#customize-dialog').isVisible()).toBe(false);expect(app.runtime.state.globalProvider.type).toBe('codex');
     await page.locator('#provider-base-url').fill('https://models.example/v1');await page.locator('#provider-type').selectOption('claude');
     await page.locator('#provider-model-list option[value="opus"]').waitFor({state:'attached'});await page.locator('#provider-model-list').selectOption('opus');await page.locator('#provider-effort').selectOption('high');
-    await page.locator('#global-ownerName').fill('Alex');await page.locator('#global-language').selectOption('id');await page.locator('#preferred-currency').selectOption('IDR');await page.locator('#preferences').fill('Keep answers concise.');
+    await page.locator('[data-settings-section=preferences]').click();await page.locator('#global-ownerName').fill('Alex');await page.locator('#global-language').selectOption('id');await page.locator('#preferred-currency').selectOption('IDR');await page.locator('#preferences').fill('Keep answers concise.');
     await page.getByRole('button',{name:'Continue to first agent'}).click();await page.getByRole('heading',{name:'Create your first agent',exact:true}).waitFor();
     expect(await page.locator('#settings-dialog').isVisible()).toBe(false);expect(app.runtime.state.customization).toBeNull();
     expect(app.runtime.state.globalProvider).toMatchObject({type:'claude',model:'opus',effort:'high',configured:true});
@@ -67,7 +67,7 @@ test('first run saves full workspace settings before creating an agent with inhe
     expect(await page.locator('#provider-inherit-hint').textContent()).toContain('Claude Code · opus');await page.locator('#customize-save').click();await page.locator('#customize-dialog').waitFor({state:'hidden'});
     expect(app.runtime.state.agents).toHaveLength(1);expect(app.runtime.state.agents[0].providerOverride).toBe(false);expect(app.runtime.state.agents[0].provider.model).toBe('opus');expect(app.runtime.state.customization.name).toBe('Scout');
     await page.reload();expect(await page.locator(':root').getAttribute('data-navigation')).toBe('sidebar');expect(await page.locator('#settings-dialog').isVisible()).toBe(false);expect(await page.locator('#customize-dialog').isVisible()).toBe(false);
-    await page.locator('#settings-open').click();await page.getByRole('heading',{name:'Odwyn settings',exact:true}).waitFor();expect(await page.locator('#preferences-form button.primary-button').textContent()).toContain('Save');
+    await page.locator('#settings-open').click();await page.locator('[data-settings-section=provider]').click();await page.getByRole('heading',{name:'Odwyn settings',exact:true}).waitFor();expect(await page.locator('#preferences-form > .form-footer button.primary-button').textContent()).toContain('Save');
     expect(errors).toEqual([]);
   } finally {await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
 },30_000);
@@ -98,19 +98,19 @@ test('model picker switches catalogs, preserves custom names, and falls back on 
   };
   const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'}}),page=await context.newPage();page.setDefaultTimeout(5000);
   try {
-    await page.goto(server.url.href);await page.locator('#settings-open').click();
+    await page.goto(server.url.href);await page.locator('#settings-open').click();await page.locator('[data-settings-section=provider]').click();
     await page.locator('#provider-model-list').waitFor({state:'visible'});expect(await page.locator('#provider-model').isVisible()).toBe(false);
     await page.locator('#provider-model-list').selectOption('another-codex');expect(await page.locator('#provider-model').inputValue()).toBe('another-codex');
     await page.locator('#provider-type').selectOption('claude');await page.locator('#provider-model-list option[value="opus"]').waitFor({state:'attached'});
     expect(await page.locator('#provider-model-list').inputValue()).toBe('sonnet');expect(await page.locator('#provider-model-list option[value="another-codex"]').count()).toBe(0);
     await page.locator('#provider-model-list').selectOption('opus');expect(await page.locator('#provider-model').inputValue()).toBe('opus');
     await page.locator('#provider-model-list').selectOption('');await page.locator('#provider-model').fill('custom-claude');
-    await page.locator('#preferences-form button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});
-    expect(app.runtime.state.globalProvider.model).toBe('custom-claude');await page.locator('#settings-open').click();await page.locator('#provider-model-list').waitFor({state:'visible'});
+    await page.locator('#preferences-form > .form-footer button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});
+    expect(app.runtime.state.globalProvider.model).toBe('custom-claude');await page.locator('#settings-open').click();await page.locator('[data-settings-section=provider]').click();await page.locator('#provider-model-list').waitFor({state:'visible'});
     expect(await page.locator('#provider-model-list').inputValue()).toBe('');expect(await page.locator('#provider-model').inputValue()).toBe('custom-claude');
     await page.locator('#provider-type').selectOption('openai');await page.getByText('Model list unavailable. Enter a model name manually.',{exact:true}).waitFor();
     expect(await page.locator('#provider-model-list').isVisible()).toBe(false);await page.locator('#provider-model').fill('manual-api');
-    await page.locator('#preferences-form button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});expect(app.runtime.state.globalProvider.model).toBe('manual-api');
+    await page.locator('#preferences-form > .form-footer button.primary-button').click();await page.locator('#settings-dialog').waitFor({state:'hidden'});expect(app.runtime.state.globalProvider.model).toBe('manual-api');
     await page.locator('#agents-open').click();await page.locator('.sidebar-agent-row summary').first().click();await page.getByRole('button',{name:'Customize agent',exact:true}).click();
     await page.locator('[data-custom-step="3"]').click();await page.locator('#provider-source').selectOption('custom');await page.locator('#provider-type').selectOption('claude');
     await page.locator('#provider-model-list option[value="opus"]').waitFor({state:'attached'});await page.locator('#provider-model-list').selectOption('opus');

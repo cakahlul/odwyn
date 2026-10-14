@@ -52,7 +52,7 @@ test('default skill selection persists, reaches provider instructions, and block
     await page.setViewportSize({width:320,height:568});
     await page.locator('#settings-open').click();
     await page.locator('.settings-scroll').evaluate(node=>node.scrollTop=0);
-    const save=await page.locator('#preferences-form button.primary-button').boundingBox();
+    const save=await page.locator('#preferences-form > .form-footer button.primary-button').boundingBox();
     expect(save.y+save.height).toBeLessThanOrEqual(568);
     expect(await page.locator('#settings-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
     await page.screenshot({path:join(import.meta.dir,'../artifacts/settings-save-mobile.png')});

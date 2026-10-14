@@ -19,11 +19,24 @@ export function openConnectors(db,policy,directory){
   function decrypt(row){const bytes=Buffer.from(row.credential,'base64'),cipher=createDecipheriv('aes-256-gcm',key(),bytes.subarray(0,12));cipher.setAAD(Buffer.from(binding(row)));cipher.setAuthTag(bytes.subarray(12,28));return Buffer.concat([cipher.update(bytes.subarray(28)),cipher.final()]).toString();}
   const providers=state=>[['workspace',state.provider],['global',state.globalProvider],...state.agents.map(a=>['agent/'+a.id,a.provider])].filter(([,config])=>config);
   return {
-    list(){return db.query('SELECT id,space_id AS spaceId,type,name,enabled FROM connectors').all().map(r=>({...r,enabled:!!r.enabled,operation:connectorManifest[r.type].operation}));},
+    list(){return db.query('SELECT id,space_id AS spaceId,type,name,endpoint,enabled FROM connectors').all().map(r=>({...r,enabled:!!r.enabled,operation:connectorManifest[r.type].operation}));},
     create(input){
       if(!input||Object.keys(input).some(k=>!['spaceId','type','name','endpoint','credential'].includes(k))||!Object.hasOwn(connectorManifest,input.type)||!policy.listSpaces().some(s=>s.id===input.spaceId)||typeof input.name!=='string'||!input.name.trim()||input.name.length>200||typeof input.credential!=='string'||!input.credential||input.credential.length>4096||/[\r\n]/.test(input.credential))throw new Error('Invalid reviewed connector configuration.');
       const url=new URL(input.endpoint);if(url.protocol!=='https:'||url.username||url.password||url.hash||input.endpoint.length>2000)throw new Error('Connector requires an exact credential-free HTTPS endpoint.');
       const id=randomUUID();db.query('INSERT INTO connectors VALUES(?,?,?,?,?,?,1)').run(id,input.spaceId,input.type,input.name,url.href,encrypt(input.credential,{id,space_id:input.spaceId}));policy.touch();return this.list().find(r=>r.id===id);
+    },
+    update(id,input){
+      const row=db.query('SELECT * FROM connectors WHERE id=?').get(id);if(!row)throw new Error('Connection not found.');
+      if(!input||Array.isArray(input)||Object.keys(input).some(k=>!['name','endpoint','credential'].includes(k))||typeof input.name!=='string'||!input.name.trim()||input.name.length>200||typeof input.endpoint!=='string'||input.endpoint.length>2000||input.credential!==undefined&&(typeof input.credential!=='string'||!input.credential||input.credential.length>4096||/[\r\n]/.test(input.credential)))throw new Error('Invalid reviewed connector configuration.');
+      const url=new URL(input.endpoint);if(url.protocol!=='https:'||url.username||url.password||url.hash)throw new Error('Connector requires an exact credential-free HTTPS endpoint.');
+      const changed=url.href!==row.endpoint||input.credential!==undefined;if(changed)policy.assertConfigurationIdle(row.space_id);
+      const linked=policy.listResources().filter(r=>r.metadata.connectionId===id);
+      db.transaction(()=>{if(changed)for(const r of linked){policy.revokeResourceAccess(r.id);if(r.metadata.endpoint!==undefined)db.query('UPDATE resources SET metadata=? WHERE id=?').run(JSON.stringify({...r.metadata,endpoint:url.href}),r.id);}db.query('UPDATE connectors SET name=?,endpoint=?,credential=? WHERE id=?').run(input.name.trim(),url.href,input.credential===undefined?row.credential:encrypt(input.credential,row),id);policy.touch();policy.auditOwner('connector.update',row.space_id,changed?'Owner changed connection configuration; linked resource access revoked for review.':'Owner renamed connection.');})();return this.list().find(r=>r.id===id);
+    },
+    remove(id){
+      const row=db.query('SELECT space_id FROM connectors WHERE id=?').get(id);if(!row)throw new Error('Connection not found.');policy.assertConfigurationIdle(row.space_id);
+      if(policy.listResources().some(r=>r.metadata.connectionId===id))throw new Error('Delete or unlink resources using this connection first.');
+      db.transaction(()=>{policy.auditOwner('connector.delete',row.space_id,'Owner permanently deleted connection.');db.query('DELETE FROM connectors WHERE id=?').run(id);policy.touch();})();
     },
     disable(id){const row=db.query('SELECT space_id FROM connectors WHERE id=?').get(id);if(!row)throw new Error('Connection not found.');db.transaction(()=>{db.query('UPDATE connectors SET enabled=0 WHERE id=?').run(id);policy.touch();policy.auditOwner('connector.disable',row.space_id,'Owner disabled connection '+id+'; in-flight results and subsequent calls are denied.');})();},
     withCredential(id,context,fn){const row=db.query('SELECT * FROM connectors WHERE id=?').get(id);if(!row||!row.enabled||row.space_id!==context.spaceId)throw new Error('Connection disabled or outside task Space.');return fn({id:row.id,endpoint:row.endpoint,manifest:connectorManifest[row.type],secret:decrypt(row)});},

@@ -2,13 +2,14 @@ import {randomUUID,randomBytes,createHash} from 'node:crypto';
 const hash=text=>createHash('sha256').update(text).digest('hex');
 export function canonical(value){if(value===null||typeof value==='string'||typeof value==='boolean'||typeof value==='number'&&Number.isFinite(value))return JSON.stringify(value);if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';if(value&&typeof value==='object')return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';throw new Error('Invalid action parameters.');}
 export function openApprovals(db,policy,connectors){
+ const seedPresets=!db.query("SELECT name FROM sqlite_master WHERE name='security_presets'").get();
  db.exec(`CREATE TABLE IF NOT EXISTS approval_requests(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,action TEXT NOT NULL,resource_id TEXT NOT NULL,envelope TEXT NOT NULL,digest TEXT NOT NULL,expires_at INTEGER NOT NULL,status TEXT NOT NULL,receipt TEXT);
  CREATE TABLE IF NOT EXISTS approval_keys(digest TEXT PRIMARY KEY,approval_id TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS owner_reauth(digest TEXT PRIMARY KEY,approval_id TEXT NOT NULL,expires_at INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS security_pauses(scope TEXT NOT NULL,id TEXT NOT NULL,PRIMARY KEY(scope,id));
  CREATE TABLE IF NOT EXISTS agent_security_settings(agent_id TEXT PRIMARY KEY,default_space TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS security_presets(name TEXT PRIMARY KEY,actions TEXT NOT NULL);`);
- for(const [name,actions] of [['Research only',['memory.read','repository.read','browser.read']],['Builder',['repository.read','sandbox.exec','repository.branch.push']],['Operator',['memory.read','memory.write']],['Custom',[]]])db.query('INSERT OR IGNORE INTO security_presets VALUES(?,?)').run(name,JSON.stringify(actions));
+ if(seedPresets)for(const [name,actions] of [['Research only',['memory.read','repository.read','browser.read']],['Builder',['repository.read','sandbox.exec','repository.branch.push']],['Operator',['memory.read','memory.write']],['Custom',[]]])db.query('INSERT OR IGNORE INTO security_presets VALUES(?,?)').run(name,JSON.stringify(actions));
  const row=id=>{const r=db.query('SELECT * FROM approval_requests WHERE id=?').get(id);if(!r)throw new Error('Approval unavailable.');return r;};
 
  function check(r){const e=JSON.parse(r.envelope);if(r.expires_at<=Date.now()||e.policyRevision!==policy.revision)throw new Error('Approval expired or policy changed.');const j={id:e.taskId,agentId:e.agentId,spaceId:e.spaceId};if(!policy.taskLive(e.taskId))throw new Error('Approval task ended.');policy.context(j);if(policy.simulate({agentId:j.agentId,spaceId:j.spaceId,taskId:j.id,action:r.action,resourceId:r.resource_id}).mode==='deny')throw new Error('Approval denied by current policy.');return e;}
