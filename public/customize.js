@@ -10,6 +10,9 @@ export const setAppearance = (node, appearance) => {
   Object.entries(vars).forEach(([key,value])=>node.style.setProperty(`--${key}`,value));
 };
 const setPalette = (node, palette) => setAppearance(node,{palette});
+function syncHexColors(form) {
+  for (const hex of form.querySelectorAll('[data-color-for]')) hex.value=$('#'+hex.dataset.colorFor).value;
+}
 
 export function applyProfile(profile, appearance = {}, owner = {}) {
   const p = resolveProfile(profile,appearance,owner), signature = JSON.stringify([p,appearance,owner]);
@@ -69,6 +72,7 @@ export function openCustomization(onboarding = false, newAgent = false, workspac
   $('#settings-dialog').close(); $('#customize-form').reset();
   for (const key of ownerPreferenceKeys) $('#customize-form').elements.namedItem(key).disabled = false;
   for (const [key,value] of Object.entries(draft)) { const field = $('#customize-form').elements.namedItem(key); if (field) field.value = value; }
+  syncHexColors($('#customize-form'));
   $('#agent-skill-options').innerHTML = (getState().skills || []).map(skill=>`<label class="agent-skill-option"><input type="checkbox" value="${esc(skill.id)}" ${(draft.skillIds || []).includes(skill.id) ? 'checked' : ''}><span><strong>${esc(skill.name)}</strong><small>/${esc(skill.command)}${skill.description ? ' · '+esc(skill.description) : ''}</small></span></label>`).join('') || '<p class="field-hint">No skills yet. Add or import skills in Workflows &amp; skills.</p>';
   $('#workspace-override').checked = !adding && !!getState()?.customization?.overrideWorkspace;
   $('#agent-appearance-controls').hidden = appearanceOnly;
@@ -110,7 +114,7 @@ function previewWorkspaceAppearance() {
   $('#dock-size-value').textContent = draft.dockSize + '%';
   $('#appearance-preview').style.setProperty('--dock-scale',draft.dockSize / 100);
   for (const key of Object.keys(materialDefaults)) $(`#appearance-${key}-value`).textContent = `${draft[key]}${{opacity:'%',blur:'px',depth:'%',radius:'px'}[key]}`;
-  for (const key of customColorKeys) $(`#appearance-color-${key}-value`).textContent = $(`#appearance-color-${key}`).value;
+  for (const hex of document.querySelectorAll('#appearance-color-fields [data-color-for]')) hex.disabled=!$('#appearance-custom-colors').checked;
   $('#appearance-color-fields').hidden = !$('#appearance-custom-colors').checked;
   try {
     validateAppearance(draft);setAppearance($('#appearance-preview'),draft);
@@ -128,12 +132,19 @@ export function fillWorkspaceAppearance(appearance = {}) {
   $('#appearance-custom-colors').checked = !!Object.keys(appearance.customColors || {}).length;
   const vars = appearanceVars(appearance);
   for (const key of customColorKeys) $(`#appearance-color-${key}`).value = vars[key];
+  syncHexColors($('#preferences-form'));
   for (const [key,value] of Object.entries(materialDefaults)) $(`#appearance-${key}`).value = appearance[key] ?? value;
   previewWorkspaceAppearance();
 }
 
 export function setupCustomization(state, onSaved, readProvider = () => undefined) {
   getState = state; saved = onSaved; providerDraft = readProvider;
+  for (const hex of document.querySelectorAll('[data-color-for]')) {
+    const color=$('#'+hex.dataset.colorFor);
+    color.addEventListener('input',()=>{hex.value=color.value;});
+    hex.oninput=event=>{event.stopPropagation();if(/^#[0-9a-f]{6}$/i.test(hex.value)){color.value=hex.value;color.dispatchEvent(new Event('input',{bubbles:true}));}};
+    hex.addEventListener('invalid',()=>{const details=hex.closest('details');if(details)details.open=true;});
+  }
   for (const [id,name] of [['palette-choices','palette'],['settings-palette-choices','workspacePalette']]) $(`#${id}`).innerHTML = Object.entries(palettes).map(([value,p])=>`<label class="palette-option"><input type="radio" name="${name}" value="${value}"><svg viewBox="0 0 96 32" aria-hidden="true">${p.colors.map((color,i)=>`<rect x="${i*32}" width="32" height="32" fill="${color}"/>`).join('')}</svg><span><strong>${p.name}</strong><small>${paletteDetails[value]}</small></span></label>`).join('');
   $('#avatar-choices').innerHTML = Object.entries(choices.shape).map(([value,name])=>`<label class="avatar-option"><input type="radio" name="shape" value="${value}"><span></span><strong>${name}</strong></label>`).join('');
   for (const key of ['eyes','mouth','accessory','motion','language','detail']) $(`#customize-form select[name="${key}"]`).innerHTML = Object.entries(choices[key]).map(([value,name])=>`<option value="${value}">${name}</option>`).join('');
@@ -146,6 +157,7 @@ export function setupCustomization(state, onSaved, readProvider = () => undefine
     if (event.target.name==='workspacePalette') {
       $('#appearance-custom-colors').checked = false;
       for (const key of customColorKeys) $(`#appearance-color-${key}`).value = palettes[event.target.value].vars[key];
+      syncHexColors($('#preferences-form'));
     }
     previewWorkspaceAppearance();
   };

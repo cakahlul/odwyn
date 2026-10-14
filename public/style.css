@@ -757,9 +757,12 @@ button[data-mention-link]:hover { text-decoration:underline; }
 .profile-controls .appearance-toggle { display:flex; align-items:center; gap:8px; }
 .appearance-toggle input { width:18px; height:18px; accent-color:var(--orange-deep); }
 .appearance-color-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
-.appearance-color-fields label>span { display:flex; align-items:center; gap:8px; margin-top:8px; }
+.appearance-color-fields div>span,.avatar-colors div>span { display:flex; align-items:center; gap:8px; margin-top:8px; }
 .appearance-color-fields input[type=color] { width:40px; height:36px; padding:3px; cursor:pointer; flex-shrink:0; }
-.appearance-color-fields output { font-size:11px; font-weight:400; font-variant-numeric:tabular-nums; }
+.color-hex { min-width:0; font-variant-numeric:tabular-nums; }
+.profile-controls .avatar-colors input[type=color] { width:40px; flex-shrink:0; }
+.avatar-colors div>span input { margin-top:0; }
+@media(max-width:760px) { .avatar-colors { grid-template-columns:minmax(0,1fr); } }
 .appearance-materials { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 24px; }
 .appearance-materials label { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
 .appearance-materials output { color:var(--muted); font-size:11px; font-weight:400; }

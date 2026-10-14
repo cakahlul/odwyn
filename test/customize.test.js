@@ -16,7 +16,7 @@ test('agent editor saves across sections, retains failed drafts, and preserves i
   nodes.get('#agent-skill-options').querySelectorAll=()=>[];
   form.elements={namedItem:key=>fields.get(key)};
   form.reset=()=>{};
-  form.querySelectorAll=selector=>selector==='details' ? [] : [...sections,...['customize-save','customize-cancel','customize-defaults'].map(id=>nodes.get('#'+id))];
+  form.querySelectorAll=selector=>['details','[data-color-for]'].includes(selector) ? [] : [...sections,...['customize-save','customize-cancel','customize-defaults'].map(id=>nodes.get('#'+id))];
   name.closest=selector=>selector==='[data-profile-step]' ? panels.find(panel=>panel.dataset.profileStep==='1') : null; name.reportValidity=()=>{};
   form.querySelector=()=>name.value ? null : name;
   dialog.dispatchEvent=()=>{}; dialog.showModal=()=>{dialog.open=true;}; dialog.close=()=>{dialog.open=false;}; nodes.get('#settings-dialog').close=()=>{};

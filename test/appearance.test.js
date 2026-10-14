@@ -40,7 +40,15 @@ test('workspace themes preview, customize, validate, persist and reset without c
     expect(await page.locator('.appearance-preview-message:not(.appearance-preview-own)').evaluate(node=>{const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');canvas.width=canvas.height=1;ctx.fillStyle=getComputedStyle(node).backgroundColor;ctx.fillRect(0,0,1,1);return Math.max(...ctx.getImageData(0,0,1,1).data.slice(0,3));})).toBeLessThan(100);
     await page.screenshot({path:join(artifacts,'workspace-palettes.png'),animations:'disabled'});
     await page.locator('.appearance-custom summary').click();await page.locator('#appearance-custom-colors').check();
-    for(const [key,value] of Object.entries({paper:'#17202b',surface:'#29394b',orange:'#f3a46c'}))await page.locator(`#appearance-color-${key}`).fill(value);
+    for(const [key,value] of Object.entries({paper:'#17202b',surface:'#29394b',orange:'#f3a46c'})){
+      await page.locator(`#appearance-color-${key}`).fill(value);
+      expect(await page.locator(`#appearance-color-${key}-value`).inputValue()).toBe(value);
+      await page.locator(`#appearance-color-${key}-value`).fill('#12');
+      expect(await page.locator(`#appearance-color-${key}-value`).evaluate(node=>node.checkValidity())).toBe(false);
+      expect(await page.locator(`#appearance-color-${key}`).inputValue()).toBe(value);
+      await page.locator(`#appearance-color-${key}-value`).fill(value.toUpperCase());
+      expect(await page.locator(`#appearance-color-${key}`).inputValue()).toBe(value);
+    }
     await setRange('opacity',70);await setRange('blur',28);await setRange('depth',90);await setRange('radius',22);
     expect(await page.locator('#appearance-depth-value').textContent()).toBe('90%');
     expect(await page.locator('#appearance-preview-status').textContent()).toBe('');
@@ -153,6 +161,17 @@ test('workspace themes preview, customize, validate, persist and reset without c
     expect(await page.locator('.dock-reveal-button').isVisible()).toBe(false);
     const fixedContent = await page.locator('.agent-workspace').boundingBox(), fixedDock = await page.locator('.workspace-dock').boundingBox();
     expect(fixedContent.y+fixedContent.height).toBeLessThanOrEqual(fixedDock.y);
+    await page.locator('#agents-open').click();await page.locator('.agent-menu summary').first().click();await page.getByRole('button',{name:'Customize agent',exact:true}).first().click();
+    await page.locator('[data-custom-step="0"]').click();await page.getByText('Colors & expression',{exact:true}).click();
+    for(const [key,value] of Object.entries({bodyColor:'#81ae76',eyeColor:'#abcdef',mouthColor:'#234567'})){
+      const color=page.locator(`#agent-${key}`),hex=page.locator(`[data-color-for="agent-${key}"]`);
+      await color.fill(value);expect(await hex.inputValue()).toBe(value);
+      await hex.fill('#gggggg');expect(await hex.evaluate(node=>node.checkValidity())).toBe(false);
+      await page.locator('#customize-save').click();expect(await page.locator('#customize-dialog').isVisible()).toBe(true);
+      await hex.fill(value.toUpperCase());expect(await color.inputValue()).toBe(value);
+    }
+    await page.locator('#customize-save').click();await page.locator('#customize-dialog').waitFor({state:'hidden'});
+    expect(app.runtime.state.customization).toMatchObject({bodyColor:'#81ae76',eyeColor:'#abcdef',mouthColor:'#234567'});
     expect(errors).toEqual([]);
   }finally{await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
 },30_000);
