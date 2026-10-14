@@ -3,7 +3,7 @@ import {randomUUID,randomBytes,createHash} from 'node:crypto';
 export const stateData=Symbol('server classified data');
 const digest=text=>createHash('sha256').update(text).digest('hex');
 const uuid=id=>typeof id==='string'&&/^[a-f0-9-]{36}$/.test(id);
-const readAction=action=>({'memory.write':'memory.read','repository.branch.push':'repository.read'}[action]||action);
+const readAction=action=>({'browser.navigate':'browser.read','browser.interact':'browser.read','memory.write':'memory.read','repository.branch.push':'repository.read'}[action]||action);
 export function openData(db,state,policy){
   db.exec(`CREATE TABLE IF NOT EXISTS classified_conversations(id TEXT PRIMARY KEY,space_id TEXT NOT NULL,agent_id TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS classified_messages(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL,space_id TEXT NOT NULL,agent_id TEXT NOT NULL,task_id TEXT,digest TEXT NOT NULL);

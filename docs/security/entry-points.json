@@ -123,14 +123,14 @@
     {
       "category": "browser",
       "file": "security/scoped-browser.js",
-      "anchor": "  async page(raw,check,signal)",
+      "anchor": "  async page(raw,check,signal,metadata,redirects=0)",
       "plannedHook": "PDP-bound credential-free exact GET broker, pinned public DNS, bounded HTML, no redirects",
       "gap": "Interactive/visual agent browsing remains unavailable"
     },
     {
       "category": "browser",
       "file": "execution/browser-worker.js",
-      "anchor": "export async function openBrowserPage(input)",
+      "anchor": "export async function openBrowserPage(input,options={})",
       "plannedHook": "Whole Chromium process inside isolated network-none worker; no controller IPC or profiles",
       "gap": "Default container seccomp is the OS boundary; Chromium inner sandbox is not enabled"
     },

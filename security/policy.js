@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { taskSecurityContext } from './task-context.js';
 import {AsyncLocalStorage} from 'node:async_hooks';
 import {canonical} from './approvals.js';
+import {blockedDomain} from './browser-scope.js';
 export const approvalActions=['payment.execute','message.send','repository.merge','deployment.production'];
 
 export const statePolicy = Symbol('server policy');
@@ -57,10 +58,11 @@ export function openPolicy(db,state,directory) {
   const resourceValue=input=>{
       strict(input,['spaceId','type','name','metadata']);space(input.spaceId);
       if(!Object.values(capabilities).some(c=>c.resourceType===input.type))throw new Error('Unknown resource type.');
-      const metadata=input.metadata || {};strict(metadata,input.type==='repository'?['endpoint','connectionId','upstreamId']:input.type==='file'?['path','workspaceId']:input.type==='browser'?['readUrls']:['connector','payment','destination','environment'].includes(input.type)?['connectionId','upstreamId']:[]);
+      const metadata=input.metadata || {};strict(metadata,input.type==='repository'?['endpoint','connectionId','upstreamId']:input.type==='file'?['path','workspaceId']:input.type==='browser'?['readUrls','blockedDomains']:['connector','payment','destination','environment'].includes(input.type)?['connectionId','upstreamId']:[]);
       if(['payment','destination','environment'].includes(input.type)||input.type==='repository'&&metadata.upstreamId!==undefined){id(metadata.connectionId);id(metadata.upstreamId);if(!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='action-gateway-v1' AND enabled=1").get(metadata.connectionId,input.spaceId))throw new Error('Reviewed action connection scope mismatch.');}
       else if(input.type==='repository'&&metadata.connectionId!==undefined){id(metadata.connectionId);if(!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='git-https-v1' AND endpoint=? AND enabled=1").get(metadata.connectionId,input.spaceId,metadata.endpoint))throw new Error('Git connection scope mismatch.');}
       if(metadata.workspaceId!==undefined){id(metadata.workspaceId);if(!db.query("SELECT id FROM resources WHERE id=? AND space_id=? AND type='workspace'").get(metadata.workspaceId,input.spaceId))throw new Error('File workspace outside Space.');}
+      if(input.type==='browser'&&metadata.blockedDomains!==undefined){if(metadata.readUrls!==undefined||!Array.isArray(metadata.blockedDomains)||metadata.blockedDomains.length>100)throw new Error('Choose blocked domains or an existing URL allowlist, not both. Maximum 100 blocked domains.');metadata.blockedDomains=[...new Set(metadata.blockedDomains.map(blockedDomain))];}
       if(input.type==='browser'&&metadata.readUrls!==undefined){if(!Array.isArray(metadata.readUrls)||!metadata.readUrls.length||metadata.readUrls.length>20)throw new Error('Use bounded reviewed read-only URLs.');for(const raw of metadata.readUrls){id(raw);const u=new URL(raw);if(u.protocol!=='https:'||u.username||u.password||u.hash||u.href!==raw)throw new Error('Use exact credential-free HTTPS read URLs.');}}
       if(input.type==='connector'&&Object.keys(metadata).length){id(metadata.connectionId);id(metadata.upstreamId);if(!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='mcp-document-v1' AND enabled=1").get(metadata.connectionId,input.spaceId))throw new Error('Connection outside resource Space or MCP manifest.');}
       if(metadata.endpoint!==undefined){
@@ -92,7 +94,7 @@ export function openPolicy(db,state,directory) {
     configureExecution(available){execution=available===true;},
     touch(){bump();},
     auditOwner(action,spaceId,reason){space(spaceId);events({action,spaceId},{mode:'deny',reason});},
-    catalog(){return Object.values(capabilities).map(c=>({...c,requiresApproval:approvalActions.includes(c.action),available:c.available||browserExecution&&['browser.read','browser.navigate'].includes(c.action)||execution&&['sandbox.exec','repository.branch.push'].includes(c.action)||approvalActions.includes(c.action)&&!!db.query("SELECT id FROM connectors WHERE type='action-gateway-v1' AND enabled=1 LIMIT 1").get()}));},
+    catalog(){return Object.values(capabilities).map(c=>({...c,requiresApproval:approvalActions.includes(c.action),available:c.available||browserExecution&&['browser.read','browser.navigate','browser.interact'].includes(c.action)||execution&&['sandbox.exec','repository.branch.push'].includes(c.action)||approvalActions.includes(c.action)&&!!db.query("SELECT id FROM connectors WHERE type='action-gateway-v1' AND enabled=1 LIMIT 1").get()}));},
     listSpaces(){return db.query('SELECT id,name FROM spaces WHERE owner_id=?').all(meta().owner_id);},
     createSpace(input){strict(input,['name']);const value={id:randomUUID(),name:name(input.name)};db.transaction(()=>{db.query('INSERT INTO spaces VALUES(?,?,?)').run(value.id,meta().owner_id,value.name);bump();})();return value;},
     createResource(input){
@@ -175,12 +177,14 @@ export function openPolicy(db,state,directory) {
         if(request.action==='repository.read'&&!JSON.parse(r.metadata).endpoint)return deny('Repository endpoint unavailable.');
         if(!approvalActions.includes(request.action)&&request.action.startsWith('repository.')&&JSON.parse(r.metadata).connectionId&&!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='git-https-v1' AND enabled=1").get(JSON.parse(r.metadata).connectionId,request.spaceId))return deny('Git connection disabled or outside scope.');
         if(request.action==='file.download'&&!JSON.parse(r.metadata).path)return deny('Exact file path unavailable.');
-        if(request.action.startsWith('browser.')&&!JSON.parse(r.metadata).readUrls?.length)return deny('Reviewed browser read URLs unavailable.');
+        if(request.action.startsWith('browser.')&&!(JSON.parse(r.metadata).readUrls?.length||Array.isArray(JSON.parse(r.metadata).blockedDomains)))return deny('Browsing scope unavailable.');
         if(request.action==='mcp.invoke'&&!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='mcp-document-v1' AND enabled=1").get(JSON.parse(r.metadata).connectionId||'',request.spaceId))return deny('Reviewed connector unavailable.');
         const high=approvalActions.includes(request.action);
         if(high&&!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='action-gateway-v1' AND enabled=1").get(JSON.parse(r.metadata).connectionId||'',request.spaceId))return deny('Reviewed action gateway unavailable.');
-        if(!high&&!capabilities[request.action].available&&!(execution&&['sandbox.exec','repository.branch.push'].includes(request.action))&&!(browserExecution&&['browser.read','browser.navigate'].includes(request.action)))return deny('Scoped executor unavailable.');
-        return {mode:high||gs.some(g=>g.mode==='ask')?'ask':'auto',reason:'Matching resource grant.',revision:policy.revision};
+        if(!high&&!capabilities[request.action].available&&!(execution&&['sandbox.exec','repository.branch.push'].includes(request.action))&&!(browserExecution&&['browser.read','browser.navigate','browser.interact'].includes(request.action)))return deny('Scoped executor unavailable.');
+        let readApproval=false;
+        if(request.action.startsWith('browser.')&&request.action!=='browser.read'){const read=policy.simulate({...request,action:'browser.read'});if(read.mode==='deny')return deny('Read page content access required.');readApproval=read.mode==='ask';}
+        return {mode:high||readApproval||gs.some(g=>g.mode==='ask')?'ask':'auto',reason:readApproval?'Read page content requires approval.':'Matching resource grant.',revision:policy.revision};
       }catch{return deny('Invalid security context.');}
     },
     constraints(job,action,resourceId){const c=policy.context(job);const grants=db.query("SELECT constraints,expires_at FROM grants WHERE agent_id=? AND space_id=? AND action=? AND (resource_id=? OR resource_id='*') AND mode!='deny'").all(c.agentId,c.spaceId,action,resourceId).filter(g=>!g.expires_at||Date.parse(g.expires_at)>Date.now()).map(g=>JSON.parse(g.constraints));
