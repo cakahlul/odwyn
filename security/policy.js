@@ -2,6 +2,7 @@ import {securityBackup} from './migration.js';
 import { randomUUID } from 'node:crypto';
 import { taskSecurityContext } from './task-context.js';
 import {AsyncLocalStorage} from 'node:async_hooks';
+import {sourceFolder} from '../execution/workspace-source.js';
 import {canonical} from './approvals.js';
 import {blockedDomain} from './browser-scope.js';
 export const approvalActions=['payment.execute','message.send','repository.merge','deployment.production'];
@@ -58,9 +59,10 @@ export function openPolicy(db,state,directory) {
   const resourceValue=input=>{
       strict(input,['spaceId','type','name','metadata']);space(input.spaceId);
       if(!Object.values(capabilities).some(c=>c.resourceType===input.type))throw new Error('Unknown resource type.');
-      const metadata=input.metadata || {};strict(metadata,input.type==='repository'?['endpoint','connectionId','upstreamId']:input.type==='file'?['path','workspaceId']:input.type==='browser'?['readUrls','blockedDomains']:['connector','payment','destination','environment'].includes(input.type)?['connectionId','upstreamId']:[]);
+      const metadata=input.metadata || {};strict(metadata,input.type==='repository'?['endpoint','connectionId','upstreamId']:input.type==='workspace'?['sourceFolder']:input.type==='file'?['path','workspaceId']:input.type==='browser'?['readUrls','blockedDomains']:['connector','payment','destination','environment'].includes(input.type)?['connectionId','upstreamId']:[]);
       if(['payment','destination','environment'].includes(input.type)||input.type==='repository'&&metadata.upstreamId!==undefined){id(metadata.connectionId);id(metadata.upstreamId);if(!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='action-gateway-v1' AND enabled=1").get(metadata.connectionId,input.spaceId))throw new Error('Reviewed action connection scope mismatch.');}
       else if(input.type==='repository'&&metadata.connectionId!==undefined){id(metadata.connectionId);if(!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='git-https-v1' AND endpoint=? AND enabled=1").get(metadata.connectionId,input.spaceId,metadata.endpoint))throw new Error('Git connection scope mismatch.');}
+      if(metadata.sourceFolder!==undefined)metadata.sourceFolder=sourceFolder(metadata.sourceFolder);
       if(metadata.workspaceId!==undefined){id(metadata.workspaceId);if(!db.query("SELECT id FROM resources WHERE id=? AND space_id=? AND type='workspace'").get(metadata.workspaceId,input.spaceId))throw new Error('File workspace outside Space.');}
       if(input.type==='browser'&&metadata.blockedDomains!==undefined){if(metadata.readUrls!==undefined||!Array.isArray(metadata.blockedDomains)||metadata.blockedDomains.length>100)throw new Error('Choose blocked domains or an existing URL allowlist, not both. Maximum 100 blocked domains.');metadata.blockedDomains=[...new Set(metadata.blockedDomains.map(blockedDomain))];}
       if(input.type==='browser'&&metadata.readUrls!==undefined){if(!Array.isArray(metadata.readUrls)||!metadata.readUrls.length||metadata.readUrls.length>20)throw new Error('Use bounded reviewed read-only URLs.');for(const raw of metadata.readUrls){id(raw);const u=new URL(raw);if(u.protocol!=='https:'||u.username||u.password||u.hash||u.href!==raw)throw new Error('Use exact credential-free HTTPS read URLs.');}}
@@ -97,8 +99,9 @@ export function openPolicy(db,state,directory) {
     catalog(){return Object.values(capabilities).map(c=>({...c,requiresApproval:approvalActions.includes(c.action),available:c.available||browserExecution&&['browser.read','browser.navigate','browser.interact'].includes(c.action)||execution&&['sandbox.exec','repository.branch.push'].includes(c.action)||approvalActions.includes(c.action)&&!!db.query("SELECT id FROM connectors WHERE type='action-gateway-v1' AND enabled=1 LIMIT 1").get()}));},
     listSpaces(){return db.query('SELECT id,name FROM spaces WHERE owner_id=?').all(meta().owner_id);},
     createSpace(input){strict(input,['name']);const value={id:randomUUID(),name:name(input.name)};db.transaction(()=>{db.query('INSERT INTO spaces VALUES(?,?,?)').run(value.id,meta().owner_id,value.name);bump();})();return value;},
-    createResource(input){
-      const value={id:randomUUID(),...resourceValue(input)};
+    validateResource(input){return resourceValue(input);},
+    createResource(input,resourceId=randomUUID()){
+      id(resourceId);const value={id:resourceId,...resourceValue(input)};
       db.transaction(()=>{db.query('INSERT INTO resources VALUES(?,?,?,?,?)').run(value.id,value.spaceId,value.type,value.name,JSON.stringify(value.metadata));bump();})();return value;
     },
     updateSpace(spaceId,input){strict(input,['name']);space(spaceId);const value={id:spaceId,name:name(input.name)};db.transaction(()=>{db.query('UPDATE spaces SET name=? WHERE id=?').run(value.name,spaceId);bump();events({action:'space.update',spaceId},{mode:'deny',reason:'Owner renamed Space.'});})();return value;},

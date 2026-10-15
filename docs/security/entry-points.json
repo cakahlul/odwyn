@@ -147,6 +147,13 @@
       "anchor": "const workspaceId = url.searchParams.get('workspace')",
       "plannedHook": "Authenticate owner before routing requests to independent workspace storage; task tokens validate in the selected home",
       "gap": "Shared settings are explicit owner actions; account sign-ins and permissions remain workspace scoped"
+    },
+    {
+      "category": "file",
+      "file": "execution/workspace-source.js",
+      "anchor": "export async function importWorkspaceSource(",
+      "plannedHook": "Owner source import: bounded files, private staging, atomic empty-folder replacement",
+      "gap": "Owner-only; known filename and configured-secret checks cannot identify every secret"
     }
   ],
   "httpLiterals": [
@@ -164,6 +171,8 @@
     "/api/connectors",
     "/api/customization",
     "/api/data/exports",
+    "/api/execution",
+    "/api/execution/source",
     "/api/files",
     "/api/images",
     "/api/jobs",
@@ -201,6 +210,7 @@
     "/^\\/api\\/files\\/([a-f0-9-]{36})(\\/preview)?$/",
     "/^\\/api\\/jobs\\/([a-f0-9-]{36})\\/(answer|respond|cancel|retry|permissions)$/",
     "/^\\/api\\/resources\\/([a-f0-9-]{36})$/",
+    "/^\\/api\\/resources\\/([a-f0-9-]{36})\\/source$/",
     "/^\\/api\\/rooms\\/([a-f0-9-]{36})(?:\\/(messages|cancel))?$/",
     "/^\\/api\\/rooms\\/([a-f0-9-]{36})\\/(decision|publish|handoff|start|evidence|checkpoint)$/",
     "/^\\/api\\/schedules\\/([a-f0-9-]{36})$/",

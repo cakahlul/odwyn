@@ -233,6 +233,7 @@ Linux container commands and local Chromium are supported. Native iOS simulators
 Android emulators, external test services, unrestricted networking, and arbitrary
 binary document extraction are not supplied by this change. Supported larger
 builds require the trusted execution profile and reviewed snapshot contents.
+Configure code resources and import initial project folders in **Workspace Settings → Resources**, using the [source setup steps](USAGE.md#isolated-workspace-source). Source folders are initial inputs; room handoffs carry accepted checkpoints.
 A green light is recorded approval, never a production deployment permission.
 
 Reverting to an older runtime removes these gates. Stop configured discussions

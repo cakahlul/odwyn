@@ -83,6 +83,19 @@ Create, edit, or delete these items in Settings. Successful creation clears fiel
 
 Changing a target or connection credential revokes affected agent permissions, including wildcard access. Stop tasks in the Space before changing configuration. Deletion confirms its impact and checks dependencies. Spaces referenced by history cannot be deleted; resource deletion preserves history and removes its grants. Connections can be disabled or permanently removed after unlinking their resources.
 
+## Isolated workspace source
+
+1. Open **Workspace Settings → Resources → Create resource**. Select the Space and **Isolated workspace**.
+2. Name the resource, for example **MyApp · Execution code**. **Source folder** is optional: leave it blank for an automatic private folder, or enter a relative name such as `myapp/execution` under the displayed server source root. **Check folder** reports whether it exists. Saving creates missing folders.
+3. To load existing code from your computer, edit the saved resource, choose a project folder, and click **Import project folder**. No SSH or manual UUID folders are needed. Start with an empty folder; imports never overwrite existing code.
+4. Grant the relevant agents access under **Customize agent → Access & Autonomy**. Source preparation alone grants no access.
+
+Import project source only: credentials, Git metadata, dependencies and build outputs are excluded; the UI reports skipped files. Limits are **16 MiB**, **4,096 files and directories**, and **32 nested directories**. Server source folders reject symlinks and unsafe paths. Review source for credentials before import; filename exclusions cannot identify every secret. Browser imports do not preserve executable permission bits.
+
+Agents receive isolated copies, not live host mounts. Accepted edits persist as checkpoints; they do not overwrite the source folder. Stop Space tasks before import or changing the source. Source changes revoke existing grants; a resource with a checkpoint needs a fresh resource to start from different code.
+
+The displayed executor status is separate from source readiness. Folder import does not install Docker, toolchains or dependencies: those must already be available in the reviewed execution image. Workers have no network access. Existing server execution setup remains supported; see [Execution setup](../execution/README.md).
+
 ## Agent access
 
 Open **Customize agent → Access & Autonomy**. Assign Spaces, choose a resource, and set each action to **Blocked**, **Ask first**, or **Automatic**. Preview shows effective permissions grouped by resource name, Space, and ID. Save access before switching resources.

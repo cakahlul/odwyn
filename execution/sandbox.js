@@ -1,3 +1,4 @@
+import {workspaceSource} from './workspace-source.js';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, mkdirSync, realpathSync, lstatSync, openSync, closeSync, fstatSync, readFileSync, writeFileSync, fsyncSync, constants } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
@@ -10,7 +11,7 @@ export class Sandbox {
   constructor(policy,{image,snapshotRoot,snapshotResolver,checkpointRoot,executionProfile={},validateCheckpointBytes}={}){
     if(validateCheckpointBytes!==undefined&&typeof validateCheckpointBytes!=='function')throw new Error('Invalid checkpoint validator.');
     this.validateCheckpointBytes=validateCheckpointBytes;
-    this.policy=policy;this.image=image;this.snapshotResolver=snapshotResolver||(snapshotRoot?((resource,context)=>join(snapshotRoot,context.spaceId,resource.id)):null);
+    this.policy=policy;this.image=image;this.snapshotRoot=snapshotRoot;this.snapshotResolver=snapshotResolver||(snapshotRoot?((resource,context)=>workspaceSource(snapshotRoot,resource.metadata?.sourceFolder||`${context.spaceId}/${resource.id}`).path):null);
     this.configured=/^sha256:[a-f0-9]{64}$/.test(image||'')&&!!this.snapshotResolver;
     this.workers=new Map();this.removals=new Set();
     this.executionProfile=Object.freeze({memory:128,pids:64,cpus:1,workspace:32,temporary:16,timeoutMs:120000,...executionProfile});
