@@ -1,4 +1,4 @@
-import {lstatSync,mkdirSync,readdirSync,realpathSync,mkdtempSync,writeFileSync,renameSync,rmSync} from 'node:fs';
+import {lstatSync,mkdirSync,readdirSync,realpathSync,mkdtempSync,writeFileSync,renameSync,rmSync,readFileSync} from 'node:fs';
 import {resolve,join,dirname} from 'node:path';
 
 export const sourceLimits=Object.freeze({bytes:16*1024*1024,entries:4096});
@@ -45,5 +45,22 @@ export async function importWorkspaceSource(root,folder,files,{assertBytes=()=>{
     beforeWrite();const current=workspaceSource(root,folder);if(!current.empty)throw new Error('Source folder changed during import.');
     renameSync(temporary,source.path);
     return {files:prepared.length,bytes,skipped,workspaceSource:workspaceSource(root,folder)};
+  }finally{rmSync(temporary,{recursive:true,force:true});}
+}
+
+export async function importServerWorkspaceSource(root,folder,serverFolder,{run,protectedRoots=[],assertBytes=()=>{},beforeWrite=()=>{}}={}){
+  if(typeof serverFolder!=='string'||!serverFolder.startsWith('/')||serverFolder.length>4096||/[\x00-\x1f\x7f\\]/.test(serverFolder)||serverFolder.split('/').some(part=>part.startsWith('.')))throw new Error('Enter an absolute project folder on the Odwyn server, without hidden folders, traversal or symbolic links.');
+  serverFolder=resolve(serverFolder);if(serverFolder==='/')throw new Error('Select a project folder, not the server filesystem root.');
+  if(typeof run!=='function'||!root)throw new Error('Server source copying is unavailable.');
+  beforeWrite();const source=workspaceSource(root,folder);
+  if(!source.exists||!source.empty)throw new Error('Copy requires an empty source folder. Create a fresh workspace resource to preserve existing code.');
+  const temporary=mkdtempSync(join(dirname(source.path),'.import-'));
+  try{
+    const copied=await run(['python3',join(import.meta.dir,'snapshot.py'),serverFolder,temporary,'--project',...new Set([...protectedRoots,resolve(root)])],{timeoutMs:15000,limit:4096});
+    if(copied.exitCode!==0||copied.truncated||copied.timedOut||copied.cancelled)throw new Error('Could not copy this server project. Use a readable project folder outside Odwyn private data and managed sources, without symlinks, hard links or special files; maximum 16 MiB and 4,096 entries.');
+    const result=JSON.parse(copied.stdout.toString());if(!result.files)throw new Error('No source files to copy after exclusions.');
+    const validate=(directory,relative='')=>{for(const entry of readdirSync(directory,{withFileTypes:true})){const name=relative?relative+'/'+entry.name:entry.name;filePath(name);if(entry.isDirectory())validate(join(directory,entry.name),name);else if(entry.isFile())assertBytes(readFileSync(join(directory,entry.name)));else throw new Error('Unsupported project file.');}};
+    validate(temporary);beforeWrite();if(!workspaceSource(root,folder).empty)throw new Error('Source folder changed during copy.');
+    renameSync(temporary,source.path);return {...result,workspaceSource:workspaceSource(root,folder)};
   }finally{rmSync(temporary,{recursive:true,force:true});}
 }

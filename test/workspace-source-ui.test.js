@@ -1,7 +1,7 @@
 import {test,expect} from 'bun:test';
 import {chromium} from 'playwright';
 import {EventEmitter} from 'node:events';
-import {mkdtempSync,mkdirSync,writeFileSync,existsSync,readFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,existsSync,readFileSync,realpathSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createApp} from '../server.js';
@@ -10,6 +10,7 @@ import {defaults} from '../public/profile.js';
 test('workspace resource source folder can be checked, created, edited and rejected through settings',async()=>{
  const directory=mkdtempSync(join(tmpdir(),'odwyn-source-ui-')),sourceRoot=join(directory,'sources'),password='test-password-long-enough';
  mkdirSync(join(sourceRoot,'project'),{recursive:true});writeFileSync(join(sourceRoot,'project','main.js'),'console.log("project");');
+ const serverProject=realpathSync(mkdtempSync(join(tmpdir(),'odwyn-server-project-')));mkdirSync(join(serverProject,'src'));writeFileSync(join(serverProject,'src','main.js'),'console.log("server project");');writeFileSync(join(serverProject,'.env'),'PRIVATE=excluded');mkdirSync(join(serverProject,'node_modules'));writeFileSync(join(serverProject,'node_modules','dependency.js'),'excluded');
  const codex=Object.assign(new EventEmitter(),{request:async()=>({account:null}),stop(){}});let app;
  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
  app=createApp({directory,user:'owner',password,origin:server.url.origin,providerOptions:{codex},browser:{close:async()=>{}},execution:{snapshotRoot:sourceRoot}});
@@ -19,7 +20,7 @@ test('workspace resource source folder can be checked, created, edited and rejec
  try{
   await page.goto(server.url.href);await page.locator('#settings-open').click();await page.locator('[data-settings-section=resources]').click();
   await page.locator('[data-manage-new=resources]:not([disabled])').click();await page.locator('#workspace-resource-name').fill('Project development');await page.locator('#workspace-resource-type').selectOption('workspace');
-  expect(await page.locator('#workspace-resource-source').isVisible()).toBe(true);expect(await page.locator('#workspace-source-help').textContent()).toContain(sourceRoot);
+  expect(await page.locator('#workspace-resource-source').isVisible()).toBe(true);expect(await page.locator('#workspace-source-server-import').isVisible()).toBe(false);expect(await page.locator('#workspace-source-server-import').isDisabled()).toBe(true);expect(await page.locator('#workspace-source-help').textContent()).toContain(sourceRoot);
   const help=await page.locator('[data-workspace-field=source]').textContent();for(const text of ['never mounted live','16 MiB','4,096','no internet','browser computer','checkpoints'])expect(help).toContain(text);
   await page.locator('#workspace-resource-source').fill('project');await page.locator('#workspace-source-check').click();await page.waitForFunction(()=>document.querySelector('#workspace-source-status').textContent.includes('Folder exists:'));
   await page.locator('#workspace-resource-source').fill('../outside');await page.locator('#workspace-source-check').click();await page.waitForFunction(()=>document.querySelector('#workspace-management-status').textContent!=='Working…');
@@ -32,10 +33,16 @@ test('workspace resource source folder can be checked, created, edited and rejec
   await page.locator('#workspace-source-files').setInputFiles(join(sourceRoot,'project'));await page.locator('#workspace-source-import').click();await page.waitForFunction(()=>document.querySelector('#workspace-source-status').textContent.includes('Imported 1 files'));expect(readFileSync(join(sourceRoot,'new-project','main.js'),'utf8')).toContain('project');expect(await page.locator('#workspace-source-status').textContent()).toContain('Skipped 2 excluded files');expect(existsSync(join(sourceRoot,'new-project','.env'))).toBe(false);expect(existsSync(join(sourceRoot,'new-project','node_modules'))).toBe(false);
   await page.locator('#workspace-source-files').setInputFiles(join(sourceRoot,'project'));await page.locator('#workspace-source-import').click();await page.waitForFunction(()=>document.querySelector('#workspace-management-status').textContent!=='Working…');expect(await page.locator('#workspace-management-status').textContent()).not.toBe('');await page.locator('[data-manage-cancel=resources]').click();
   await page.locator('[data-manage-new=resources]').click();await page.locator('#workspace-resource-name').fill('References');await page.locator('#workspace-resource-type').selectOption('workspace');await page.locator('#workspace-resource-source').fill('must-not-submit');await page.locator('#workspace-resource-type').selectOption('browser');
-  expect(await page.locator('#workspace-resource-source').isVisible()).toBe(false);expect(await page.locator('#workspace-resource-source').isDisabled()).toBe(true);
+  expect(await page.locator('#workspace-resource-source').isVisible()).toBe(false);expect(await page.locator('#workspace-resource-source').isDisabled()).toBe(true);expect(await page.locator('#workspace-source-server-folder').isDisabled()).toBe(true);
   const request=page.waitForRequest(req=>new URL(req.url()).pathname==='/api/resources'&&req.method()==='POST');await page.locator('[data-manage-save=resources]').click();const body=(await request).postDataJSON();expect(body.metadata.sourceFolder).toBeUndefined();await page.locator('#workspace-resources-editor').waitFor({state:'hidden'});
   await page.locator('[data-manage-new=resources]').click();await page.locator('#workspace-resource-name').fill('Empty development');await page.locator('#workspace-resource-type').selectOption('workspace');
   const saved=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/resources'&&response.request().method()==='POST');await page.locator('[data-manage-save=resources]').click();const empty=await (await saved).json();expect(empty.workspaceSource.empty).toBe(true);expect(existsSync(empty.workspaceSource.path)).toBe(true);await page.locator('#workspace-resources-editor').waitFor({state:'hidden'});
+  await page.locator('[data-manage-edit=resources]').click();expect(await page.locator('#workspace-source-server-import').isVisible()).toBe(true);expect(await page.locator('#workspace-source-files').locator('..').textContent()).toContain('Project folder on this computer');
+  await page.locator('#workspace-source-server-folder').fill(join(serverProject,'missing'));await page.locator('#workspace-source-server-import').click();await page.waitForFunction(()=>document.querySelector('#workspace-management-status').textContent!=='Working…');expect(await page.locator('#workspace-management-status').textContent()).not.toBe('');expect(existsSync(join(empty.workspaceSource.path,'src'))).toBe(false);
+  await page.locator('#workspace-source-server-folder').fill(serverProject);await page.locator('#workspace-resource-source').fill('unsaved-destination');await page.locator('#workspace-source-server-import').click();await page.waitForFunction(()=>document.querySelector('#workspace-management-status').textContent.includes('Save the source folder change'));expect(existsSync(join(empty.workspaceSource.path,'src'))).toBe(false);
+  await page.locator('#workspace-resource-source').fill('');await page.locator('#workspace-source-server-import').click();await page.waitForFunction(()=>document.querySelector('#workspace-source-status').textContent.includes('Copied 1 files'));
+  expect(readFileSync(join(empty.workspaceSource.path,'src','main.js'),'utf8')).toBe('console.log("server project");');expect(readFileSync(join(serverProject,'src','main.js'),'utf8')).toBe('console.log("server project");');expect(existsSync(join(empty.workspaceSource.path,'.env'))).toBe(false);expect(existsSync(join(empty.workspaceSource.path,'node_modules'))).toBe(false);expect(await page.locator('#workspace-source-status').textContent()).toContain('Skipped 2 excluded entries');expect(await page.locator('#workspace-source-status').textContent()).toContain('Original server project unchanged');expect(await page.locator('#workspace-source-server-folder').inputValue()).toBe('');
+  await page.locator('#workspace-source-server-folder').fill(serverProject);await page.locator('[data-manage-cancel=resources]').click();await page.locator('[data-manage-edit=resources]').click();expect(await page.locator('#workspace-source-server-folder').inputValue()).toBe('');
   expect(errors).toEqual([]);
- }finally{await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
+ }finally{await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});rmSync(serverProject,{recursive:true,force:true});}
 },30000);

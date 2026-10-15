@@ -1,4 +1,4 @@
-import {workspaceSource,sourceLimits,sourceFolder,importWorkspaceSource} from './execution/workspace-source.js';
+import {workspaceSource,sourceLimits,sourceFolder,importWorkspaceSource,importServerWorkspaceSource} from './execution/workspace-source.js';
 import {canonical} from './security/approvals.js';
 import { resolve, join } from 'node:path';
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
@@ -23,6 +23,7 @@ const headers = {
 
 export function createApp(options = {}) {
   const directory = resolve(options.directory || (process.env.ODWYN_DATA_DIR ?? process.env.SIDEKICK_DATA_DIR) || join(root, 'data'));
+  const sourceProtectedRoot=options.sourceProtectedRoot||directory;
   const user = options.user || (process.env.ODWYN_USER ?? process.env.SIDEKICK_USER);
   const password = options.password || (process.env.ODWYN_PASSWORD ?? process.env.SIDEKICK_PASSWORD);
   if (!user || !password || password.length < 16) throw new Error('Set ODWYN_USER and an ODWYN_PASSWORD of at least 16 characters. Run bun run setup.');
@@ -41,6 +42,7 @@ export function createApp(options = {}) {
   }
   store.state.provider = store.state.agents[0].provider;
   const home = options.workspaceId ? join(directory, 'codex') : resolve((process.env.ODWYN_CODEX_HOME ?? process.env.SIDEKICK_CODEX_HOME) || join(directory, 'codex'));
+  const sourceProtectedRoots=[...new Set([...(options.sourceProtectedRoots||[]),sourceProtectedRoot,home])];
   const codex = new AIProvider({ config: store.state.provider, home, workspace, isolated:!!options.workspaceId, codex: options.codex, ...options.providerOptions });
   let runtime;
   const browser = options.browser || new Browser({ directory, executablePath: (process.env.ODWYN_BROWSER_EXECUTABLE ?? process.env.SIDEKICK_BROWSER_EXECUTABLE) || undefined, headless: (process.env.ODWYN_HEADLESS ?? process.env.SIDEKICK_HEADLESS) !== 'false',
@@ -145,7 +147,7 @@ export function createApp(options = {}) {
     }
   }
   function openHome(row) {
-    const child = createApp({...options,browser:undefined,codex:undefined,directory:join(directory,'workspaces',row.id),workspaceId:row.id,
+    const child = createApp({...options,sourceProtectedRoot,sourceProtectedRoots,browser:undefined,codex:undefined,directory:join(directory,'workspaces',row.id),workspaceId:row.id,
       checkSettings,settingsChanged:(source,kinds)=>settingsChanged(kinds,source)});
     homes.set(row.id,child); return child;
   }
@@ -296,13 +298,18 @@ export function createApp(options = {}) {
         const sourceImport=pathname.match(/^\/api\/resources\/([a-f0-9-]{36})\/source$/);
         if(sourceImport&&req.method==='POST'){
           const resource=store.security.resource(sourceImport[1]);if(resource.type!=='workspace')throw new Error('Choose an isolated workspace resource.');
+          const beforeWrite=()=>{const current=store.security.resource(resource.id);if(canonical(current.metadata)!==canonical(resource.metadata)||store.state.executionHeads?.[resource.id]||store.state.jobs.some(job=>job.spaceId===resource.spaceId&&['queued','running','waiting','takeover','stopping'].includes(job.status)))throw new Error('Stop Space tasks and use a workspace without an existing checkpoint or changed source.');};
+          if(req.headers.get('content-type')?.startsWith('application/json')){
+            const input=await json(req);if(Object.keys(input).some(key=>key!=='serverFolder'))throw new Error('Only a server project folder is accepted.');
+            const result=await importServerWorkspaceSource(runtime.sandbox.snapshotRoot,resource.metadata.sourceFolder||`${resource.spaceId}/${resource.id}`,input.serverFolder,{run:(argv,options)=>runtime.sandbox.process(argv,options),protectedRoots:sourceProtectedRoots,assertBytes:bytes=>store.connectors.assertNoSecret(bytes),beforeWrite});
+            runtime.changed();return response({...result,workspaceSource:{...result.workspaceSource,configured:runtime.sandbox.configured}},201);
+          }
           const length=Number(req.headers.get('content-length'));if(length>21*1024*1024)throw new Error('Source upload exceeds 21 MiB.');
           const chunks=[],reader=req.body?.getReader();let size=0;
           if(!reader)throw new Error('Choose source files.');
           try{while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>21*1024*1024){await reader.cancel();throw new Error('Source upload exceeds 21 MiB.');}chunks.push(value);}}finally{reader.releaseLock();}
           const data=await new Request(req.url,{method:'POST',headers:req.headers,body:Buffer.concat(chunks)}).formData();if([...data.keys()].some(key=>key!=='files'))throw new Error('Only source files are accepted.');
           const files=data.getAll('files');if(files.some(file=>!(file instanceof File)))throw new Error('Choose source files.');
-          const beforeWrite=()=>{const current=store.security.resource(resource.id);if(canonical(current.metadata)!==canonical(resource.metadata)||store.state.executionHeads?.[resource.id]||store.state.jobs.some(job=>job.spaceId===resource.spaceId&&['queued','running','waiting','takeover','stopping'].includes(job.status)))throw new Error('Stop Space tasks and use a workspace without an existing checkpoint or changed source.');};
           const result=await importWorkspaceSource(runtime.sandbox.snapshotRoot,resource.metadata.sourceFolder||`${resource.spaceId}/${resource.id}`,files,{assertBytes:bytes=>store.connectors.assertNoSecret(bytes),beforeWrite});
           runtime.changed();return response({...result,workspaceSource:{...result.workspaceSource,configured:runtime.sandbox.configured}},201);
         }

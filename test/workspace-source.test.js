@@ -1,5 +1,5 @@
 import {test,expect} from 'bun:test';
-import {mkdtempSync,rmSync,readFileSync,symlinkSync,readdirSync} from 'node:fs';
+import {mkdtempSync,rmSync,readFileSync,symlinkSync,readdirSync,mkdirSync,writeFileSync,realpathSync,linkSync,statSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {EventEmitter} from 'node:events';
@@ -59,5 +59,32 @@ test('owner API provisions sources and imports code, rejects task tokens and saf
     store.state.executionHeads={[resource.id]:'a'.repeat(64)};expect((await request(`/api/resources/${resource.id}`,{metadata:{sourceFolder:'third'}},'PUT')).status).toBe(400);expect((await request(`/api/resources/${resource.id}/source`,form())).status).toBe(400);expect(p.resource(resource.id).metadata.sourceFolder).toBe('next');
     expect((await request(`/api/resources/${resource.id}`,{metadata:null},'PUT')).status).toBe(400);expect(p.resource(resource.id).metadata.sourceFolder).toBe('next');
     const blank=await (await request('/api/resources',{spaceId:p.legacySpaceId,type:'workspace',name:'Automatic'})).json();expect(blank.metadata).toEqual({});expect(blank.workspaceSource.path).toBe(join(info.sourceRoot,p.legacySpaceId,blank.id));expect(blank.workspaceSource.empty).toBe(true);
+  }finally{await app.close();rmSync(directory,{recursive:true,force:true});}
+});
+
+test('server project copy preserves originals and executable bits, excludes private data and fails atomically',async()=>{
+  const directory=realpathSync(mkdtempSync(join(tmpdir(),'odwyn-server-source-'))),project=join(directory,'project'),data=join(directory,'private'),root=join(data,'sources');
+  mkdirSync(join(project,'src'),{recursive:true});mkdirSync(data);writeFileSync(join(project,'src/main.js'),'console.log("existing project");',{mode:0o755});
+  for(const name of ['.git','node_modules','dist']){mkdirSync(join(project,name));writeFileSync(join(project,name,'excluded'),'excluded');}writeFileSync(join(project,'.env'),'secret');
+  const app=createApp({directory:data,sourceProtectedRoots:[join(directory,'provider-private')],user:'owner',password:'source-copy-password',origin:'http://localhost',codex:Object.assign(new EventEmitter(),{request:async()=>({account:null}),stop(){}}),browser:{close:async()=>{}}}),p=app.runtime.store.security;
+  const headers={authorization:'Basic '+Buffer.from('owner:source-copy-password').toString('base64'),origin:'http://localhost','content-type':'application/json'};
+  const request=(path,body,auth=headers)=>app.fetch(new Request('http://localhost'+path,{method:'POST',headers:auth,body:JSON.stringify(body)}));
+  const resource=await(await request('/api/resources',{spaceId:p.legacySpaceId,type:'workspace',name:'Server project'})).json(),target=resource.workspaceSource.path,path='/api/resources/'+resource.id+'/source';
+  try{
+    const protectedProject=join(directory,'provider-private');mkdirSync(protectedProject);writeFileSync(join(protectedProject,'private.txt'),'synthetic provider data');
+    const copied=await request(path,{serverFolder:project});expect(copied.status).toBe(201);const result=await copied.json();expect(result.files).toBe(1);expect(result.skipped).toBe(4);expect(readFileSync(join(target,'src/main.js'),'utf8')).toContain('existing project');expect(statSync(join(target,'src/main.js')).mode&0o111).toBe(0o111);expect(readFileSync(join(project,'.env'),'utf8')).toBe('secret');expect((await request(path,{serverFolder:project})).status).toBe(400);
+    const fresh=await(await request('/api/resources',{spaceId:p.legacySpaceId,type:'workspace',name:'Fresh'})).json(),freshPath='/api/resources/'+fresh.id+'/source';
+    for(const serverFolder of ['relative','/','/etc/../etc',data,root,join(directory,'missing')])expect((await request(freshPath,{serverFolder})).status).toBe(400);
+    const workspace=await(await request('/api/workspaces',{name:'Studio'})).json();
+    const state=await(await app.fetch(new Request('http://localhost/api/state?workspace='+workspace.id,{headers}))).json();
+    const child=await(await request('/api/resources?workspace='+workspace.id,{spaceId:state.security.legacySpaceId,type:'workspace',name:'Child copy'})).json();
+    expect((await request('/api/resources/'+child.id+'/source?workspace='+workspace.id,{serverFolder:protectedProject})).status).toBe(400);
+    symlinkSync(project,join(directory,'alias'));expect((await request(freshPath,{serverFolder:join(directory,'alias')})).status).toBe(400);
+    symlinkSync(join(project,'src/main.js'),join(project,'link'));expect((await request(freshPath,{serverFolder:project})).status).toBe(400);rmSync(join(project,'link'));
+    linkSync(join(project,'src/main.js'),join(project,'hard'));expect((await request(freshPath,{serverFolder:project})).status).toBe(400);rmSync(join(project,'hard'));
+    const job=createJob(app.runtime.state,{agentId:app.runtime.state.agents[0].id,prompt:'Block import'});job.status='running';expect((await request(freshPath,{serverFolder:project})).status).toBe(400);const bearer={...headers,authorization:'Bearer '+app.runtime.store.data.issueToken(job)};expect((await request(freshPath,{serverFolder:project},bearer)).status).toBe(401);job.status='completed';
+    app.runtime.state.executionHeads={[fresh.id]:'a'.repeat(64)};expect((await request(freshPath,{serverFolder:project})).status).toBe(400);delete app.runtime.state.executionHeads[fresh.id];
+    writeFileSync(join(project,'large'),'x'.repeat(16*1024*1024+1));expect((await request(freshPath,{serverFolder:project})).status).toBe(400);rmSync(join(project,'large'));expect(readdirSync(fresh.workspaceSource.path)).toEqual([]);
+    symlinkSync(data,join(project,'private-link'));expect((await request(freshPath,{serverFolder:project})).status).toBe(400);expect(readdirSync(fresh.workspaceSource.path)).toEqual([]);
   }finally{await app.close();rmSync(directory,{recursive:true,force:true});}
 });

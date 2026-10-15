@@ -1,9 +1,10 @@
 import {test,expect} from 'bun:test';
-import {readFileSync} from 'node:fs';
+import {readFileSync,realpathSync} from 'node:fs';
 import {join} from 'node:path';
+import {createJob} from '../../../store.js';
 import {fixture,script} from './fixture.js';
 import {Sandbox} from '../../../execution/sandbox.js';
-import {workspaceSource,importWorkspaceSource} from '../../../execution/workspace-source.js';
+import {workspaceSource,importWorkspaceSource,importServerWorkspaceSource} from '../../../execution/workspace-source.js';
 
 test('imported named workspace runs in a real isolated worker without changing its source folder',async()=>{
   const f=await fixture();let sandbox;
@@ -14,6 +15,11 @@ test('imported named workspace runs in a real isolated worker without changing i
     workspaceSource(root,resource.metadata.sourceFolder,{create:true});
     await importWorkspaceSource(root,resource.metadata.sourceFolder,[new File(['console.log("Imported source works");'],'src/main.js'),new File(['excluded'],'.env')]);
     sandbox=new Sandbox(p,{image:process.env.ODWYN_SECURITY_SANDBOX_IMAGE,snapshotRoot:root,checkpointRoot:join(f.directory,'import-checkpoints')});
+    workspaceSource(root,'server-copy',{create:true});
+    await importServerWorkspaceSource(root,'server-copy',realpathSync(f.workspace),{run:(argv,options)=>sandbox.process(argv,options),protectedRoots:[join(f.directory,'app')]});
+    const copiedResource=p.createResource({spaceId:f.job.spaceId,type:'workspace',name:'Copied server project',metadata:{sourceFolder:'server-copy'}});p.putAccess(f.job.agentId,{revision:p.revision,spaceIds:[f.job.spaceId],grants:[resource,copiedResource].map(row=>({spaceId:f.job.spaceId,resourceId:row.id,action:'sandbox.exec',mode:'auto',constraints:{}}))});
+    const copyJob=createJob(f.store.state,{agentId:f.job.agentId,spaceId:f.job.spaceId,prompt:'Verify server copy'});
+    const copied=await sandbox.run(copyJob,{resourceId:copiedResource.id,command:'cat public.txt',reason:'Verify server project copy',timeoutMs:5000});expect(copied.exitCode).toBe(0);expect(copied.stdout).toContain('Synthetic permitted workspace');
     const result=await sandbox.run(f.job,{resourceId:resource.id,command:'bun src/main.js',reason:'Verify imported source',timeoutMs:5000});
     expect(result.exitCode).toBe(0);expect(result.stdout).toContain('Imported source works');
     const edit=await sandbox.run(f.job,{resourceId:resource.id,command:script('const fs=require("node:fs");if(fs.existsSync(".env"))throw Error("secret copied");fs.writeFileSync("src/main.js","changed inside worker");'),reason:'Verify private copy',timeoutMs:5000});
