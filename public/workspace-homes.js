@@ -1,21 +1,32 @@
-import { $, esc, api, handleError, workspaceId } from './ui.js';
+import { $, esc, api, handleError, workspaceId, icon } from './ui.js';
 import { freshPassword } from './security-ui.js';
 
 export function setupWorkspaceHomes() {
   const picker = $('#workspace-home');
+  const menu=$('#workspace-menu');
+  const position=()=>{const rect=picker.getBoundingClientRect(),width=Math.min(320,innerWidth-24);menu.style.left=Math.max(12,Math.min(rect.left,innerWidth-width-12))+'px';menu.style.top=(rect.bottom+8)+'px';};
+  menu.addEventListener('beforetoggle',event=>{picker.setAttribute('aria-expanded',String(event.newState==='open'));if(event.newState==='open')position();});
+  addEventListener('resize',()=>{if(menu.matches(':popover-open'))position();});
+  menu.addEventListener('toggle',event=>{if(event.newState==='open')menu.querySelector('[aria-current=page]')?.focus();});
   const management=$('#workspace-manage-home');let homes=[],managing=false;
   function selected(){return homes.find(row=>row.id===management.value);}
   function drawManagement(){const row=selected();$('#workspace-rename-name').value=row?.name||'';$('#workspace-rename').disabled=!row;$('#workspace-delete').disabled=!row||row.id==='default';$('#workspace-delete-hint').hidden=row?.id!=='default';}
   async function load() {
     const result = await api('/api/workspaces',undefined,'GET');
     homes=result.workspaces;
-    picker.innerHTML = result.workspaces.map(row=>`<option value="${esc(row.id)}">${esc(row.name)}</option>`).join('');
-    picker.value=workspaceId; picker.disabled=false;
-    if(!managing){const id=management.value||workspaceId;management.innerHTML=picker.innerHTML;management.value=homes.some(row=>row.id===id)?id:workspaceId;drawManagement();}
+    const current=homes.find(row=>row.id===workspaceId);
+    $('#workspace-current-name').textContent=current?.name||'Workspace';
+    picker.querySelector('.workspace-monogram').textContent=Array.from(current?.name||'W')[0].toUpperCase();
+    picker.setAttribute('aria-label',`Switch workspace: ${current?.name||'Workspace'}`);
+    $('#workspace-options').innerHTML=homes.map(row=>`<a href="${row.id==='default'?'/':'/?workspace='+encodeURIComponent(row.id)}" data-workspace-id="${esc(row.id)}" ${row.id===workspaceId?'aria-current="page"':''}><span class="workspace-monogram" aria-hidden="true">${esc(Array.from(row.name)[0].toUpperCase())}</span><span>${esc(row.name)}</span>${row.id===workspaceId?icon('check'):''}</a>`).join('');
+    picker.disabled=false;$('#workspace-picker-status').textContent='';
+    if(!managing){const id=management.value||workspaceId;management.innerHTML=homes.map(row=>`<option value="${esc(row.id)}">${esc(row.name)}</option>`).join('');management.value=homes.some(row=>row.id===id)?id:workspaceId;drawManagement();}
     for (const checkbox of document.querySelectorAll('[data-share-setting]')) if (!checkbox.disabled) checkbox.checked=!!result.sharing[checkbox.dataset.shareSetting];
   }
-  picker.onchange = () => { location.href=picker.value==='default' ? '/' : `/?workspace=${encodeURIComponent(picker.value)}`; };
-  const create=() => { $('#workspace-create-status').textContent=''; $('#workspace-create-dialog').showModal(); $('#workspace-home-name').focus(); };
+  let createReturn=picker;
+  $('#workspace-create-dialog').addEventListener('close',()=>{(createReturn.getClientRects().length?createReturn:picker).focus();});
+  const create=event => { createReturn=event?.currentTarget||picker; if(menu.matches(':popover-open'))menu.hidePopover(); $('#workspace-create-status').textContent=''; $('#workspace-create-dialog').showModal(); $('#workspace-home-name').focus(); };
+  $('#workspace-menu-settings').onclick=()=>{menu.hidePopover();$('#settings-open').click();document.querySelector('[data-settings-section=workspaces]').click();};
   $('#new-workspace').onclick=create;$('#workspace-manage-create').onclick=create;
   management.onchange=()=>{drawManagement();$('#workspace-homes-status').textContent='';};
   $('#workspace-rename-name').onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();$('#workspace-rename').click();}};
@@ -51,5 +62,5 @@ export function setupWorkspaceHomes() {
     finally { checkbox.disabled=false; }
   };
   $('#settings-dialog').addEventListener('toggle',event=>{if(event.newState==='open')void load().catch(handleError);});
-  void load().catch(handleError);
+  void load().catch(error=>{$('#workspace-picker-status').textContent=error.message;handleError(error);});
 }

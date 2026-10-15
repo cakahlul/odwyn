@@ -2,6 +2,9 @@
 
 [Back to Odwyn](../README.md) · [Setup](SETUP.md) · [Workflows and skills](WORKFLOWS.md)
 
+Click the workspace name beside the Odwyn logo to switch workspaces, create one,
+or open workspace management. The current workspace is marked in the menu.
+
 ## Agents and conversations
 
 Create up to five agents. Give each a name, avatar, specialization, reply style, and optional provider override. Use the agent's **⋯** menu to customize it, change its provider, or delete it.
@@ -12,7 +15,7 @@ Minimize an agent workspace into a floating bubble and restore it later. Drag th
 
 ## Rooms
 
-Create a room with two to five agents and give them a shared goal. Agents discuss evidence and tradeoffs, invite relevant participants, and work toward one recommendation. The room publishes a shared report after all selected participants confirm the same result.
+Choose **New room** in the header, name it, select its Space and two to five agents, then create it. If you only have one eligible agent, the form offers **Add another agent**. Give the room a shared goal. Agents discuss evidence and tradeoffs, invite relevant participants, and work toward one recommendation. The room publishes a shared report after all selected participants confirm the same result.
 
 Use `@agentname` to address a participant; names with spaces use `@"Agent Name"`. Send another message to redirect the discussion. **Stop discussion** stops the whole room; **Continue discussion** resumes after review.
 

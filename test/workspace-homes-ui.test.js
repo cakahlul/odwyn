@@ -19,13 +19,13 @@ test('create and switch homes, preserve drafts, link settings, and scope downloa
   page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());page.setDefaultTimeout(7000);
   try {
     await page.goto(server.url.href);await page.locator('#workspace-home:not([disabled])').waitFor();
-    expect(await page.locator('#workspace-home option[value=default]').textContent()).toBe('Default');
+    expect(await page.locator('#workspace-current-name').textContent()).toBe('Default');
     await page.locator('#new-chat').click();
     await page.locator('#prompt').fill('Home draft');
-    await page.locator('#new-workspace').click();await page.locator('#workspace-home-name').fill('Research');
+    await page.locator('#workspace-home').click();await page.locator('#new-workspace').click();await page.locator('#workspace-home-name').fill('Research');
     await page.locator('#workspace-create-form button').click();
     await page.waitForURL('**/?workspace=*');await page.locator('#workspace-home:not([disabled])').waitFor();
-    const id=await page.locator('#workspace-home').inputValue();
+    const id=new URL(page.url()).searchParams.get('workspace');
     expect(id).not.toBe('default');expect(await page.locator('#prompt').inputValue()).toBe('');
     // Configure the new home without connecting any external provider.
     await page.evaluate(async profile=>{
@@ -49,9 +49,9 @@ test('create and switch homes, preserve drafts, link settings, and scope downloa
     const shared=page.waitForResponse(response=>response.url().includes('/api/workspaces/share') && response.request().postData()?.includes('"kind":"provider"'));
     await page.getByRole('button',{name:'Confirm exact request',exact:true}).click();expect((await shared).status()).toBe(200);
     await page.locator('#settings-dialog .modal-top button').click();
-    await page.locator('#workspace-home').selectOption('default');await page.waitForURL(url=>!url.search);
+    await page.locator('#workspace-home').click();await page.locator('[data-workspace-id=default]').click();await page.waitForURL(url=>!url.search);
     await page.waitForFunction(()=>document.querySelector('#prompt').value==='Home draft');
-    await page.locator('#workspace-home').selectOption(id);await page.waitForURL('**/?workspace=*');
+    await page.locator('#workspace-home').click();await page.locator(`[data-workspace-id="${id}"]`).click();await page.waitForURL('**/?workspace=*');
     await page.waitForFunction(()=>document.querySelector('#prompt').value==='Research draft');
     await page.evaluate(async()=>fetch('/api/appearance'+location.search,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({palette:'paper',motion:'reduced',navigation:'sidebar'})}));
     await page.waitForFunction(()=>document.documentElement.dataset.navigation==='sidebar');
@@ -60,17 +60,22 @@ test('create and switch homes, preserve drafts, link settings, and scope downloa
       if(width===320 && !await page.locator('html').evaluate(node=>node.classList.contains('sidebar-collapsed')))await page.locator('#sidebar-collapse').click();
       expect(await page.locator('.topbar').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
       expect(await page.locator('#workspace-home').isVisible()).toBe(true);
+      await page.locator('#workspace-home').focus();await page.keyboard.press('Enter');await page.locator('#workspace-menu').waitFor({state:'visible'});
+      expect(await page.locator('#workspace-home').getAttribute('aria-expanded')).toBe('true');
+      const bounds=await page.locator('#workspace-menu').boundingBox();expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.x+bounds.width).toBeLessThanOrEqual(width);
+      await page.keyboard.press('Escape');expect(await page.locator('#workspace-menu').isVisible()).toBe(false);
+      expect(await page.locator('#new-room-top').isVisible()).toBe(true);
       if(width===320)await page.screenshot({path:'/tmp/odwyn-workspace-mobile.png'});
     }
     await page.locator('#settings-open').click();await page.locator('[data-settings-section=workspaces]').click();
     await page.locator('#workspace-manage-home').selectOption('default');expect(await page.locator('#workspace-delete').isDisabled()).toBe(true);
     await page.locator('#workspace-manage-home').selectOption(id);await page.locator('#workspace-rename-name').fill('Research lab');await page.locator('#workspace-rename-name').press('Enter');
     await page.locator('#workspace-homes-status').filter({hasText:'Workspace renamed.'}).waitFor();
-    expect(await page.locator(`#workspace-home option[value="${id}"]`).textContent()).toBe('Research lab');
+    expect(await page.locator('#workspace-current-name').textContent()).toBe('Research lab');
     page.removeAllListeners('dialog');page.once('dialog',async dialog=>{expect(dialog.message()).toContain('Research lab');expect(dialog.message()).toContain('cannot be undone');await dialog.dismiss();});
-    await page.locator('#workspace-delete').click();expect(await page.locator('#workspace-home').inputValue()).toBe(id);
+    await page.locator('#workspace-delete').click();expect(await page.evaluate(()=>new URL(location.href).searchParams.get('workspace'))).toBe(id);
     page.once('dialog',dialog=>dialog.accept());await page.locator('#workspace-delete').click();await page.waitForURL(url=>!url.search);
-    await page.locator('#workspace-home:not([disabled])').waitFor();expect(await page.locator('#workspace-home option').count()).toBe(1);
+    await page.locator('#workspace-home:not([disabled])').waitFor();expect(await page.locator('[data-workspace-id]').count()).toBe(1);
     expect(await page.evaluate(id=>sessionStorage.getItem(`odwyn-drafts:${id}`),id)).toBeNull();
     expect(errors).toEqual([]);
   } finally {await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}

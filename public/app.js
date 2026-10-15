@@ -135,6 +135,7 @@ function renderRooms() {
     roomListSignature = listSignature;
   }
   $('#new-room').disabled = workspace.agents.length < 2 || busy || switching;
+  $('#new-room-top').disabled=busy||switching;
   const inRoom = !!room && !!agentId;
   $('#room-composer-hint').hidden = !inRoom;
   const roomRun=room?.roomWorkflowRunId && workspace.workflowRuns?.find(run=>run.id===room.roomWorkflowRunId);
@@ -212,6 +213,7 @@ function renderRoomAgents(room = null) {
   const spaceId = $('#room-space').value;
   $('#room-agent-options').innerHTML = workspace.agents.filter(a=>spaceId === workspace.security.legacySpaceId || workspace.security.memberships[a.id]?.includes(spaceId)).map(a=>`<label class="room-agent-option"><input type="checkbox" name="memberIds" value="${esc(a.id)}" ${room ? room.memberIds.includes(a.id) ? 'checked' : '' : a.id === agentId ? 'checked' : ''}>${avatarSvg(a.customization || defaults)}<span><strong>${esc(a.customization?.name || defaults.name)}</strong><small>${esc(providers[a.provider.type][0])} · ${a.runtime.account ? 'Ready' : 'Connect provider'}</small></span></label>`).join('');
   if (!$('#room-agent-options').children.length) $('#room-agent-options').innerHTML = '<p class="field-hint">No agents belong to this Space. Assign membership in agent settings.</p>';
+  const needsAgent=$('#room-agent-options').querySelectorAll('input').length<2;$('#room-setup-hint').hidden=!needsAgent;$('#room-save').disabled=needsAgent;
   renderRoomRoles(room?.governance || {});
 }
 
@@ -663,6 +665,8 @@ function search() {
 
 $('#new-chat').onclick = () => navigate();
 $('#new-room').onclick = () => openRoomEditor();
+$('#new-room-top').onclick = () => openRoomEditor();
+$('#room-add-agent').onclick=()=>{$('#room-dialog').close();openCustomization(false,true);};
 function openRename() {
   const conversation=workspace.conversations.find(c=>c.id===conversationId); if (!conversation) return;
   renamingConversationId=conversation.id; $('#room-header').close();
