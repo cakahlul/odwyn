@@ -7,7 +7,9 @@ import { validateCommand } from '../terminal.js';
 
 export const shellQuote=value=>"'"+String(value).replaceAll("'","'\\''")+"'";
 export class Sandbox {
-  constructor(policy,{image,snapshotRoot,snapshotResolver,checkpointRoot,executionProfile={}}={}){
+  constructor(policy,{image,snapshotRoot,snapshotResolver,checkpointRoot,executionProfile={},validateCheckpointBytes}={}){
+    if(validateCheckpointBytes!==undefined&&typeof validateCheckpointBytes!=='function')throw new Error('Invalid checkpoint validator.');
+    this.validateCheckpointBytes=validateCheckpointBytes;
     this.policy=policy;this.image=image;this.snapshotResolver=snapshotResolver||(snapshotRoot?((resource,context)=>join(snapshotRoot,context.spaceId,resource.id)):null);
     this.configured=/^sha256:[a-f0-9]{64}$/.test(image||'')&&!!this.snapshotResolver;
     this.workers=new Map();this.removals=new Set();
@@ -128,7 +130,7 @@ export class Sandbox {
       if(parts.length>33||parts.some(part=>!part||part==='.'||part==='..'||/[\\\x00-\x1f\x7f]/.test(part)||excluded.has(part)||part.startsWith('.env.')||part.endsWith('.pem')||part.endsWith('.key'))||/^\.git\/(config|hooks|logs)(\/|$)/.test(file.path)||paths.has(file.path))throw new Error('Unsafe checkpoint path.');
       const data=Buffer.from(file.data,'base64');bytes+=data.length;
       if(data.toString('base64')!==file.data||bytes>16*1024*1024)throw new Error('Checkpoint data exceeds bounds.');
-      paths.add(file.path);
+      this.validateCheckpointBytes?.(data);paths.add(file.path);
     }
     for(const path of paths){let parent=path;while(parent.includes('/')){parent=parent.slice(0,parent.lastIndexOf('/'));if(paths.has(parent))throw new Error('Conflicting checkpoint paths.');}}
     return files;

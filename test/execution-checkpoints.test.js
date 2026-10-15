@@ -150,3 +150,11 @@ test('restore failure removes its worker and keeps source checkpoint',async()=>{
     expect(sandbox.workers.has('failed')).toBe(false);expect((await sandbox.loadCheckpoint(job,'repo-a',first.id)).id).toBe(first.id);
   }finally{clean();}
 });
+
+test('checkpoint bytes are checked against service-secret policy before durable publication',async()=>{
+  const {sandbox,clean}=fixture({validateCheckpointBytes(bytes){if(bytes.includes(Buffer.from('known-service-secret')))throw Error('Service credential export denied.');}});
+  try{
+    sandbox.payload=[{path:'ordinary.txt',data:Buffer.from('known-service-secret').toString('base64'),executable:false}];
+    await expect(sandbox.checkpoint(job,'repo-a')).rejects.toThrow('credential');
+  }finally{clean();}
+});
