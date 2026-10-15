@@ -11,7 +11,7 @@ export const statePolicy = Symbol('server policy');
 export const capabilities = Object.freeze(Object.fromEntries([
   ['memory.read','memory',true], ['memory.write','memory',true],
   ['repository.read','repository',true], ['repository.branch.push','repository',false], ['repository.merge','repository',false],
-  ['sandbox.exec','workspace',false], ['filesystem.read','file',false], ['filesystem.write','file',false],
+  ['workspace.read','workspace',true], ['sandbox.exec','workspace',false], ['filesystem.read','file',false], ['filesystem.write','file',false],
   ['file.download','file',true], ['browser.read','browser',false], ['browser.navigate','browser',false], ['browser.interact','browser',false],
   ['mcp.invoke','connector',true], ['routine.create','routine',false], ['room.share','room',false],
   ['payment.execute','payment',false], ['message.send','destination',false], ['deployment.production','environment',false],
@@ -173,6 +173,7 @@ export function openPolicy(db,state,directory) {
         if(!r||r.type!==capabilities[request.action].resourceType)return deny('Resource/action mismatch.');
         const gs=db.query("SELECT * FROM grants WHERE agent_id=? AND space_id=? AND action=? AND (resource_id=? OR resource_id='*')").all(request.agentId,request.spaceId,request.action,request.resourceId).filter(g=>!g.expires_at||Date.parse(g.expires_at)>Date.now());
         if(gs.some(g=>g.mode==='deny'))return deny('Explicit owner deny.');
+        if(!gs.length&&request.action==='workspace.read')return policy.simulate({...request,action:'sandbox.exec'});
         if(!gs.length)return deny('No grant.');
         if(request.action==='repository.read'&&!JSON.parse(r.metadata).endpoint)return deny('Repository endpoint unavailable.');
         if(!approvalActions.includes(request.action)&&request.action.startsWith('repository.')&&JSON.parse(r.metadata).connectionId&&!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='git-https-v1' AND enabled=1").get(JSON.parse(r.metadata).connectionId,request.spaceId))return deny('Git connection disabled or outside scope.');
