@@ -161,6 +161,13 @@
       "anchor": "export function openKnowledge(",
       "plannedHook": "Assigned Knowledge uses Space resources, room permission intersection and data-source provenance",
       "gap": "Owner text only; keyword retrieval, version references, no file parsing or embeddings"
+    },
+    {
+      "category": "network",
+      "file": "execution/git-sync.js",
+      "anchor": "export async function syncGitWorkspace(",
+      "plannedHook": "Linked repository read and workspace execution grants; pinned HTTPS broker fetch, worker-only unpack, provenance and permission rechecks",
+      "gap": "Bounded SHA-1 smart HTTP only; full history and checkpoint limits can reject larger repositories"
     }
   ],
   "httpLiterals": [
@@ -233,6 +240,7 @@
     "odwyn_export_read",
     "odwyn_repository_push",
     "odwyn_repository_patch",
+    "odwyn_repository_sync",
     "odwyn_repository_read",
     "odwyn_mcp_repository_read",
     "odwyn_send_file",

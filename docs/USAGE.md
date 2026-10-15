@@ -94,6 +94,21 @@ Import project source only: credentials, Git metadata, dependencies and build ou
 
 Agents receive isolated copies, not live host mounts. Accepted edits persist as checkpoints; they do not overwrite the source folder. Stop Space tasks before import or changing the source. Source changes revoke existing grants; a resource with a checkpoint needs a fresh resource to start from different code.
 
+### Git checkout and pull
+
+Source import/copy deliberately excludes `.git`. For a Git project:
+
+1. In **Resources**, create a **Repository** in the development Space. Set its endpoint to the exact HTTPS clone URL, such as `https://github.com/your-org/your-app.git`.
+2. For private repositories, create a **Scoped Git** connection in **Connections**, using that same endpoint and a repository-scoped read token; select it on the Repository. Set **Git username** when the provider expects username/token authentication. Blank username uses Bearer authentication. Existing VPS SSH keys are not reused.
+3. Create a fresh **Isolated workspace** in the same Space, leave its source empty, and select that Repository in **Git repository**. Save it. A workspace that already has checkpoints cannot change its source/link; use a fresh resource.
+4. Grant each coding agent **repository.read → Automatic** on the Repository and **sandbox.exec → Automatic** on the linked workspace. Workflows must allow **repository_sync**. In rooms, every participant also needs automatic repository read and workspace read access, including reviewers who do not execute commands.
+5. Ask the agent: “Use the linked workspace, checkout `main`, then pull its latest update.” The agent uses `odwyn_repository_sync`; terminal Git commands have no network access.
+
+Git HEAD, branches and objects persist in checkpoints; credentials, Git config and hooks do not enter workers/checkpoints. Checkout can adopt imported files only if every file exactly matches the remote branch. Mismatches preserve the files and require a fresh empty workspace. Pull requires the current branch; updates refuse dirty/untracked/ignored files and divergent local commits. There is no automatic reset, cleanup or push.
+
+This supports bounded SHA-1 Git smart HTTP over public HTTPS, without SSH, redirects, submodules or Git LFS downloads. Each fetch currently transfers full history with an **8 MiB pack limit**. Existing **16 MiB / 4,096 checkpoint entries** also include Git objects. Large histories can exceed these limits even for small source trees. Git history is repository data: review it for secrets too.
+
+
 The displayed executor status is separate from source readiness. Folder import does not install Docker, toolchains or dependencies: those must already be available in the reviewed execution image. Workers have no network access. Existing server execution setup remains supported; see [Execution setup](../execution/README.md).
 
 ## Agent knowledge

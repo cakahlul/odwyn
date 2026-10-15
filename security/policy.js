@@ -59,10 +59,12 @@ export function openPolicy(db,state,directory) {
   const resourceValue=input=>{
       strict(input,['spaceId','type','name','metadata']);space(input.spaceId);
       if(!Object.values(capabilities).some(c=>c.resourceType===input.type))throw new Error('Unknown resource type.');
-      const metadata=input.metadata || {};strict(metadata,input.type==='repository'?['endpoint','connectionId','upstreamId']:input.type==='workspace'?['sourceFolder']:input.type==='knowledge'?['version']:input.type==='file'?['path','workspaceId']:input.type==='browser'?['readUrls','blockedDomains']:['connector','payment','destination','environment'].includes(input.type)?['connectionId','upstreamId']:[]);
+      const metadata=input.metadata || {};strict(metadata,input.type==='repository'?['endpoint','connectionId','upstreamId','gitUsername']:input.type==='workspace'?['sourceFolder','repositoryId']:input.type==='knowledge'?['version']:input.type==='file'?['path','workspaceId']:input.type==='browser'?['readUrls','blockedDomains']:['connector','payment','destination','environment'].includes(input.type)?['connectionId','upstreamId']:[]);
       if(['payment','destination','environment'].includes(input.type)||input.type==='repository'&&metadata.upstreamId!==undefined){id(metadata.connectionId);id(metadata.upstreamId);if(!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='action-gateway-v1' AND enabled=1").get(metadata.connectionId,input.spaceId))throw new Error('Reviewed action connection scope mismatch.');}
       else if(input.type==='repository'&&metadata.connectionId!==undefined){id(metadata.connectionId);if(!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='git-https-v1' AND endpoint=? AND enabled=1").get(metadata.connectionId,input.spaceId,metadata.endpoint))throw new Error('Git connection scope mismatch.');}
       if(input.type==='knowledge'&&(!Number.isSafeInteger(metadata.version)||metadata.version<1))throw new Error('Knowledge needs a valid version.');
+      if(metadata.gitUsername!==undefined&&(typeof metadata.gitUsername!=='string'||!metadata.gitUsername.length||metadata.gitUsername.length>100||/[:\x00-\x20\x7f]/.test(metadata.gitUsername)))throw new Error('Use a Git HTTPS username without spaces or colons.');
+      if(metadata.repositoryId!==undefined){id(metadata.repositoryId);const repository=policy.resource(metadata.repositoryId);if(input.type!=='workspace'||repository.type!=='repository'||repository.spaceId!==input.spaceId||!repository.metadata.endpoint||repository.metadata.upstreamId)throw new Error('Choose a Git repository in the same Space.');}
       if(metadata.sourceFolder!==undefined)metadata.sourceFolder=sourceFolder(metadata.sourceFolder);
       if(metadata.workspaceId!==undefined){id(metadata.workspaceId);if(!db.query("SELECT id FROM resources WHERE id=? AND space_id=? AND type='workspace'").get(metadata.workspaceId,input.spaceId))throw new Error('File workspace outside Space.');}
       if(input.type==='browser'&&metadata.blockedDomains!==undefined){if(metadata.readUrls!==undefined||!Array.isArray(metadata.blockedDomains)||metadata.blockedDomains.length>100)throw new Error('Choose blocked domains or an existing URL allowlist, not both. Maximum 100 blocked domains.');metadata.blockedDomains=[...new Set(metadata.blockedDomains.map(blockedDomain))];}
@@ -127,7 +129,7 @@ export function openPolicy(db,state,directory) {
     },
     deleteResource(resourceId){
       const r=policy.resource(resourceId);idle(r.spaceId);
-      if(policy.listResources().some(other=>other.metadata.workspaceId===resourceId))throw new Error('Delete or unlink file resources using this workspace first.');
+      if(policy.listResources().some(other=>other.metadata.workspaceId===resourceId||other.metadata.repositoryId===resourceId))throw new Error('Delete or unlink resources using this target first.');
       db.transaction(()=>{db.query('DELETE FROM grants WHERE resource_id=?').run(resourceId);db.query('DELETE FROM resources WHERE id=?').run(resourceId);bump();events({action:'resource.delete',spaceId:r.spaceId,resourceId},{mode:'deny',reason:'Owner deleted resource and revoked its access; history preserved.'});})();
     },
     resource(resourceId){id(resourceId);const row=db.query('SELECT * FROM resources WHERE id=?').get(resourceId);if(!row)throw new Error('Resource not found.');return {id:row.id,spaceId:row.space_id,type:row.type,name:row.name,metadata:JSON.parse(row.metadata)};},

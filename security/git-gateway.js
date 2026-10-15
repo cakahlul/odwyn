@@ -1,3 +1,4 @@
+import {syncGitWorkspace} from '../execution/git-sync.js';
 import http from 'node:http';
 import https from 'node:https';
 import { resolvePublic } from '../security.js';
@@ -13,20 +14,21 @@ function lines(body){
   }return result;
 }
 export class GitGateway {
-  constructor(policy,sandbox,{resolver=resolvePublic,credentialResolver=()=>null}={}){this.policy=policy;this.sandbox=sandbox;this.resolver=resolver;this.credentialResolver=credentialResolver;}
-  async request(target,path,method,body,token,signal){
+  constructor(policy,sandbox,{resolver=resolvePublic,credentialResolver=()=>null,readCredentialResolver=()=>null}={}){this.policy=policy;this.sandbox=sandbox;this.resolver=resolver;this.credentialResolver=credentialResolver;this.readCredentialResolver=readCredentialResolver;}
+  async request(target,path,method,body,token,signal,{service='git-receive-pack',limit=1024*1024,username}={}){
     const {url,address,family}=target;
     return new Promise((resolve,reject)=>{
-      const headers={host:url.host,'content-type':'application/x-git-receive-pack-request',accept:'application/x-git-receive-pack-result'};
-      if(token)headers.authorization='Bearer '+token;
+      const headers={host:url.host,'content-type':`application/x-${service}-request`,accept:`application/x-${service}-result`};
+      if(token)headers.authorization=username?'Basic '+Buffer.from(username+':'+token).toString('base64'):'Bearer '+token;
       const request=(url.protocol==='https:'?https:http).request({hostname:address,family,servername:url.hostname,port:Number(url.port||(url.protocol==='https:'?443:80)),path,method,headers,signal:AbortSignal.any([signal,AbortSignal.timeout(15000)])},response=>{
         if(response.statusCode!==200){response.destroy();reject(new Error('Scoped Git upstream unavailable.'));return;}
         const chunks=[];let size=0;
-        response.on('data',chunk=>{size+=chunk.length;if(size>1024*1024){response.destroy();reject(new Error('Git response exceeds bounds.'));}else chunks.push(chunk);});
+        response.on('data',chunk=>{size+=chunk.length;if(size>limit){reject(new Error('Git response exceeds bounds.'));response.destroy();}else chunks.push(chunk);});
         response.on('end',()=>resolve(Buffer.concat(chunks)));response.on('error',()=>reject(new Error('Scoped Git response interrupted.')));response.on('aborted',()=>reject(new Error('Scoped Git response interrupted.')));
       });request.on('error',()=>reject(new Error('Scoped Git transport unavailable.')));request.end(body);
     });
   }
+  async sync(job,args,signal,canRun){return syncGitWorkspace(this,job,args,signal,canRun);}
   async push(job,args,signal){
     if(!args||Object.keys(args).some(k=>!['resourceId','ref'].includes(k))||typeof args.ref!=='string'||args.ref.length>256||!/^refs\/heads\/[a-zA-Z0-9][a-zA-Z0-9_./-]*$/.test(args.ref)||args.ref.includes('..')||args.ref.endsWith('/')||args.ref.includes('//'))throw new Error('Unsupported Git push target.');
     const check=()=>{signal.throwIfAborted();return this.policy.authorize(job,'repository.branch.push',args.resourceId);};
@@ -48,7 +50,7 @@ export class GitGateway {
     const token=await this.credentialResolver(args.resourceId,this.policy.context(job));
     if(token!==null&&(typeof token!=='string'||token.length>4096||/[\r\n]/.test(token)))throw new Error('Invalid scoped credential.');
     const path=target.url.pathname.replace(/\/$/,'');
-    const advertisement=lines(await this.request(target,path+'/info/refs?service=git-receive-pack','GET',undefined,token,signal));
+    const advertisement=lines(await this.request(target,path+'/info/refs?service=git-receive-pack','GET',undefined,token,signal,{username:resource.metadata.gitUsername}));
     const refs=advertisement.filter(line=>/^[a-f0-9]{40} /.test(line));
     if(!refs.some(line=>line.split('\0')[1]?.split(/\s/).includes('report-status')))throw new Error('Git receipt verification unavailable.');
     const old=refs.find(line=>line.split(' ')[1]?.split(/[\0\n]/)[0]===args.ref)?.slice(0,40)||'0'.repeat(40);
@@ -58,7 +60,7 @@ export class GitGateway {
     const packed=await this.sandbox.git(job,['pack-objects','--stdout','--revs'],{input:Buffer.from(next+'\n'),signal,limit:8*1024*1024});
     if(packed.exitCode!==0||packed.truncated||packed.stdout.subarray(0,4).toString()!=='PACK')throw new Error('Bounded Git pack unavailable.');
     check();
-    const response=lines(await this.request(target,path+'/git-receive-pack','POST',Buffer.concat([pkt(`${old} ${next} ${args.ref}\0report-status\n`),Buffer.from('0000'),packed.stdout]),token,signal));
+    const response=lines(await this.request(target,path+'/git-receive-pack','POST',Buffer.concat([pkt(`${old} ${next} ${args.ref}\0report-status\n`),Buffer.from('0000'),packed.stdout]),token,signal,{username:resource.metadata.gitUsername}));
     if(!response.includes('unpack ok\n')||!response.includes(`ok ${args.ref}\n`))throw new Error('Git push receipt did not confirm success.');
     check();return {resourceId:args.resourceId,ref:args.ref,commit:next,receiptVerified:true};
   }
