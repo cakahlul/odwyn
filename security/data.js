@@ -28,11 +28,17 @@ export function openData(db,state,policy){
     for(const upstream of handoff?.upstreamExports||[])validExport(upstream.spaceId,upstream.id,seen);
     seen.delete(id);return row;
   };
-  const allowed=(job,taskId)=>{try{
-    const c=policy.context(job);if(!taskId)return true;const source=task(taskId);if(source.spaceId!==c.spaceId)return false;
+  const handoffBlocker=(job,taskId)=>{try{
+    const c=policy.context(job);if(!taskId)return null;const source=task(taskId);if(source.spaceId!==c.spaceId)return {reason:'Source task belongs to another Space.'};
     for(const row of db.query('SELECT export_id FROM task_exports WHERE task_id=?').all(taskId))validExport(c.spaceId,row.export_id);
-    return sources(taskId).every(ref=>policy.simulate({agentId:source.agentId,spaceId:c.spaceId,...ref,...(ref.action==='sandbox.exec'?{action:readAction(ref.action)}:{})}).mode==='auto'&&policy.simulate({agentId:c.agentId,spaceId:c.spaceId,resourceId:ref.resourceId,action:readAction(ref.action)}).mode==='auto');
-  }catch{return false;}};
+    for(const ref of sources(taskId)){
+      for(const request of [{agentId:source.agentId,spaceId:c.spaceId,...ref,...(ref.action==='sandbox.exec'?{action:readAction(ref.action)}:{})},{agentId:c.agentId,spaceId:c.spaceId,resourceId:ref.resourceId,action:readAction(ref.action)}]){
+        const decision=policy.simulate(request);if(decision.mode!=='auto')return {...request,mode:decision.mode,reason:decision.reason};
+      }
+    }
+    return null;
+  }catch(error){return {reason:error instanceof Error?error.message:'Checkpoint source validation failed.'};}};
+  const allowed=(job,taskId)=>!handoffBlocker(job,taskId);
   const data={
     sync(){
       for(const c of state.conversations){
@@ -68,6 +74,15 @@ export function openData(db,state,policy){
       const result=conversation.messages.filter(m=>data.readable(job,m.id));if(result.length<conversation.messages.length)policy.auditData(job,'history.read',conversationId);return result;
     },
     assertHandoff(job,taskIds){for(const id of taskIds){if(!allowed(job,id))throw new Error('Classified workflow disclosure denied.');for(const r of sources(id))db.query('INSERT OR IGNORE INTO data_sources VALUES(?,?,?)').run(job.id,r.resourceId,readAction(r.action));for(const r of db.query('SELECT export_id FROM task_exports WHERE task_id=?').all(id))db.query('INSERT OR IGNORE INTO task_exports VALUES(?,?)').run(job.id,r.export_id);}},
+    checkpointDenied(job,resourceId,checkpointId,record,failure){
+      // Diagnostic labels stay in owner audit; agent-facing disclosure errors remain generic.
+      const source=state.jobs.find(item=>item.id===record?.taskId),blocker=record?.exportId?{reason:failure?.message||'Checkpoint export unavailable.'}:record?.taskId?handoffBlocker(job,record.taskId):{reason:'Checkpoint provenance unavailable.'};
+      const label=(items,id)=>{const item=items.find(value=>value.id===id);return `${item?.customization?.name||item?.name||'Unknown'} (${id||'unavailable'})`;};
+      const details=[`Checkpoint ${checkpointId} restore denied.`,`Workspace: ${label(policy.listResources(),resourceId)}.`,`Source task: ${record?.taskId||'unavailable'}; source agent: ${label(state.agents,source?.agentId)}; receiving agent: ${label(state.agents,job.agentId)}.`];
+      if(record?.exportId)details.push(`Export: ${record.exportId}.`);
+      if(blocker?.resourceId)details.push(`Blocked agent: ${label(state.agents,blocker.agentId)}; resource: ${label(policy.listResources(),blocker.resourceId)}; permission: ${blocker.action}; decision: ${blocker.mode}.`);
+      details.push(blocker?.reason||'Checkpoint access changed during validation.');policy.auditData(job,'checkpoint.restore',resourceId,details.join(' '));
+    },
     workflowOutput(run,step,job){policy.context(job);db.query('INSERT OR REPLACE INTO workflow_output_sources VALUES(?,?,?)').run(run.id,step.id,job.id);},
     workflowKeys(run,step){const paths=[...JSON.stringify(step).matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g)].map(m=>m[1]);return paths.includes('steps')?Object.keys(run.outputs):[...new Set(paths.filter(p=>p.startsWith('steps.')).map(p=>p.split('.')[1]))].filter(id=>Object.hasOwn(run.outputs,id));},
     workflowTasks(run,step){return data.workflowKeys(run,step).map(id=>{const row=db.query('SELECT task_id FROM workflow_output_sources WHERE run_id=? AND step_id=?').get(run.id,id);if(!row)throw new Error('Unclassified legacy workflow output requires owner review.');return row.task_id;});},

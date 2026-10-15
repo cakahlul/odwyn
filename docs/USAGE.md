@@ -94,6 +94,8 @@ Import project source only: credentials, Git metadata, dependencies and build ou
 
 Agents receive isolated copies, not live host mounts. Accepted edits persist as checkpoints; they do not overwrite the source folder. Stop Space tasks before import or changing the source. Source changes revoke existing grants; a resource with a checkpoint needs a fresh resource to start from different code.
 
+If a restore reports **Classified workflow disclosure denied**, open the receiving agent’s **Access & Autonomy → Recent activity**, then **Refresh approvals and audit** after retrying. The `checkpoint.restore` entry identifies the checkpoint, source task, source/receiving agents and first failed permission, or missing/invalid provenance/export. A fresh chat still restores the resource’s latest checkpoint. These diagnostics are owner-only and do not grant access or reset source files. Older failures need a retry to create the new diagnostic.
+
 ### Git checkout and pull
 
 Source import/copy deliberately excludes `.git`. For a Git project:

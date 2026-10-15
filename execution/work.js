@@ -16,10 +16,15 @@ function workingRoom(runtime,job){
 }
 function provenance(runtime,job,resourceId,id){
   const record=[...(runtime.state.checkpoints||[]),...runtime.state.conversations.flatMap(room=>room.checkpoints||[])].find(item=>item.id===id&&item.resourceId===resourceId&&item.spaceId===job.spaceId);
-  if(!record)throw new Error('Checkpoint provenance unavailable.');
-  if(record.exportId)runtime.store.data.readExport(job,record.exportId);
-  else if(record.taskId)runtime.store.data.assertHandoff(job,[record.taskId]);
-  else throw new Error('Checkpoint provenance unavailable.');
+  try{
+    if(!record)throw new Error('Checkpoint provenance unavailable.');
+    if(record.exportId)runtime.store.data.readExport(job,record.exportId);
+    else if(record.taskId)runtime.store.data.assertHandoff(job,[record.taskId]);
+    else throw new Error('Checkpoint provenance unavailable.');
+  }catch(error){
+    try{runtime.store.data.checkpointDenied(job,resourceId,id,record,error);}catch{}
+    throw new Error(error.message+' Checkpoint restore denied; owner details: Access & Autonomy → Recent activity.');
+  }
   return record;
 }
 function adopt(room,id){

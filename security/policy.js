@@ -217,7 +217,7 @@ export function openPolicy(db,state,directory) {
     },
     auditIsolation(job,resourceId){const c=policy.context(job);events({...c,action:'network.fetch',resourceId},{mode:'deny',reason:'Worker egress disabled by OS network namespace.'});},
     auditExecution(context,resourceId,usage){events({...context,action:'sandbox.exec',resourceId},{mode:'auto',reason:JSON.stringify(usage)});},
-    auditData(job,action,resourceId){try{const c=policy.identity(job);events({...c,action,resourceId:/^[a-f0-9-]{36}$/.test(resourceId||'')?resourceId:null},{mode:'deny',reason:'Classified data or task-scoped operation denied.'});}catch{}},
+    auditData(job,action,resourceId,reason='Classified data or task-scoped operation denied.'){try{const c=policy.identity(job);events({...c,action,resourceId:/^[a-f0-9-]{36}$/.test(resourceId||'')?resourceId:null},{mode:'deny',reason});}catch{}},
   };
   Object.defineProperty(state,statePolicy,{value:policy});
   for(const conversation of state.conversations)conversation.spaceId ||= policy.legacySpaceId;
