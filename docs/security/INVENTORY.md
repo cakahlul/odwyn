@@ -58,6 +58,9 @@ Dynamic families (every action under each matcher must be enforced):
 - `odwyn_send_file`: `Runtime.executeRequest`, then actual resource boundary.
 - `odwyn_room_next`: `Runtime.executeRequest`, then actual resource boundary.
 - `odwyn_room_done`: `Runtime.executeRequest`, then actual resource boundary.
+- `odwyn_room_review`: `Runtime.executeRequest` verifies active task/room/Space,
+  owner-designated reviewer identity, current readable proposal version, and
+  participant permission intersection. Decisions never grant resource access.
 - `odwyn_terminal`: `Runtime.executeRequest`, then actual resource boundary.
 - `odwyn_search`: `Runtime.executeRequest`, then actual resource boundary.
 - `odwyn_browser`: `Runtime.executeRequest`, then actual resource boundary.

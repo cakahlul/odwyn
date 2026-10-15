@@ -18,6 +18,30 @@ Use `@agentname` to address a participant; names with spaces use `@"Agent Name"`
 
 Rooms pause for owner questions, approvals, errors, restarts, or their discussion limit. Review what happened before continuing. Deleting a stopped room removes its messages and task history while keeping agents and saved files.
 
+### Room roles and required reviews
+
+In the room editor, enable **Configure room roles and required reviews**. Choose
+an optional facilitator, assign contributors or observers, and select required
+reviewers. The facilitator opens group discussions and coordinates feedback.
+Reviewers are also contributors. Roles never grant resource access.
+
+Every contributor must confirm the shared proposal, even when a message targets
+one agent. Required reviewers must separately approve that exact version; agent
+consensus alone cannot complete the room. Observers can comment without being
+required to confirm. Offline observers are omitted from group broadcasts;
+explicitly addressing an offline observer still requires connecting its provider.
+
+The review card shows pending decisions, change requests, and reviewer rationale.
+Requested changes require a revised proposal before approval. Revisions clear
+confirmations and reviews for the new version while preserving earlier decisions.
+Changing participants or role configuration invalidates completion. Resolve room
+roles and membership before deleting a participating agent. Unconfigured rooms
+keep their existing consensus behavior.
+
+These gates currently review the shared text result. Draft artifact review,
+owner stage approval, and passing results to another room are not implemented
+yet. A recorded reviewer rationale does not prove that tests were executed.
+
 ## Shared data lives in Workspace Settings
 
 Settings has separate sections for **Appearance**, **AI provider**, **Preferences**, **Spaces**, **Resources**, **Connections**, and **Permission templates**.

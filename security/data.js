@@ -70,7 +70,14 @@ export function openData(db,state,policy){
       if(room&&!room.memberIds.every(agentId=>refs.every(r=>policy.simulate({agentId,spaceId:c.spaceId,resourceId:r.resourceId,action:readAction(r.action)}).mode==='auto')))throw new Error('Room disclosure requires participant permission intersection.');
     },
     propose(job,outcome){data.roomCheck(job);db.query('INSERT OR IGNORE INTO room_proposal_sources VALUES(?,?,?)').run(outcome.id,job.id,digest(JSON.stringify([outcome.result,outcome.nextPlan])));},
-    proposal(job,outcome){if(!outcome)return null;const row=db.query('SELECT * FROM room_proposal_sources WHERE id=?').get(outcome.id);if(!row||!allowed(job,row.task_id)||digest(JSON.stringify([outcome.result,outcome.nextPlan]))!==row.digest)return null;try{data.roomCheck(task(row.task_id));data.assertHandoff(job,[row.task_id]);return outcome;}catch{return null;}},
+    proposal(job,outcome){
+      if(!outcome)return null;
+      const row=db.query('SELECT * FROM room_proposal_sources WHERE id=?').get(outcome.id);
+      if(!row||digest(JSON.stringify([outcome.result,outcome.nextPlan]))!==row.digest)return null;
+      const taskIds=[...new Set([row.task_id,...Object.values(outcome.confirmationTasks||{}),...(outcome.reviewEvents||[]).map(review=>review.taskId)])];
+      if(taskIds.some(id=>!allowed(job,id)))return null;
+      try{for(const id of taskIds)data.roomCheck(task(id));data.assertHandoff(job,taskIds);return outcome;}catch{return null;}
+    },
     assertFileSpace(id,spaceId){const row=db.query('SELECT * FROM classified_files WHERE id=?').get(id);if(!row || row.space_id!==spaceId)throw new Error('File Space access denied.');return row;},
     file(job,id){
       const c=policy.context(job);if(!uuid(id))throw new Error('File access denied.');const row=data.assertFileSpace(id,c.spaceId);

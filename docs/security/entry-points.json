@@ -218,6 +218,7 @@
     "odwyn_send_file",
     "odwyn_room_next",
     "odwyn_room_done",
+    "odwyn_room_review",
     "odwyn_terminal",
     "odwyn_search",
     "odwyn_browser",

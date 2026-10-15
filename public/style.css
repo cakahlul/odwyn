@@ -671,6 +671,15 @@ button[data-mention-link]:hover { text-decoration:underline; }
 .room-agent-option>span { min-width:0; }
 .room-agent-option strong { display:block; font-size:12px; overflow-wrap:anywhere; }
 .room-agent-option small { display:block; margin-top:5px; font-size:11px; font-weight:400; color:var(--muted); }
+.room-role-row { min-width:0; margin:16px 0; padding:12px; border:1px solid var(--glass-rim); border-radius:12px; }
+.room-role-row legend { padding:0 4px; overflow-wrap:anywhere; }
+.room-role-row select { width:100%; margin:6px 0 12px; }
+.room-dialog .room-review-choice { display:flex; align-items:center; gap:10px; font-size:12px; line-height:1.6; }
+.room-review-choice input { width:17px; height:17px; margin:0; flex-shrink:0; accent-color:var(--orange-deep); }
+.room-review-card { padding:16px; margin:16px 0; border:1px solid var(--glass-rim); border-radius:12px; font-size:12px; line-height:1.8; overflow-wrap:anywhere; }
+.room-review-card ul { padding-left:20px; }
+.room-review-card pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; }
+.room-review-card summary { cursor:pointer; }
 .working-row strong { display:block; font-size:11px; margin-bottom:5px; }
 @media (max-width:760px) {
   .room-details-open { font-size:11px; gap:7px; }

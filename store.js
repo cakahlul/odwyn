@@ -90,6 +90,7 @@ export function findAgent(state, id = state.agents[0].id) {
 export function deleteAgent(state, id) {
   const agent = findAgent(state,id);
   if (state.agents.length === 1) throw new Error('Keep at least one agent. Add a replacement first.');
+  if (state.conversations.some(c=>c.kind==='room' && c.governance && c.memberIds.includes(id))) throw new Error('Update this agent’s room roles and membership before deleting it.');
   if (state.workflows?.some(w=>w.steps.some(s=>s.agentId===id)) || state.workflowRuns?.some(r=>['running','waiting','takeover'].includes(r.status) && (r.agentId===id || r.workflow.steps.some(s=>s.agentId===id)))) throw new Error('Update or finish workflows using this agent before deleting it.');
   const rooms = state.conversations.filter(c => c.kind === 'room' && c.memberIds.includes(id));
   if (state.jobs.some(j => (j.agentId === id || rooms.some(r => r.id === j.conversationId)) && ['queued','running','waiting','takeover','stopping'].includes(j.status))) throw new Error('Stop this agent’s tasks and room discussions before deleting it.');
@@ -124,6 +125,15 @@ function roomDetails(state, input, spaceId) {
   const memberIds = input.memberIds;
   if (!Array.isArray(memberIds) || memberIds.length < 2 || memberIds.length > 5 || memberIds.some(id => typeof id !== 'string' || !id) || new Set(memberIds).size !== memberIds.length) throw new Error('Choose 2 to 5 different agents.');
   for (const id of memberIds) { findAgent(state,id); state[statePolicy].visible(id,spaceId); }
+  const governance=input.governance;
+  if(governance!==undefined && governance!==null){
+    if(typeof governance!=='object'||Array.isArray(governance)||Object.keys(governance).some(key=>!['facilitatorId','reviewerIds','observerIds'].includes(key)))throw new Error('Invalid room roles.');
+    const {facilitatorId=null,reviewerIds=[],observerIds=[]}=governance;
+    for(const ids of [reviewerIds,observerIds])if(!Array.isArray(ids)||ids.length>5||new Set(ids).size!==ids.length||ids.some(id=>!memberIds.includes(id)))throw new Error('Room roles require different room participants.');
+    if(facilitatorId!==null && !memberIds.includes(facilitatorId))throw new Error('Facilitator must be a room participant.');
+    if(observerIds.length===memberIds.length||observerIds.includes(facilitatorId)||reviewerIds.some(id=>observerIds.includes(id)))throw new Error('Observers cannot facilitate or review. Keep at least one contributor.');
+    return {title,memberIds:[...memberIds],governance:{facilitatorId,reviewerIds:[...reviewerIds],observerIds:[...observerIds]}};
+  }
   return {title,memberIds:[...memberIds]};
 }
 
@@ -137,8 +147,12 @@ export function createRoom(state, input) {
 export function updateRoom(state, id, input) {
   const room = findRoom(state,id);
   if (Object.hasOwn(input,'spaceId') && input.spaceId !== room.spaceId) throw new Error('Room Space cannot change.');
-  const details = roomDetails(state,input,room.spaceId);
+  const details = roomDetails(state,{...input,governance:Object.hasOwn(input,'governance') ? input.governance : room.governance},room.spaceId);
   if (state.jobs.some(j => j.conversationId === id && ['queued','running','waiting','takeover','stopping'].includes(j.status))) throw new Error('Stop the room discussion before editing its participants.');
+  if(room.discussion && (JSON.stringify(room.memberIds)!==JSON.stringify(details.memberIds)||JSON.stringify(room.governance)!==JSON.stringify(details.governance))){
+    room.discussion.status='stopped';room.discussion.invalidatedReason='Room configuration changed. Start a new discussion and review the new result.';
+  }
+  if(!details.governance)delete room.governance;
   Object.assign(room,details,{agentId:details.memberIds[0]});
   if (!details.memberIds.includes(room.lastAgentId)) room.lastAgentId = room.agentId;
   return room;
