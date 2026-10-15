@@ -67,7 +67,16 @@ export class Sandbox {
       try{
         const source=await this.snapshotResolver(this.policy.resource(resourceId),context);
         const copied=await this.process(['python3',join(import.meta.dir,'snapshot.py'),source,directory],{signal});
-        if(copied.exitCode!==0)throw new Error('Safe workspace snapshot unavailable.');
+        if(copied.exitCode!==0||copied.timedOut||copied.cancelled||copied.truncated){
+          // Only fixed diagnostic text crosses the boundary; traceback paths may contain private data.
+          const detail=copied.stderr?.toString()||'';
+          const reason=copied.cancelled?'Snapshot preparation was cancelled.':copied.timedOut?'Snapshot preparation timed out.':copied.truncated?'Snapshot diagnostic output exceeded its limit.':
+            detail.includes('Snapshot exceeds 16 MiB')?'Source files exceed the 16 MiB snapshot limit.':detail.includes('Snapshot entry count exceeds bounds')?'Source exceeds 4,096 files and directories.':detail.includes('Snapshot nesting exceeds bounds')?'Source exceeds 32 nested directories.':
+            /PermissionError:/.test(detail)?'The Odwyn server cannot read a source file or folder.':/FileNotFoundError:/.test(detail)?'The source folder or one of its files is missing; confirm the resource used by this task.':
+            /\[Errno (40|62)\]/.test(detail)?'The source contains a symbolic link, which snapshots reject.':/NotADirectoryError:/.test(detail)?'A source path component is not a directory.':
+            detail.includes('Unsupported snapshot file type')?'The source contains a special file; only regular files and directories are supported.':detail.includes('Unsupported snapshot name')?'A source filename contains unsupported control characters.':'The server snapshot copier failed; check Python 3 availability and whether the source is readable.';
+          throw new Error(`Workspace snapshot unavailable for resource ${resourceId}. ${reason} The command did not run.`);
+        }
         const tar=await this.process(['tar','-cf','-','-C',directory,'.'],{signal,limit:20*1024*1024});
         if(tar.exitCode!==0||tar.truncated)throw new Error('Workspace snapshot exceeds bounds.');
         await this.required(['exec','-i',worker.id,'tar','--no-same-owner','-xf','-','-C','/workspace'],{input:tar.stdout,signal});

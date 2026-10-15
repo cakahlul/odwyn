@@ -158,3 +158,21 @@ test('checkpoint bytes are checked against service-secret policy before durable 
     await expect(sandbox.checkpoint(job,'repo-a')).rejects.toThrow('credential');
   }finally{clean();}
 });
+
+test('snapshot failures report safe actionable causes and remove the failed worker before any command runs',async()=>{
+  const {sandbox,clean}=fixture();sandbox.workers.clear();let executed=0,removed=0;
+  sandbox.create=async()=>{};sandbox.inside=async()=>{executed++;throw Error('Command must not run');};sandbox.docker=async()=>{removed++;return {exitCode:0};};
+  try{
+    for(const [stderr,flags,expected] of [
+      ['FileNotFoundError: private-path',{},'missing'],['PermissionError: private-path',{},'cannot read'],['OSError: [Errno 40] private-path',{},'symbolic link'],
+      ['ValueError: Snapshot exceeds 16 MiB',{},'16 MiB'],['ValueError: Snapshot entry count exceeds bounds',{},'4,096'],['ValueError: Snapshot nesting exceeds bounds',{},'32 nested'],
+      ['ValueError: Unsupported snapshot file type',{},'special file'],['ValueError: Unsupported snapshot name',{},'control characters'],
+      ['',{timedOut:true},'timed out'],['',{cancelled:true},'cancelled'],['',{truncated:true},'output exceeded'],['private-path',{},'copier failed'],
+    ]){
+      sandbox.process=async()=>({exitCode:1,stdout:Buffer.alloc(0),stderr:Buffer.from(stderr),...flags});
+      let error;try{await sandbox.worker(job,'repo-a');}catch(value){error=value;}
+      expect(error.message).toContain(expected);expect(error.message).toContain('resource repo-a');expect(error.message).not.toContain('private-path');expect(sandbox.workers.size).toBe(0);
+    }
+    expect(executed).toBe(0);expect(removed).toBe(12);
+  }finally{clean();}
+});
