@@ -6,6 +6,7 @@ import {invalidateRoomResult} from '../room-work.js';
 const strict=(input,keys)=>{if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(key=>!keys.includes(key)))throw new Error('Invalid execution work fields.');};
 const roomFor=(runtime,job)=>runtime.state.conversations.find(room=>room.id===job.conversationId&&room.kind==='room');
 const head=(runtime,resourceId)=>Object.hasOwn(runtime.state.executionHeads||{},resourceId)?runtime.state.executionHeads[resourceId]:null;
+const activeTask=job=>{if(!['running','waiting'].includes(job.status))throw new Error('Execution task has ended or is stopping.');};
 const checkpointId=id=>{if(typeof id!=='string'||!/^[a-f0-9]{64}$/.test(id))throw new Error('Choose a recorded checkpoint.');return id;};
 function workingRoom(runtime,job){
   const context=runtime.store.security.context(job),room=roomFor(runtime,job);
@@ -27,8 +28,8 @@ function adopt(room,id){
   for(const item of room.cases||[]){if(item.status==='passed')item.status='pending';delete item.checkpointId;delete item.evidenceId;}
   invalidateRoomResult(room,'Execution checkpoint changed. Retest the current version.');
 }
-export async function ensureTaskWorkspace(runtime,job,resourceId,selectedId){
-  textInput(resourceId,200);runtime.store.security.authorize(job,'sandbox.exec',resourceId);
+export async function ensureTaskWorkspace(runtime,job,resourceId,selectedId,signal){
+  signal?.throwIfAborted();activeTask(job);textInput(resourceId,200);runtime.store.security.authorize(job,'sandbox.exec',resourceId);
   runtime.store.data.roomCheck(job,[{resourceId,action:'sandbox.exec'}]);
   const pin=job.workspacePin;
   if(pin&&(pin.resourceId!==resourceId||selectedId!==undefined&&selectedId!==pin.headId))throw new Error('Task workspace cannot switch resources or checkpoints.');
@@ -36,21 +37,23 @@ export async function ensureTaskWorkspace(runtime,job,resourceId,selectedId){
   if(id){checkpointId(id);provenance(runtime,job,resourceId,id);}
   const existing=runtime.sandbox.workers.get(job.id);
   if(existing&&(existing.resourceId!==resourceId||(existing.checkpointId||null)!==(id||null)))throw new Error('Existing task workspace does not match the pinned checkpoint.');
-  const worker=existing?await runtime.sandbox.worker(job,resourceId):id?await runtime.sandbox.restore(job,resourceId,id):await runtime.sandbox.worker(job,resourceId);
+  const worker=existing?await runtime.sandbox.worker(job,resourceId,signal):id?await runtime.sandbox.restore(job,resourceId,id,signal):await runtime.sandbox.worker(job,resourceId,signal);
+  signal?.throwIfAborted();activeTask(job);runtime.store.security.authorize(job,'sandbox.exec',resourceId);runtime.store.data.roomCheck(job);
+  const room=roomFor(runtime,job);if(room?.governance)workingRoom(runtime,job);
   job.workspacePin={resourceId,headId:id||null};
   runtime.store.data.note(job,resourceId,'sandbox.exec');
-  const room=roomFor(runtime,job);if(id&&(!room?.targetCheckpointId||head(runtime,resourceId)===id))adopt(room,id);
+  if(id&&(!room?.targetCheckpointId||head(runtime,resourceId)===id))adopt(room,id);
   runtime.changed();return worker;
 }
 export async function saveTaskCheckpoint(runtime,job,input){
   strict(input,['resourceId','label']);const resourceId=textInput(input.resourceId,200),label=input.label===undefined?'Checkpoint':textInput(runtime.store.connectors.redact(input.label),120);
   const room=roomFor(runtime,job);if(room)workingRoom(runtime,job);
-  await ensureTaskWorkspace(runtime,job,resourceId);
-  const pin=job.workspacePin,before=head(runtime,resourceId),controller=new AbortController(),run={job,controller};runtime.executions.add(run);
-  let saved;
-  try{saved=await runtime.sandbox.checkpoint(job,resourceId,{expectedParent:pin.headId,signal:controller.signal});}
+  const controller=new AbortController(),run={job,controller};runtime.executions.add(run);
+  let saved,pin,before;
+  try{await ensureTaskWorkspace(runtime,job,resourceId,undefined,controller.signal);pin=job.workspacePin;before=head(runtime,resourceId);saved=await runtime.sandbox.checkpoint(job,resourceId,{expectedParent:pin.headId,signal:controller.signal});}
   finally{runtime.executions.delete(run);}
   if(controller.signal.aborted)throw new Error('Checkpoint save cancelled.');
+  activeTask(job);if(room)workingRoom(runtime,job);
   runtime.store.security.authorize(job,'sandbox.exec',resourceId);runtime.store.data.roomCheck(job);
   const conflict=before!==pin.headId||head(runtime,resourceId)!==pin.headId;
   const record={id:saved.id,spaceId:job.spaceId,resourceId,parentId:pin.headId,taskId:job.id,agentId:job.agentId,label,createdAt:saved.createdAt,...(conflict?{conflict:true}:{})};
@@ -85,7 +88,6 @@ export async function runRecordedTest(runtime,job,input){
   const item=input.caseId===undefined?null:room.cases?.find(item=>item.id===input.caseId);
   if(input.caseId!==undefined&&!item)throw new Error('Test case not found.');
   if(job.workspaceDirty)throw new Error('Save a checkpoint before testing modified work.');
-  await ensureTaskWorkspace(runtime,job,resourceId,id);
   if(item){
     runtime.store.data.assertHandoff(job,item.sourceTaskIds||[item.taskId]);
     const dependencies=new Set(),visit=key=>{if(dependencies.has(key))return;dependencies.add(key);for(const next of room.cases.find(candidate=>candidate.id===key)?.dependsOn||[])visit(next);};for(const key of item.dependsOn)visit(key);
@@ -94,10 +96,15 @@ export async function runRecordedTest(runtime,job,input){
   }
   const revision=item?.revision,controller=new AbortController(),run={job,controller},startedAt=new Date().toISOString();runtime.executions.add(run);
   let result,error;
-  try{result=await runtime.sandbox.run(job,{resourceId,...command},controller.signal);}
+  try{
+    // Every test starts at the immutable checkpoint; prior test commands cannot alter its input.
+    await runtime.sandbox.stop(job.id);
+    await ensureTaskWorkspace(runtime,job,resourceId,id,controller.signal);
+    result=await runtime.sandbox.run(job,{resourceId,...command},controller.signal);
+  }
   catch(failure){error=failure;result={exitCode:null,stdout:'',stderr:failure.message||'Execution failed.'};}
-  finally{runtime.executions.delete(run);}
-  const cancelled=controller.signal.aborted||result.cancelled||job.status==='stopping',passed=!error&&!cancelled&&!result.timedOut&&!result.truncated&&result.exitCode===0;
+  finally{await runtime.sandbox.stop(job.id);runtime.executions.delete(run);}
+  const cancelled=controller.signal.aborted||result.cancelled||!['running','waiting'].includes(job.status)||room.discussion?.status!=='active'||room.discussion.id!==job.roomRoundId,passed=!error&&!cancelled&&!result.timedOut&&!result.truncated&&result.exitCode===0;
   runtime.store.security.authorize(job,'sandbox.exec',resourceId);runtime.store.data.roomCheck(job);
   const bounded=(value,limit)=>new TextDecoder().decode(Buffer.from(runtime.store.connectors.redact(value||'')).subarray(0,limit),{stream:true});
   const stdout=bounded(result.stdout,32768),stderr=bounded(result.stderr,32768-Buffer.byteLength(stdout));
