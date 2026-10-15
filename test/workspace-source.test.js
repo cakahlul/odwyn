@@ -25,7 +25,8 @@ test('source folder imports are bounded, atomic, exclude credentials and preserv
     workspaceSource(root,'product',{create:true});
     const result=await importWorkspaceSource(root,'product',[upload('src/main.js','export const value=1;'),upload('.env','secret'),upload('node_modules/a.js','dependency'),upload('.git/config','credential')]);
     expect(result.files).toBe(1);expect(result.skipped).toBe(3);expect(readFileSync(join(root,'product/src/main.js'),'utf8')).toContain('value=1');
-    await expect(importWorkspaceSource(root,'product',[upload('other.js','overwrite')])).rejects.toThrow('empty');expect(readdirSync(join(root,'product'))).toEqual(['src']);
+    await expect(importWorkspaceSource(root,'product',[upload('other.js','overwrite')])).rejects.toThrow('not empty');expect(readdirSync(join(root,'product'))).toEqual(['src']);
+    const recreated=await importWorkspaceSource(root,'missing/nested',[upload('main.js','restored')]);expect(recreated.files).toBe(1);expect(readFileSync(join(root,'missing/nested/main.js'),'utf8')).toBe('restored');
     workspaceSource(root,'fresh',{create:true});
     for(const path of ['../outside','/outside','a/../../outside','a\\b','a\n'])await expect(importWorkspaceSource(root,'fresh',[upload(path,'x')])).rejects.toThrow('unsafe');
     await expect(importWorkspaceSource(root,'fresh',[upload('file','a'),upload('file','b')])).rejects.toThrow('duplicate');
@@ -72,7 +73,8 @@ test('server project copy preserves originals and executable bits, excludes priv
   const resource=await(await request('/api/resources',{spaceId:p.legacySpaceId,type:'workspace',name:'Server project'})).json(),target=resource.workspaceSource.path,path='/api/resources/'+resource.id+'/source';
   try{
     const protectedProject=join(directory,'provider-private');mkdirSync(protectedProject);writeFileSync(join(protectedProject,'private.txt'),'synthetic provider data');
-    const copied=await request(path,{serverFolder:project});expect(copied.status).toBe(201);const result=await copied.json();expect(result.files).toBe(1);expect(result.skipped).toBe(4);expect(readFileSync(join(target,'src/main.js'),'utf8')).toContain('existing project');expect(statSync(join(target,'src/main.js')).mode&0o111).toBe(0o111);expect(readFileSync(join(project,'.env'),'utf8')).toBe('secret');expect((await request(path,{serverFolder:project})).status).toBe(400);
+    const copied=await request(path,{serverFolder:project});expect(copied.status).toBe(201);const result=await copied.json();expect(result.files).toBe(1);expect(result.skipped).toBe(4);expect(readFileSync(join(target,'src/main.js'),'utf8')).toContain('existing project');expect(statSync(join(target,'src/main.js')).mode&0o111).toBe(0o111);expect(readFileSync(join(project,'.env'),'utf8')).toBe('secret');const repeat=await request(path,{serverFolder:project});expect(repeat.status).toBe(400);expect((await repeat.json()).error).toContain(target);
+    const missing=await(await request('/api/resources',{spaceId:p.legacySpaceId,type:'workspace',name:'Recreate deleted folder'})).json();rmSync(missing.workspaceSource.path,{recursive:true});expect((await request('/api/resources/'+missing.id+'/source',{serverFolder:project})).status).toBe(201);expect(readFileSync(join(missing.workspaceSource.path,'src/main.js'),'utf8')).toContain('existing project');
     const fresh=await(await request('/api/resources',{spaceId:p.legacySpaceId,type:'workspace',name:'Fresh'})).json(),freshPath='/api/resources/'+fresh.id+'/source';
     for(const serverFolder of ['relative','/','/etc/../etc',data,root,join(directory,'missing')])expect((await request(freshPath,{serverFolder})).status).toBe(400);
     const workspace=await(await request('/api/workspaces',{name:'Studio'})).json();

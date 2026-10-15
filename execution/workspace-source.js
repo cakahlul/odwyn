@@ -34,8 +34,9 @@ export async function importWorkspaceSource(root,folder,files,{assertBytes=()=>{
     const content=Buffer.from(await file.arrayBuffer());bytes+=content.length;if(bytes>sourceLimits.bytes)throw new Error('Source files exceed 16 MiB.');assertBytes(content);prepared.push({path,content});
   }
   if(!prepared.length)throw new Error('No source files to import after excluding credentials, Git history, dependencies and build outputs.');
-  beforeWrite();const source=workspaceSource(root,folder);
-  if(!source.exists||!source.empty)throw new Error('Import requires an empty source folder. Create a fresh workspace resource to preserve existing code.');
+  beforeWrite();const source=workspaceSource(root,folder,{create:true});
+  if(!source.exists)throw new Error('Source storage is unavailable; check the displayed server source root.');
+  if(!source.empty)throw new Error(`Import destination is not empty: ${source.path}. Existing files were preserved. Use a fresh workspace resource to import another copy.`);
   const temporary=mkdtempSync(join(dirname(source.path),'.import-'));
   try{
     const directories=new Set();
@@ -52,8 +53,9 @@ export async function importServerWorkspaceSource(root,folder,serverFolder,{run,
   if(typeof serverFolder!=='string'||!serverFolder.startsWith('/')||serverFolder.length>4096||/[\x00-\x1f\x7f\\]/.test(serverFolder)||serverFolder.split('/').some(part=>part.startsWith('.')))throw new Error('Enter an absolute project folder on the Odwyn server, without hidden folders, traversal or symbolic links.');
   serverFolder=resolve(serverFolder);if(serverFolder==='/')throw new Error('Select a project folder, not the server filesystem root.');
   if(typeof run!=='function'||!root)throw new Error('Server source copying is unavailable.');
-  beforeWrite();const source=workspaceSource(root,folder);
-  if(!source.exists||!source.empty)throw new Error('Copy requires an empty source folder. Create a fresh workspace resource to preserve existing code.');
+  beforeWrite();const source=workspaceSource(root,folder,{create:true});
+  if(!source.exists)throw new Error('Source storage is unavailable; check the displayed server source root.');
+  if(!source.empty)throw new Error(`Copy destination is not empty: ${source.path}. Existing files were preserved. Use a fresh workspace resource to copy another project.`);
   const temporary=mkdtempSync(join(dirname(source.path),'.import-'));
   try{
     const copied=await run(['python3',join(import.meta.dir,'snapshot.py'),serverFolder,temporary,'--project',...new Set([...protectedRoots,resolve(root)])],{timeoutMs:15000,limit:4096});
