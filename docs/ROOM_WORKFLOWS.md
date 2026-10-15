@@ -1,7 +1,7 @@
 # Reviewed room workflows
 
-Status: all implementation slices delivered. Final combined regression verification
-is in progress; the result and evidence path are recorded below when complete.
+Status: all implementation slices delivered and verified. The full suite passed
+267 tests with zero failures or skips on 2026-10-15.
 
 ## Objective
 
@@ -219,7 +219,7 @@ A new checkpoint or case revision requires retesting. Each recorded command star
 from a fresh restored worker. Blocking dependencies stop dependent tests while
 unrelated cases can continue. Conflicting checkpoint branches remain recoverable;
 the owner explicitly selects a head after stopping workspace tasks. Selection
-invalidates completion and test results. There is no automatic merge.
+invalidates completion and test results. There is no automatic merge. A room accepts one target checkpoint; put related projects in the same reviewed workspace/package, or use separate rooms for independent targets.
 
 Room workflows contain only room stages. Instructions can interpolate launch
 inputs and run metadata. Prior-stage data arrives through the explicitly selected
@@ -246,3 +246,12 @@ conflict preservation, cancellation, fresh checkpoint tests, five-stage chaining
 a non-software editorial flow, and responsive browser configuration/handoff/start.
 The real Docker checkpoint test is `tests/security/phase2/checkpoints.test.js`.
 Fixture providers verify orchestration and do not establish model judgment quality.
+
+Final combined run: `artifacts/tests/1792051723143-30549/results.json` and
+`regression.log`: 267 tests, zero failures/skips, complete JUnit, browser smoke and
+dependency checks passed. All 58 test files passed, including security phases 0–5
+with the declared disposable runner and pinned terminal/browser images. Nested
+application regressions include the final browser and five-agent Studio checks.
+`bun run check:workflows` also passed. No live inference or production actions
+were exercised. Docker Desktop worker checks do not certify a Linux production
+deployment or native mobile execution.
