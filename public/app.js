@@ -1,3 +1,4 @@
+import {setupKnowledgeSettings} from './knowledge-ui.js';
 import {setupRoomWork} from './room-work-ui.js';
 import {setupWorkspaceHomes} from './workspace-homes.js';
 import {setupWorkspaceSettings} from './workspace-settings.js';
@@ -75,6 +76,7 @@ $('#preferred-currency').innerHTML = currencies.map(code=>`<option value="${code
 hydrateIcons(); setupBrowser(() => state);
 const renderSecuritySpace=setupSecurity(() => state);
 setupWorkspaceSettings(refresh);
+setupKnowledgeSettings(refresh);
 setupCustomization(() => state, async (result, adding, onboarding) => { $('#provider-api-key').value = ''; signature = ''; await refresh(); if (adding) await switchAgent(result.id); if (onboarding && !workspace.globalProvider.configured) openSettings(); }, () => $('#provider-source').value === 'global' ? {inherit:true} : {...providerInput(),inherit:false});
 
 function selectState() {

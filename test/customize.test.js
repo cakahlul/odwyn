@@ -13,7 +13,7 @@ test('agent editor saves across sections, retains failed drafts, and preserves i
   for (const [id,name] of [['agent-name-input','name'],['owner-name-input','ownerName'],['agent-specialization','specialization'],['user-context-input','userContext'],['workspace-override','overrideWorkspace']]) nodes.set('#'+id,fields.get(name));
   for (const selector of ['.profile-layout','.profile-sidebar']) nodes.set(selector,node());
   const form=nodes.get('#customize-form'), dialog=nodes.get('#customize-dialog'), checkbox=fields.get('overrideWorkspace'), name=fields.get('name');
-  nodes.get('#agent-skill-options').querySelectorAll=()=>[];
+  for(const id of ['#agent-skill-options','#agent-knowledge-options'])nodes.get(id).querySelectorAll=()=>[];
   form.elements={namedItem:key=>fields.get(key)};
   form.reset=()=>{};
   form.querySelectorAll=selector=>['details','[data-color-for]'].includes(selector) ? [] : [...sections,...['customize-save','customize-cancel','customize-defaults'].map(id=>nodes.get('#'+id))];

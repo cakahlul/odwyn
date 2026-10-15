@@ -281,6 +281,13 @@ export function createApp(options = {}) {
         const spaceMatch=pathname.match(/^\/api\/spaces\/([a-f0-9-]{36})$/);
         if(spaceMatch&&req.method==='PUT'){const result=store.security.updateSpace(spaceMatch[1],await json(req));runtime.changed();return response(result);}
         if(spaceMatch&&req.method==='DELETE'){store.security.deleteSpace(spaceMatch[1]);runtime.changed();return response({ok:true});}
+        if(pathname === '/api/knowledge'){
+          if(req.method==='GET')return response(store.connectors.sanitize(store.state.knowledge));
+          if(req.method==='POST'){const result=store.knowledge.create(await json(req,90000));runtime.changed();return response(result,201);}
+          return response({error:'Method not allowed.'},405);
+        }
+        const knowledgeMatch=pathname.match(/^\/api\/knowledge\/([a-f0-9-]{36})$/);
+        if(knowledgeMatch&&['PUT','DELETE'].includes(req.method)){const input=await json(req,90000),result=req.method==='PUT'?store.knowledge.update(knowledgeMatch[1],input):store.knowledge.delete(knowledgeMatch[1],input);runtime.changed();return response(result);}
         if(pathname === '/api/execution'&&req.method==='GET')return response({configured:runtime.sandbox.configured,sourceRoot:runtime.sandbox.snapshotRoot||null,limits:sourceLimits});
         if(pathname === '/api/execution/source'&&req.method==='POST'){
           const input=await json(req);if(Object.keys(input).some(key=>key!=='sourceFolder'))throw new Error('Only a source folder is accepted.');
@@ -301,6 +308,7 @@ export function createApp(options = {}) {
         }
         const resourceMatch=pathname.match(/^\/api\/resources\/([a-f0-9-]{36})$/);
         if(resourceMatch&&req.method==='PUT'){
+          if(store.knowledge.managed(resourceMatch[1]))throw new Error('Manage this resource in Settings → Knowledge.');
           const input=await json(req),previous=store.security.resource(resourceMatch[1]);
           if(Object.keys(input).some(key=>!['name','metadata'].includes(key)))throw new Error('Invalid resource fields.');
           const candidate=store.security.validateResource({spaceId:previous.spaceId,type:previous.type,name:Object.hasOwn(input,'name')?input.name:previous.name,metadata:Object.hasOwn(input,'metadata')?input.metadata:previous.metadata});
@@ -311,9 +319,10 @@ export function createApp(options = {}) {
           }
           const result=store.security.updateResource(resourceMatch[1],input);runtime.changed();return response(store.connectors.sanitize({...result,...(result.type==='workspace'?{workspaceSource:{...workspaceSource(runtime.sandbox.snapshotRoot,result.metadata.sourceFolder||`${result.spaceId}/${result.id}`),configured:runtime.sandbox.configured}}:{})}));
         }
-        if(resourceMatch&&req.method==='DELETE'){store.security.deleteResource(resourceMatch[1]);runtime.changed();return response({ok:true});}
+        if(resourceMatch&&req.method==='DELETE'){if(store.knowledge.managed(resourceMatch[1]))throw new Error('Manage this resource in Settings → Knowledge.');store.security.deleteResource(resourceMatch[1]);runtime.changed();return response({ok:true});}
         if (pathname === '/api/resources' && req.method === 'POST') {
           const input=store.security.validateResource(await json(req)),resourceId=randomUUID();
+          if(input.type==='knowledge')throw new Error('Create knowledge in Settings → Knowledge.');
           const source=input.type==='workspace'?{...workspaceSource(runtime.sandbox.snapshotRoot,input.metadata.sourceFolder||`${input.spaceId}/${resourceId}`,{create:true}),configured:runtime.sandbox.configured}:null;
           const result=store.security.createResource(input,resourceId);runtime.changed();return response({...result,...(source?{workspaceSource:source}:{})},201);
         }
@@ -414,6 +423,7 @@ export function createApp(options = {}) {
         }
         if (pathname === '/api/agents' && req.method === 'POST') {
           const input = await json(req, 1_300_000), customization = validateProfile(input);
+          if (customization.knowledgeIds?.some(id=>!store.state.knowledge.some(doc=>doc.id===id))) throw new Error('Choose existing knowledge documents.');
           if (customization.skillIds?.some(id=>!store.state.skills.some(skill=>skill.id===id))) throw new Error('Choose existing skills.');
           const config = input.provider === undefined || input.provider.inherit === true ? { ...store.state.globalProvider } : validateProvider(input.provider,store.state.globalProvider);
           if (input.provider?.inherit !== undefined && typeof input.provider.inherit !== 'boolean') throw new Error('Choose a provider source.');
@@ -434,6 +444,7 @@ export function createApp(options = {}) {
         if (pathname === '/api/customization' && req.method === 'PUT') {
           const agent = findAgent(store.state, url.searchParams.get('agentId') ?? undefined);
           const input = await json(req, 1_300_000), customization = validateProfile(input);
+          if (customization.knowledgeIds?.some(id=>!store.state.knowledge.some(doc=>doc.id===id))) throw new Error('Choose existing knowledge documents.');
           if (customization.skillIds?.some(id=>!store.state.skills.some(skill=>skill.id===id))) throw new Error('Choose existing skills.');
           let changedAgents = [];
           if (input.provider !== undefined) {
@@ -541,7 +552,7 @@ export function createApp(options = {}) {
         }
         if (pathname.startsWith('/api/')) return response({ error: 'Endpoint not found.' }, 404);
         if (!['GET','HEAD'].includes(req.method)) return response({ error: 'Method not allowed.' }, 405);
-        const files = { '/': 'index.html', '/app.js': 'app.js', '/security-ui.js':'security-ui.js', '/workspace-settings.js':'workspace-settings.js', '/workspace-homes.js':'workspace-homes.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/room-policy.js':'room-policy.js', '/room-work-ui.js':'room-work-ui.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
+        const files = { '/': 'index.html', '/app.js': 'app.js', '/security-ui.js':'security-ui.js', '/workspace-settings.js':'workspace-settings.js', '/knowledge-ui.js':'knowledge-ui.js', '/workspace-homes.js':'workspace-homes.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/room-policy.js':'room-policy.js', '/room-work-ui.js':'room-work-ui.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
         if (!files[pathname]) return response({ error: 'Not found.' }, 404);
         return new Response(Bun.file(join(root, 'public', files[pathname])), { headers });
       } catch (error) { return response({ error: error.message || 'Something went wrong. Try again.' }, 400); }

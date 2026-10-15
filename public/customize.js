@@ -4,7 +4,7 @@ import { defaults, resolveProfile, ownerPreferenceKeys, palettes, choices, palet
 let getState, saved, providerDraft = () => undefined, step = 0, firstRun = false, adding = false, editingId = null, lastApplied = '', appearanceOnly = false;
 const toneDetails = {warm:'Friendly, thoughtful, plainspoken.',crisp:'The answer first. Keep it short.',playful:'A little wit, plenty of useful work.',formal:'Courteous, precise, professional.',patient:'Calm explanations, one step at a time.',coach:'Practical next steps and encouragement.'};
 let ownerDraft = {};
-const readDraft = () => ({...Object.fromEntries(new FormData($('#customize-form'))),...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$('#customize-form').elements.namedItem(key).disabled ? ownerDraft[key] : $('#customize-form').elements.namedItem(key).value])),skillIds:[...$('#agent-skill-options').querySelectorAll('input:checked')].map(input=>input.value),overrideWorkspace:$('#workspace-override').checked});
+const readDraft = () => ({...Object.fromEntries(new FormData($('#customize-form'))),...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$('#customize-form').elements.namedItem(key).disabled ? ownerDraft[key] : $('#customize-form').elements.namedItem(key).value])),knowledgeIds:[...$('#agent-knowledge-options').querySelectorAll('input:checked')].map(input=>input.value),skillIds:[...$('#agent-skill-options').querySelectorAll('input:checked')].map(input=>input.value),overrideWorkspace:$('#workspace-override').checked});
 export const setAppearance = (node, appearance) => {
   const vars = appearanceVars(appearance);node.dataset.scheme = vars.scheme;
   Object.entries(vars).forEach(([key,value])=>node.style.setProperty(`--${key}`,value));
@@ -74,6 +74,7 @@ export function openCustomization(onboarding = false, newAgent = false, workspac
   for (const [key,value] of Object.entries(draft)) { const field = $('#customize-form').elements.namedItem(key); if (field) field.value = value; }
   syncHexColors($('#customize-form'));
   $('#agent-skill-options').innerHTML = (getState().skills || []).map(skill=>`<label class="agent-skill-option"><input type="checkbox" value="${esc(skill.id)}" ${(draft.skillIds || []).includes(skill.id) ? 'checked' : ''}><span><strong>${esc(skill.name)}</strong><small>/${esc(skill.command)}${skill.description ? ' · '+esc(skill.description) : ''}</small></span></label>`).join('') || '<p class="field-hint">No skills yet. Add or import skills in Workflows &amp; skills.</p>';
+  $('#agent-knowledge-options').innerHTML=(getState().knowledge||[]).map(doc=>`<label class="agent-skill-option"><input type="checkbox" value="${esc(doc.id)}" ${(draft.knowledgeIds||[]).includes(doc.id)?'checked':''}><span><strong>${esc(doc.name)}</strong><small>v${doc.version}${doc.summary?' · '+esc(doc.summary):''}</small></span></label>`).join('')||'<p class="field-hint">No knowledge yet. Add it in Workspace Settings → Knowledge.</p>';
   $('#workspace-override').checked = !adding && !!getState()?.customization?.overrideWorkspace;
   $('#agent-appearance-controls').hidden = appearanceOnly;
   $('.profile-sidebar').hidden = appearanceOnly;

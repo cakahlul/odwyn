@@ -75,6 +75,7 @@ export function setupSecurity(getState){
 export async function freshPassword(){let d=$('#security-auth');if(!d){d=document.createElement('dialog');d.id='security-auth';d.innerHTML='<form method="dialog"><h2>Fresh owner authentication</h2><label>Owner password<input id="security-password" type="password" autocomplete="current-password" required></label><button value="confirm">Confirm exact request</button><button value="cancel" formnovalidate>Cancel</button></form>';document.body.append(d);}$('#security-password').value='';d.showModal();return new Promise((resolve,reject)=>d.addEventListener('close',()=>{const pw=$('#security-password').value;$('#security-password').value='';d.returnValue==='confirm'?resolve(pw):reject(new Error('Authentication cancelled.'));},{once:true}));}
 
 function actionExample(action){return ({
+ 'knowledge.read':['Read knowledge','Read assigned reference documents'],
  'memory.read':['Read notes','Read saved research notes'], 'memory.write':['Update notes','Save a new research finding'],
  'repository.read':['Read repository','Read the project README'], 'repository.branch.push':['Push a branch','Push a commit to agent/update-readme'], 'repository.merge':['Merge changes','Merge a reviewed commit into main'],
  'sandbox.exec':['Run commands','Run the project test command in the isolated workspace'], 'filesystem.read':['Read a file','Read the selected file'], 'filesystem.write':['Edit a file','Update the selected file'], 'file.download':['Download a file','Download the selected file artifact'],

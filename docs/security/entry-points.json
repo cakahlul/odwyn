@@ -154,6 +154,13 @@
       "anchor": "export async function importWorkspaceSource(",
       "plannedHook": "Owner source import: bounded files, private staging, atomic empty-folder replacement",
       "gap": "Owner-only; known filename and configured-secret checks cannot identify every secret"
+    },
+    {
+      "category": "file",
+      "file": "knowledge.js",
+      "anchor": "export function openKnowledge(",
+      "plannedHook": "Assigned Knowledge uses Space resources, room permission intersection and data-source provenance",
+      "gap": "Owner text only; keyword retrieval, version references, no file parsing or embeddings"
     }
   ],
   "httpLiterals": [
@@ -176,6 +183,7 @@
     "/api/files",
     "/api/images",
     "/api/jobs",
+    "/api/knowledge",
     "/api/policy/preview",
     "/api/policy/simulate",
     "/api/preferences",
@@ -209,6 +217,7 @@
     "/^\\/api\\/files\\/([a-f0-9-]{36})$/",
     "/^\\/api\\/files\\/([a-f0-9-]{36})(\\/preview)?$/",
     "/^\\/api\\/jobs\\/([a-f0-9-]{36})\\/(answer|respond|cancel|retry|permissions)$/",
+    "/^\\/api\\/knowledge\\/([a-f0-9-]{36})$/",
     "/^\\/api\\/resources\\/([a-f0-9-]{36})$/",
     "/^\\/api\\/resources\\/([a-f0-9-]{36})\\/source$/",
     "/^\\/api\\/rooms\\/([a-f0-9-]{36})(?:\\/(messages|cancel))?$/",
@@ -236,6 +245,7 @@
     "odwyn_test_case",
     "odwyn_room_done",
     "odwyn_terminal",
+    "odwyn_knowledge",
     "odwyn_search",
     "odwyn_browser",
     "odwyn_ask",

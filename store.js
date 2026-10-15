@@ -1,3 +1,4 @@
+import {openKnowledge} from './knowledge.js';
 import {securityBackup,openMigration} from './security/migration.js';
 import { openPolicy, statePolicy } from './security/policy.js';
 import {openApprovals} from './security/approvals.js';
@@ -18,7 +19,7 @@ export function openStore(directory) {
   chmodSync(filename, 0o600);
   db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL)');
   const row = db.query('SELECT value FROM state WHERE id=1').get();
-  const state = { conversations: [], jobs: [], schedules: [], files: [], workflows: [], skills: [], workflowRuns: [], preferences: '', currency:'source', customization: null, ...JSON.parse(row?.value || '{}') };
+  const state = { conversations: [], jobs: [], schedules: [], files: [], workflows: [], skills: [], knowledge: [], workflowRuns: [], preferences: '', currency:'source', customization: null, ...JSON.parse(row?.value || '{}') };
   state.agents ||= [{ id: randomUUID(), customization: state.customization }];
   state.owner ||= Object.fromEntries(ownerPreferenceKeys.map(key=>[key,state.customization?.[key] ?? state.agents[0].customization?.[key] ?? defaults[key]]));
   state.appearance ||= {palette:state.customization?.palette || 'paper',motion:state.customization?.motion || 'system'};
@@ -79,7 +80,8 @@ export function openStore(directory) {
     } catch(error) { state.conversations = conversations; state.jobs = jobs; state.workflowRuns = workflowRuns; throw error; }
   });
   if(plaintextProviderKeys){save();db.exec('PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE)');}
-  return { directory, state, security, data, connectors, approvals, migration, save, search, deleteConversation, close: () => db.close() };
+  const store={ directory, state, security, data, connectors, approvals, migration, save, search, deleteConversation, close: () => db.close() };
+  store.knowledge=openKnowledge(db,store);return store;
 }
 
 export function findAgent(state, id = state.agents[0].id) {

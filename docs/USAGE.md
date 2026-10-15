@@ -70,7 +70,7 @@ shared evidence. See [Execution setup](../execution/README.md).
 
 ## Shared data lives in Workspace Settings
 
-Settings has separate sections for **Appearance**, **AI provider**, **Preferences**, **Spaces**, **Resources**, **Connections**, and **Permission templates**.
+Settings has separate sections for **Appearance**, **AI provider**, **Preferences**, **Spaces**, **Resources**, **Knowledge**, **Connections**, and **Permission templates**.
 
 | Item | What it does |
 | --- | --- |
@@ -95,6 +95,23 @@ Import project source only: credentials, Git metadata, dependencies and build ou
 Agents receive isolated copies, not live host mounts. Accepted edits persist as checkpoints; they do not overwrite the source folder. Stop Space tasks before import or changing the source. Source changes revoke existing grants; a resource with a checkpoint needs a fresh resource to start from different code.
 
 The displayed executor status is separate from source readiness. Folder import does not install Docker, toolchains or dependencies: those must already be available in the reviewed execution image. Workers have no network access. Existing server execution setup remains supported; see [Execution setup](../execution/README.md).
+
+## Agent knowledge
+
+Knowledge is reusable reference material: architecture, product terminology, coding standards or release rules. Skills describe how to work; Knowledge supplies facts and context.
+
+1. Open **Workspace Settings → Knowledge → Create knowledge**.
+2. Enter a name, optional summary, and text or Markdown content. Select every Space where it should be available, then save. A named **Knowledge** resource is created in each selected Space.
+3. Open **Customize agent → Knowledge**, select the documents, and save. Repeat for other agents that should use them.
+4. In each agent’s **Access & Autonomy**, add the relevant Spaces and set **Read knowledge** to **Automatic** for the new resources. Assignment alone grants no access.
+
+Assigned, permitted knowledge follows future agent tasks: individual chats, rooms, workflow steps, scheduled work and retries. Short documents load automatically; long documents load their summary and opening excerpt, with `odwyn_knowledge` available to read the full text or search keywords. Workflow agents keep this reference tool even when other step tools are disabled. Knowledge is reference data and never authorizes actions.
+
+Room loading requires every participant to have Automatic read permission for that Knowledge resource. Assignment controls automatic loading; read permission controls sharing. Existing provenance checks also protect later chat history, workflow outputs and room handoffs. Task events show loaded document versions, and `knowledgeVersions` records references used by each task. Revoked permission prevents further reads; material already sent to an AI provider cannot be withdrawn.
+
+Editing creates a new numbered version and revokes affected read grants in every selected Space; review and save agent access again. Stop tasks in those Spaces before editing or deleting. Concurrent edits require reloading the current version. Deletion removes the resources and assignments; prior task version references remain. Spaces stay fixed after creation. To use a different set of Spaces, create another document.
+
+Limits: 100 documents per Workspace, 20 assigned per agent, 500 characters per summary and 20,000 characters per document. This version accepts pasted text/Markdown; it does not parse PDFs or Word files, crawl URLs, or use embeddings. Keep secrets out; known configured credentials are rejected. Knowledge stays in its own Workspace and may be sent to the selected AI provider.
 
 ## Agent access
 

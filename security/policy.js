@@ -10,7 +10,7 @@ export const approvalActions=['payment.execute','message.send','repository.merge
 export const statePolicy = Symbol('server policy');
 // Unavailable capabilities remain denied even with a grant or legacy allow mode.
 export const capabilities = Object.freeze(Object.fromEntries([
-  ['memory.read','memory',true], ['memory.write','memory',true],
+  ['knowledge.read','knowledge',true], ['memory.read','memory',true], ['memory.write','memory',true],
   ['repository.read','repository',true], ['repository.branch.push','repository',false], ['repository.merge','repository',false],
   ['workspace.read','workspace',true], ['sandbox.exec','workspace',false], ['filesystem.read','file',false], ['filesystem.write','file',false],
   ['file.download','file',true], ['browser.read','browser',false], ['browser.navigate','browser',false], ['browser.interact','browser',false],
@@ -59,9 +59,10 @@ export function openPolicy(db,state,directory) {
   const resourceValue=input=>{
       strict(input,['spaceId','type','name','metadata']);space(input.spaceId);
       if(!Object.values(capabilities).some(c=>c.resourceType===input.type))throw new Error('Unknown resource type.');
-      const metadata=input.metadata || {};strict(metadata,input.type==='repository'?['endpoint','connectionId','upstreamId']:input.type==='workspace'?['sourceFolder']:input.type==='file'?['path','workspaceId']:input.type==='browser'?['readUrls','blockedDomains']:['connector','payment','destination','environment'].includes(input.type)?['connectionId','upstreamId']:[]);
+      const metadata=input.metadata || {};strict(metadata,input.type==='repository'?['endpoint','connectionId','upstreamId']:input.type==='workspace'?['sourceFolder']:input.type==='knowledge'?['version']:input.type==='file'?['path','workspaceId']:input.type==='browser'?['readUrls','blockedDomains']:['connector','payment','destination','environment'].includes(input.type)?['connectionId','upstreamId']:[]);
       if(['payment','destination','environment'].includes(input.type)||input.type==='repository'&&metadata.upstreamId!==undefined){id(metadata.connectionId);id(metadata.upstreamId);if(!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='action-gateway-v1' AND enabled=1").get(metadata.connectionId,input.spaceId))throw new Error('Reviewed action connection scope mismatch.');}
       else if(input.type==='repository'&&metadata.connectionId!==undefined){id(metadata.connectionId);if(!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='git-https-v1' AND endpoint=? AND enabled=1").get(metadata.connectionId,input.spaceId,metadata.endpoint))throw new Error('Git connection scope mismatch.');}
+      if(input.type==='knowledge'&&(!Number.isSafeInteger(metadata.version)||metadata.version<1))throw new Error('Knowledge needs a valid version.');
       if(metadata.sourceFolder!==undefined)metadata.sourceFolder=sourceFolder(metadata.sourceFolder);
       if(metadata.workspaceId!==undefined){id(metadata.workspaceId);if(!db.query("SELECT id FROM resources WHERE id=? AND space_id=? AND type='workspace'").get(metadata.workspaceId,input.spaceId))throw new Error('File workspace outside Space.');}
       if(input.type==='browser'&&metadata.blockedDomains!==undefined){if(metadata.readUrls!==undefined||!Array.isArray(metadata.blockedDomains)||metadata.blockedDomains.length>100)throw new Error('Choose blocked domains or an existing URL allowlist, not both. Maximum 100 blocked domains.');metadata.blockedDomains=[...new Set(metadata.blockedDomains.map(blockedDomain))];}

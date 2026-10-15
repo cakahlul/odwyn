@@ -98,6 +98,10 @@ export const specializations = {general:'',research:'Research and compare option
 export function validateProfile(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Choose your customization.');
   const result = {};
+  if (input.knowledgeIds !== undefined) {
+    if (!Array.isArray(input.knowledgeIds) || input.knowledgeIds.length > 20 || input.knowledgeIds.some(id=>typeof id !== 'string' || !id || id.length > 100)) throw new Error('Choose up to 20 valid knowledge documents.');
+    result.knowledgeIds = [...new Set(input.knowledgeIds)];
+  }
   if (input.skillIds !== undefined) {
     if (!Array.isArray(input.skillIds) || input.skillIds.length > 100 || input.skillIds.some(id=>typeof id !== 'string' || !id || id.length > 100)) throw new Error('Choose valid skills.');
     result.skillIds = [...new Set(input.skillIds)];
