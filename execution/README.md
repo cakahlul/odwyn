@@ -68,3 +68,43 @@ After installing dependencies, run `bun run setup`. With rootless Linux Docker/c
 Without Docker, setup creates ordinary owner credentials and explains that isolated tools remain denied. Install rootless Docker using [Docker's official instructions](https://docs.docker.com/engine/security/rootless/) and [Ubuntu 24.04 guidance](https://docs.docker.com/engine/security/rootless/troubleshoot/), then rerun setup. macOS users start Docker Desktop first. Rootful Linux Docker is rejected. Setup never changes OS packages, services or global security settings. `--chat-only` skips worker setup; `--isolation` requires it and returns exit 2 if missing. Builds/probe failures return exit 2 without saving new worker settings.
 
 The normal `bun run start` command loads `.env` through Bun. Services started outside this checkout must load the same owner configuration explicitly; shell exports alone are temporary. Selected snapshot directories still use the exact Space/resource IDs described above and must contain only explicitly reviewed workspaces. Do not copy secrets or live data into them. `workspaces/` is ignored by Git.
+
+
+## Checkpoints and recorded tests
+
+Checkpoint manifests live privately under `<data directory>/checkpoints`. Only
+bounded regular workspace files are captured; credentials, Git configuration,
+hooks, symlinks and special files are rejected. Checkpoints are immutable and
+Space/resource scoped. Successful task completion saves modified work before the
+worker is removed. Cancellation or a failed save never promotes a new head.
+Parallel writers use compare-and-set: a losing branch remains recorded without
+overwriting the winner. The owner can explicitly select a retained checkpoint
+after stopping workspace tasks. Export selected checkpoints through room handoff
+into an empty destination workspace; this grants no execution permission.
+
+`odwyn_checkpoint` saves or selects a task's initial checkpoint. A task pins one
+workspace/checkpoint; start another task to move to a newer head.
+`odwyn_test_case` defines cases, dependencies and defects. `odwyn_run_test` records
+the real command, exact checkpoint, exit status, bounded redacted output and case
+revision. Every recorded command restores fresh checkpoint files and destroys its
+test worker afterward. Timeouts, cancellations, truncated output and failed exits
+cannot count as passing evidence. New checkpoint/case revisions require retests.
+Manual UAT entered by the owner stays distinctly attributed to the owner.
+
+`workspace.read` grants evidence access without executing commands. Existing
+execution grants provide read compatibility unless an explicit read rule exists.
+Room disclosure still requires the participant read intersection.
+
+The trusted server can set `ODWYN_EXECUTION_PROFILE` to a JSON object, for example:
+
+```sh
+ODWYN_EXECUTION_PROFILE='{"memory":1024,"pids":128,"cpus":2,"workspace":256,"temporary":128,"timeoutMs":120000}'
+```
+
+Memory, workspace and temporary sizes are MiB. Defaults remain 128/32/16 MiB,
+64 PIDs, one CPU, 120 seconds. Bounds are 64–4096 MiB memory, 16–1024 MiB workspace,
+8–1024 MiB temporary, 16–1024 PIDs, 1–8 CPUs, and at most 120 seconds per command.
+Checkpoint contents remain capped at 16 MiB/4096 files regardless of worker size.
+Profiles never enable networking, host mounts, credentials or native mobile
+emulators. Dependencies must already exist in the reviewed image/snapshot.
+Unsupported targets fail rather than silently using host execution.

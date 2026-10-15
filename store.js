@@ -67,6 +67,7 @@ export function openStore(directory) {
     const conversation = state.conversations.find(c=>c.id===id);
     if (!conversation) throw new Error('Conversation not found.');
     if (state.jobs.some(j=>j.conversationId===id && ['queued','running','waiting','takeover','stopping'].includes(j.status))) throw new Error('Stop this conversation’s tasks before deleting it.');
+    if(conversation.handoff||state.conversations.some(room=>room.handoff?.sourceRoomId===id))throw new Error('Linked room history preserves handoff evidence and cannot be deleted.');
     const conversations = state.conversations, jobs = state.jobs, workflowRuns = state.workflowRuns;
     try {
       state.conversations = conversations.filter(c=>c.id!==id);
@@ -91,7 +92,7 @@ export function deleteAgent(state, id) {
   const agent = findAgent(state,id);
   if (state.agents.length === 1) throw new Error('Keep at least one agent. Add a replacement first.');
   if (state.conversations.some(c=>c.kind==='room' && c.governance && c.memberIds.includes(id))) throw new Error('Update this agent’s room roles and membership before deleting it.');
-  if (state.workflows?.some(w=>w.steps.some(s=>s.agentId===id)) || state.workflowRuns?.some(r=>['running','waiting','takeover'].includes(r.status) && (r.agentId===id || r.workflow.steps.some(s=>s.agentId===id)))) throw new Error('Update or finish workflows using this agent before deleting it.');
+  if (state.workflows?.some(w=>w.steps.some(s=>s.agentId===id||s.room?.memberIds.includes(id))) || state.workflowRuns?.some(r=>['running','waiting','takeover'].includes(r.status) && (r.agentId===id || r.workflow.steps.some(s=>s.agentId===id||s.room?.memberIds.includes(id))))) throw new Error('Update or finish workflows using this agent before deleting it.');
   const rooms = state.conversations.filter(c => c.kind === 'room' && c.memberIds.includes(id));
   if (state.jobs.some(j => (j.agentId === id || rooms.some(r => r.id === j.conversationId)) && ['queued','running','waiting','takeover','stopping'].includes(j.status))) throw new Error('Stop this agent’s tasks and room discussions before deleting it.');
   state.agents = state.agents.filter(a => a.id !== id);
@@ -127,14 +128,30 @@ function roomDetails(state, input, spaceId) {
   for (const id of memberIds) { findAgent(state,id); state[statePolicy].visible(id,spaceId); }
   const governance=input.governance;
   if(governance!==undefined && governance!==null){
-    if(typeof governance!=='object'||Array.isArray(governance)||Object.keys(governance).some(key=>!['facilitatorId','reviewerIds','observerIds'].includes(key)))throw new Error('Invalid room roles.');
+    if(typeof governance!=='object'||Array.isArray(governance)||Object.keys(governance).some(key=>!['facilitatorId','reviewerIds','observerIds','outputs','ownerApproval','concurrency'].includes(key)))throw new Error('Invalid room roles.');
     const {facilitatorId=null,reviewerIds=[],observerIds=[]}=governance;
     for(const ids of [reviewerIds,observerIds])if(!Array.isArray(ids)||ids.length>5||new Set(ids).size!==ids.length||ids.some(id=>!memberIds.includes(id)))throw new Error('Room roles require different room participants.');
     if(facilitatorId!==null && !memberIds.includes(facilitatorId))throw new Error('Facilitator must be a room participant.');
     if(observerIds.length===memberIds.length||observerIds.includes(facilitatorId)||reviewerIds.some(id=>observerIds.includes(id)))throw new Error('Observers cannot facilitate or review. Keep at least one contributor.');
-    return {title,memberIds:[...memberIds],governance:{facilitatorId,reviewerIds:[...reviewerIds],observerIds:[...observerIds]}};
+    const options={};
+    if(governance.ownerApproval!==undefined){if(typeof governance.ownerApproval!=='boolean')throw new Error('Choose an owner approval mode.');if(governance.ownerApproval)options.ownerApproval=true;}
+    if(governance.concurrency!==undefined){if(!Number.isInteger(governance.concurrency)||governance.concurrency<1||governance.concurrency>5)throw new Error('Room concurrency must be between 1 and 5.');if(governance.concurrency>1)options.concurrency=governance.concurrency;}
+    if(governance.outputs!==undefined){
+      if(!Array.isArray(governance.outputs)||governance.outputs.length>20)throw new Error('Choose up to 20 required outputs.');
+      options.outputs=governance.outputs.map(output=>{
+        if(!output||Object.keys(output).some(key=>!['id','title','agentId','kind'].includes(key))||!memberIds.includes(output.agentId)||observerIds.includes(output.agentId))throw new Error('Each required output needs a responsible contributor.');
+        const kind=output.kind||'document';if(!['document','evidence'].includes(kind))throw new Error('Choose document or evidence output.');
+        return {id:output.id===undefined?randomUUID():textInput(output.id,80),title:textInput(output.title,120),agentId:output.agentId,kind};
+      });
+      if(new Set(options.outputs.map(output=>output.id)).size!==options.outputs.length)throw new Error('Required output IDs must be unique.');
+    }
+    return {title,memberIds:[...memberIds],governance:{facilitatorId,reviewerIds:[...reviewerIds],observerIds:[...observerIds],...options}};
   }
   return {title,memberIds:[...memberIds]};
+}
+
+export function validateRoomConfig(state,input) {
+  return {spaceId:input.spaceId,...roomDetails(state,input,input.spaceId)};
 }
 
 export function createRoom(state, input) {
@@ -149,9 +166,14 @@ export function updateRoom(state, id, input) {
   if (Object.hasOwn(input,'spaceId') && input.spaceId !== room.spaceId) throw new Error('Room Space cannot change.');
   const details = roomDetails(state,{...input,governance:Object.hasOwn(input,'governance') ? input.governance : room.governance},room.spaceId);
   if (state.jobs.some(j => j.conversationId === id && ['queued','running','waiting','takeover','stopping'].includes(j.status))) throw new Error('Stop the room discussion before editing its participants.');
+  const removed=room.memberIds.filter(id=>!details.memberIds.includes(id));
+  const records=[...(room.artifacts||[]).flatMap(artifact=>[artifact.versions.at(-1),...(artifact.versions.at(-1)?.reviewEvents||[])]),...(room.evidence||[]),...(room.checkpoints||[]),...(room.cases||[])].filter(Boolean);
+  if(removed.length&&records.some(record=>[record.taskId,...(record.sourceTaskIds||[])].some(taskId=>removed.includes(state.jobs.find(job=>job.id===taskId)?.agentId))))throw new Error('Retain participants referenced by room work, or pass approved work to a new room with different participants.');
   if(room.discussion && (JSON.stringify(room.memberIds)!==JSON.stringify(details.memberIds)||JSON.stringify(room.governance)!==JSON.stringify(details.governance))){
     room.discussion.status='stopped';room.discussion.invalidatedReason='Room configuration changed. Start a new discussion and review the new result.';
   }
+  const obsolete=(room.artifacts||[]).filter(artifact=>artifact.outputId&&(()=>{const output=details.governance?.outputs?.find(item=>item.id===artifact.outputId);return !output||output.agentId!==artifact.agentId||output.kind!==artifact.kind;})());
+  if(obsolete.length){(room.archivedArtifacts ||= []).push(...obsolete);room.artifacts=room.artifacts.filter(artifact=>!obsolete.includes(artifact));}
   if(!details.governance)delete room.governance;
   Object.assign(room,details,{agentId:details.memberIds[0]});
   if (!details.memberIds.includes(room.lastAgentId)) room.lastAgentId = room.agentId;

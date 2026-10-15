@@ -3,7 +3,9 @@ import {randomUUID,randomBytes,createHash} from 'node:crypto';
 export const stateData=Symbol('server classified data');
 const digest=text=>createHash('sha256').update(text).digest('hex');
 const uuid=id=>typeof id==='string'&&/^[a-f0-9-]{36}$/.test(id);
-const readAction=action=>({'browser.navigate':'browser.read','browser.interact':'browser.read','memory.write':'memory.read','repository.branch.push':'repository.read'}[action]||action);
+const readAction=action=>({'sandbox.exec':'workspace.read','browser.navigate':'browser.read','browser.interact':'browser.read','memory.write':'memory.read','repository.branch.push':'repository.read'}[action]||action);
+const proposalDigest=outcome=>digest(JSON.stringify(outcome.artifacts===undefined?[outcome.result,outcome.nextPlan]:[outcome.result,outcome.nextPlan,outcome.artifacts,...(outcome.checks===undefined?[]:[outcome.checks])]));
+const roomExportDigest=(room,message)=>digest(JSON.stringify([room?.discussion?.id,room?.discussion?.status,room?.discussion?.invalidatedReason,message?.text,room?.discussion?.outcome?.id,room?.discussion?.outcome?.ownerDecision,(room?.artifacts||[]).map(item=>[item.id,item.versions.at(-1)?.id,item.versions.at(-1)?.reviews])]));
 export function openData(db,state,policy){
   db.exec(`CREATE TABLE IF NOT EXISTS classified_conversations(id TEXT PRIMARY KEY,space_id TEXT NOT NULL,agent_id TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS classified_messages(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL,space_id TEXT NOT NULL,agent_id TEXT NOT NULL,task_id TEXT,digest TEXT NOT NULL);
@@ -17,11 +19,19 @@ export function openData(db,state,policy){
     CREATE TABLE IF NOT EXISTS task_exports(task_id TEXT NOT NULL,export_id TEXT NOT NULL,PRIMARY KEY(task_id,export_id));`);
   const sources=id=>db.query('SELECT resource_id AS resourceId,action FROM data_sources WHERE task_id=?').all(id);
   const task=id=>{const j=state.jobs.find(j=>j.id===id);if(!j)throw new Error('Source task unavailable.');policy.identity(j);return j;};
-  const validExport=(spaceId,id)=>{const row=db.query('SELECT * FROM data_exports WHERE id=?').get(id),message=row&&state.conversations.flatMap(c=>c.messages).find(m=>m.id===row.message_id);if(!row||row.revoked||row.destination_space!==spaceId||!message||digest(message.text)!==row.source_digest)throw new Error('Export denied, changed or revoked.');return row;};
+  const validExport=(spaceId,id,seen=new Set())=>{
+    if(seen.has(id)||seen.size>=100)throw new Error('Export dependency cycle or limit.');seen.add(id);
+    const row=db.query('SELECT * FROM data_exports WHERE id=?').get(id),message=row&&state.conversations.flatMap(c=>c.messages).find(m=>m.id===row.message_id),payload=row&&JSON.parse(row.payload),handoff=payload?.roomHandoff;
+    const source=handoff&&state.conversations.find(room=>room.id===handoff.sourceRoomId);
+    const sourceDigest=handoff?roomExportDigest(source,message):message&&digest(message.text);
+    if(!row||row.revoked||row.destination_space!==spaceId||!message||sourceDigest!==row.source_digest||handoff&&source?.discussion?.status!=='completed')throw new Error('Export denied, changed or revoked.');
+    for(const upstream of handoff?.upstreamExports||[])validExport(upstream.spaceId,upstream.id,seen);
+    seen.delete(id);return row;
+  };
   const allowed=(job,taskId)=>{try{
     const c=policy.context(job);if(!taskId)return true;const source=task(taskId);if(source.spaceId!==c.spaceId)return false;
     for(const row of db.query('SELECT export_id FROM task_exports WHERE task_id=?').all(taskId))validExport(c.spaceId,row.export_id);
-    return sources(taskId).every(ref=>policy.simulate({agentId:source.agentId,spaceId:c.spaceId,...ref}).mode==='auto'&&policy.simulate({agentId:c.agentId,spaceId:c.spaceId,resourceId:ref.resourceId,action:readAction(ref.action)}).mode==='auto');
+    return sources(taskId).every(ref=>policy.simulate({agentId:source.agentId,spaceId:c.spaceId,...ref,...(ref.action==='sandbox.exec'?{action:readAction(ref.action)}:{})}).mode==='auto'&&policy.simulate({agentId:c.agentId,spaceId:c.spaceId,resourceId:ref.resourceId,action:readAction(ref.action)}).mode==='auto');
   }catch{return false;}};
   const data={
     sync(){
@@ -69,19 +79,40 @@ export function openData(db,state,policy){
       }
       if(room&&!room.memberIds.every(agentId=>refs.every(r=>policy.simulate({agentId,spaceId:c.spaceId,resourceId:r.resourceId,action:readAction(r.action)}).mode==='auto')))throw new Error('Room disclosure requires participant permission intersection.');
     },
-    propose(job,outcome){data.roomCheck(job);db.query('INSERT OR IGNORE INTO room_proposal_sources VALUES(?,?,?)').run(outcome.id,job.id,digest(JSON.stringify([outcome.result,outcome.nextPlan])));},
+    propose(job,outcome){data.roomCheck(job);db.query('INSERT OR IGNORE INTO room_proposal_sources VALUES(?,?,?)').run(outcome.id,job.id,proposalDigest(outcome));},
     proposal(job,outcome){
       if(!outcome)return null;
       const row=db.query('SELECT * FROM room_proposal_sources WHERE id=?').get(outcome.id);
-      if(!row||digest(JSON.stringify([outcome.result,outcome.nextPlan]))!==row.digest)return null;
+      if(!row||proposalDigest(outcome)!==row.digest)return null;
       const taskIds=[...new Set([row.task_id,...Object.values(outcome.confirmationTasks||{}),...(outcome.reviewEvents||[]).map(review=>review.taskId)])];
       if(taskIds.some(id=>!allowed(job,id)))return null;
-      try{for(const id of taskIds)data.roomCheck(task(id));data.assertHandoff(job,taskIds);return outcome;}catch{return null;}
+      try{
+        for(const id of taskIds)data.roomCheck(task(id));
+        const room=state.conversations.find(item=>item.id===task(row.task_id).conversationId);
+        for(const record of [...(room?.evidence||[]),...(room?.cases||[]),...(room?.checkpoints||[])]){
+          const sources=[record.taskId,...(record.sourceTaskIds||[])].filter(Boolean);
+          for(const id of sources)data.roomCheck(task(id));
+          data.assertHandoff(job,sources);if(record.exportId)data.readExport(job,record.exportId);
+        }
+        for(const ref of outcome.artifacts||[])data.artifact(job,room.id,ref.id,ref.versionId);
+        data.assertHandoff(job,taskIds);return outcome;
+      }catch{return null;}
+    },
+    artifact(job,roomId,artifactId,versionId){
+      const c=policy.context(job),room=state.conversations.find(item=>item.id===roomId&&item.kind==='room'),artifact=room?.artifacts?.find(item=>item.id===artifactId),version=artifact?.versions.find(item=>item.id===versionId);
+      if(!room||room.spaceId!==c.spaceId||!room.memberIds.includes(c.agentId)||!version)throw new Error('Deliverable access denied.');
+      const taskIds=[...new Set([version.taskId,...(version.reviewEvents||[]).map(review=>review.taskId)])];
+      for(const id of taskIds){if(!allowed(job,id))throw new Error('Deliverable provenance access denied.');data.roomCheck(task(id));}
+      data.assertHandoff(job,taskIds);return {id:artifact.id,outputId:artifact.outputId,title:artifact.title,agentId:artifact.agentId,kind:artifact.kind,version:{...version}};
     },
     assertFileSpace(id,spaceId){const row=db.query('SELECT * FROM classified_files WHERE id=?').get(id);if(!row || row.space_id!==spaceId)throw new Error('File Space access denied.');return row;},
     file(job,id){
       const c=policy.context(job);if(!uuid(id))throw new Error('File access denied.');const row=data.assertFileSpace(id,c.spaceId);
       if(row.task_id && !allowed(job,row.task_id))throw new Error('File provenance access denied.');
+      const saved=state.files.find(file=>file.id===id);
+      if(saved?.exportId){const handoff=data.readExport(job,saved.exportId).roomHandoff;if(!handoff?.artifacts.some(artifact=>artifact.file?.id===id))throw new Error('File export denied.');return saved;}
+      if(saved?.roomDraft&&row.task_id!==job.id){const room=state.conversations.find(item=>item.id===saved.roomDraft.roomId),artifact=room?.artifacts?.find(item=>item.versions.some(version=>version.fileId===id));if(!artifact)throw new Error('Draft has not been submitted for review.');const version=artifact.versions.find(item=>item.fileId===id);data.artifact(job,room.id,artifact.id,version.id);return saved;}
+      if(saved?.roomArtifact){const ref=saved.roomArtifact,artifact=data.artifact(job,ref.roomId,ref.artifactId,ref.versionId);if(artifact.version.publishedFileId!==id)throw new Error('Deliverable publication changed.');return saved;}
       const attached=new Set([...(job.attachments||[]),...data.history(job,job.conversationId).filter(m=>m.role==='user').flatMap(m=>m.attachments||[])]);
       if(row.task_id!==job.id && !attached.has(id)){if(!row.resource_id)throw new Error('File resource grant required.');policy.authorize(job,'file.download',row.resource_id);}
       const file=state.files.find(f=>f.id===id);if(!file)throw new Error('File unavailable.');return file;
@@ -96,8 +127,19 @@ export function openData(db,state,policy){
       for(const key of input.fields){if(typeof key!=='string'||! /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key)||['constructor','prototype','__proto__'].includes(key)||!Object.hasOwn(original,key)||typeof original[key]!=='string'||original[key].length>4000)throw new Error('Export only bounded named text fields.');payload[key]=original[key];}
       const id=randomUUID();db.query('INSERT INTO data_exports VALUES(?,?,?,?,?,?,0)').run(id,row.id,digest(message.text),input.destinationSpaceId,input.purpose,JSON.stringify(payload));policy.touch();return {id,destinationSpaceId:input.destinationSpaceId,purpose:input.purpose,fields:[...input.fields]};
     },
+    exportRoom(sourceRoomId,destinationSpaceId,destinationRoomId,artifacts,openQuestions=''){
+      const room=state.conversations.find(item=>item.id===sourceRoomId&&item.kind==='room'),outcome=room?.discussion?.outcome;
+      const message=room?.messages.findLast(item=>item.roomReport&&item.proposalId===outcome?.id);
+      if(!message||room.discussion.status!=='completed'||!policy.listSpaces().some(space=>space.id===destinationSpaceId))throw new Error('A completed reviewed room is required.');
+      const sourceTasks=[message.jobId,...Object.values(outcome.confirmationTasks||{}),...(outcome.reviewEvents||[]).map(review=>review.taskId),...artifacts.map(artifact=>room.artifacts.find(item=>item.id===artifact.id)?.versions.find(version=>version.id===artifact.versionId)?.taskId)].filter(Boolean);
+      const upstreamIds=[...new Set(sourceTasks.flatMap(taskId=>db.query('SELECT export_id FROM task_exports WHERE task_id=?').all(taskId).map(row=>row.export_id)))];
+      const upstreamExports=upstreamIds.map(id=>{const row=db.query('SELECT destination_space FROM data_exports WHERE id=?').get(id);if(!row)throw new Error('Export dependency unavailable.');validExport(row.destination_space,id);return {id,spaceId:row.destination_space};});
+      const payload={roomHandoff:{sourceRoomId,proposalId:outcome.id,destinationRoomId,summary:outcome.result,decisions:outcome.nextPlan,ownerDecision:outcome.ownerDecision||null,openQuestions,artifacts,upstreamExports}};
+      if(Buffer.byteLength(JSON.stringify(payload))>512*1024)throw new Error('Handoff text exceeds 512 KB.');
+      const id=randomUUID();db.query('INSERT INTO data_exports VALUES(?,?,?,?,?,?,0)').run(id,message.id,roomExportDigest(room,message),destinationSpaceId,'Reviewed room handoff',JSON.stringify(payload));policy.touch();return {id,...payload};
+    },
     revokeExport(id){db.query('UPDATE data_exports SET revoked=1 WHERE id=?').run(id);policy.touch();},
-    readExport(job,id){const c=policy.context(job),row=validExport(c.spaceId,id);db.query('INSERT OR IGNORE INTO task_exports VALUES(?,?)').run(job.id,id);return JSON.parse(row.payload);},
+    readExport(job,id){const c=policy.context(job),row=validExport(c.spaceId,id),payload=JSON.parse(row.payload);if(payload.roomHandoff&&payload.roomHandoff.destinationRoomId!==job.conversationId)throw new Error('Handoff belongs to another room.');db.query('INSERT OR IGNORE INTO task_exports VALUES(?,?)').run(job.id,id);return payload;},
     issueToken(job){policy.context(job);const token=randomBytes(32).toString('base64url');db.query('INSERT INTO task_tokens VALUES(?,?,?)').run(digest(token),job.id,Date.now()+15*60*1000);return token;},
     authenticate(token){const row=db.query('SELECT * FROM task_tokens WHERE digest=? AND expires_at>?').get(digest(token),Date.now());const job=row&&state.jobs.find(j=>j.id===row.task_id);if(!job||!['running','waiting','takeover'].includes(job.status))throw new Error('Task token invalid or ended.');policy.context(job);return job;},
   };

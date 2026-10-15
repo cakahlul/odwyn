@@ -52,7 +52,7 @@ export function createApp(options = {}) {
       store.state.files.push(file);runtime.changed();
     },
   });
-  runtime = new Runtime({ store, codex, browser, workspace, workspaceId:options.workspaceId, model: store.state.provider.model,execution:options.execution||{image:process.env.ODWYN_SANDBOX_IMAGE,snapshotRoot:process.env.ODWYN_SANDBOX_SNAPSHOTS},browserExecution:options.browserExecution||{image:process.env.ODWYN_BROWSER_IMAGE} });
+  runtime = new Runtime({ store, codex, browser, workspace, workspaceId:options.workspaceId, model: store.state.provider.model,execution:{checkpointRoot:join(directory,'checkpoints'),...(options.execution||{image:process.env.ODWYN_SANDBOX_IMAGE,snapshotRoot:process.env.ODWYN_SANDBOX_SNAPSHOTS,executionProfile:JSON.parse(process.env.ODWYN_EXECUTION_PROFILE||'{}')})},browserExecution:options.browserExecution||{image:process.env.ODWYN_BROWSER_IMAGE} });
   const logins = new Map();
   function watchLogin(agent, provider) {
     provider.on('notification', ({ method, params }) => {
@@ -74,7 +74,7 @@ export function createApp(options = {}) {
   }
   async function changeProviders(config, agents) {
     agents = agents.filter(agent => JSON.stringify(runtime.providers.get(agent.id).config) !== JSON.stringify(config));
-    const checkActive = () => { if (agents.some(agent => runtime.active?.agentId === agent.id)) throw new Error('Stop the active task before changing AI provider.'); };
+    const checkActive = () => { if (agents.some(agent => runtime.activeJobs().some(job=>job.agentId===agent.id))) throw new Error('Stop the active task before changing AI provider.'); };
     checkActive();
     for (const agent of agents) {
       const login = logins.get(agent.id);
@@ -150,7 +150,7 @@ export function createApp(options = {}) {
   const app = {
     runtime, browser, codex,
     settings,
-    providerBusy:() => !!(runtime.active || runtime.starting || [...logins.values()].some(login=>login?.loginId)),
+    providerBusy:() => !!(runtime.activeJobs().length || runtime.starting || [...logins.values()].some(login=>login?.loginId)),
     async applySettings(kind,value) {
       value = structuredClone(value);
       if (kind === 'provider') {
@@ -294,7 +294,7 @@ export function createApp(options = {}) {
         if (pathname === '/api/state' && req.method === 'GET') {
           if (url.searchParams.get('revision') === String(runtime.revision)) return new Response(null, { status: 204, headers });
           // ponytail: a JSON state row suits one owner; use indexed tables when history gets large.
-          return response({ revision: runtime.revision, ...store.state, security:{legacySpaceId:store.security.legacySpaceId,spaces:store.security.listSpaces(),memberships:Object.fromEntries(store.state.agents.map(a=>[a.id,store.security.access(a.id).spaceIds])),defaults:Object.fromEntries(store.state.agents.map(a=>[a.id,store.security.defaultSpace(a.id)]))}, agents:store.state.agents.map(agent => ({ ...agent, provider:publicProvider(agent.provider), runtime:{ ...runtime.accounts.get(agent.id), login:logins.get(agent.id) || null } })), globalProvider:publicProvider(store.state.globalProvider), globalRuntime:{...runtime.accounts.get(globalConnection().id),login:logins.get(globalConnection().id) || null}, provider: publicProvider(store.state.provider), runtime: { account: runtime.account, connectionError: runtime.connectionError, model: store.state.provider.model, activeJobId: runtime.active?.id || null, takeover: runtime.takeover, browserOpen: !!browser.context, rateLimits: runtime.rateLimits || null, login:logins.get(store.state.agents[0].id) || null } });
+          return response({ revision: runtime.revision, ...store.state, security:{legacySpaceId:store.security.legacySpaceId,spaces:store.security.listSpaces(),memberships:Object.fromEntries(store.state.agents.map(a=>[a.id,store.security.access(a.id).spaceIds])),defaults:Object.fromEntries(store.state.agents.map(a=>[a.id,store.security.defaultSpace(a.id)]))}, agents:store.state.agents.map(agent => ({ ...agent, provider:publicProvider(agent.provider), runtime:{ ...runtime.accounts.get(agent.id), login:logins.get(agent.id) || null } })), globalProvider:publicProvider(store.state.globalProvider), globalRuntime:{...runtime.accounts.get(globalConnection().id),login:logins.get(globalConnection().id) || null}, provider: publicProvider(store.state.provider), runtime: { account: runtime.account, connectionError: runtime.connectionError, model: store.state.provider.model, activeJobId: runtime.activeJobs()[0]?.id || null, activeJobIds:runtime.activeJobs().map(job=>job.id), takeover: runtime.takeover, browserOpen: !!browser.context, rateLimits: runtime.rateLimits || null, login:logins.get(store.state.agents[0].id) || null } });
         }
         // JSON escaping expands file contents; importSkill enforces the 30 KB source limit.
         if (pathname === '/api/skills/import' && req.method === 'POST') return response(importSkill((await json(req,200_000)).source));
@@ -323,7 +323,7 @@ export function createApp(options = {}) {
         const conversationMatch = pathname.match(/^\/api\/conversations\/([a-f0-9-]{36})$/);
         if (conversationMatch && req.method === 'DELETE') {
           if (!store.state.conversations.some(c=>c.id===conversationMatch[1])) return response({error:'Conversation not found.'},404);
-          if (runtime.active?.conversationId === conversationMatch[1]) throw new Error('Stop this conversation’s tasks before deleting it.');
+          if (runtime.activeJobs().some(job=>job.conversationId===conversationMatch[1])) throw new Error('Stop this conversation’s tasks before deleting it.');
           store.deleteConversation(conversationMatch[1]); runtime.changed(); return response({ok:true});
         }
         if (conversationMatch && req.method === 'PATCH') {
@@ -332,6 +332,16 @@ export function createApp(options = {}) {
           const title = textInput((await json(req)).title,70);
           if (/[\x00-\x1f\x7f]/.test(title)) throw new Error('Use a single line for the conversation name.');
           conversation.title = title; runtime.changed(); return response({id:conversation.id,title});
+        }
+        const roomWorkAction=pathname.match(/^\/api\/rooms\/([a-f0-9-]{36})\/(decision|publish|handoff|start|evidence|checkpoint)$/);
+        if(roomWorkAction&&req.method==='POST'){
+          const [,id,action]=roomWorkAction,input=await json(req,600_000);
+          if(action==='start')return response(runtime.startRoomStage(id,input),201);
+          if(action==='evidence')return response(runtime.recordOwnerEvidence(id,input),201);
+          if(action==='checkpoint')return response(runtime.selectRoomCheckpoint(id,input));
+          if(action==='decision')return response(runtime.decideRoom(id,input));
+          if(action==='publish'){if(Object.keys(input).length)throw new Error('Publication uses only the approved room versions.');return response(runtime.publishRoom(id));}
+          return response(await runtime.handoffRoom(id,input),201);
         }
         const roomAction = pathname.match(/^\/api\/rooms\/([a-f0-9-]{36})(?:\/(messages|cancel))?$/);
         if (roomAction && req.method === 'PATCH' && !roomAction[2]) {
@@ -444,7 +454,7 @@ export function createApp(options = {}) {
           const agent = url.searchParams.get('scope') === 'global' ? globalConnection(true) : findAgent(store.state, url.searchParams.get('agentId') ?? undefined);
           const provider = runtime.providers.get(agent.id); let login = logins.get(agent.id);
           if (!['codex','claude'].includes(agent.provider.type)) throw new Error('Enter an API key in provider settings.');
-          if (runtime.active) throw new Error('Stop the active task before changing your provider sign-in.');
+          if (runtime.activeJobs().length) throw new Error('Stop the active task before changing your provider sign-in.');
           if (login?.loginId) await provider.request('account/login/cancel', { loginId: login.loginId }).catch(() => {});
           login = await provider.request('account/login/start', { type: 'chatgptDeviceCode' }); logins.set(agent.id, login); runtime.changed();
           return response(login);
@@ -452,7 +462,7 @@ export function createApp(options = {}) {
         if (pathname === '/api/account/login/complete' && req.method === 'POST') {
           const agent = url.searchParams.get('scope') === 'global' ? globalConnection(true) : findAgent(store.state,url.searchParams.get('agentId') ?? undefined);
           if (agent.provider.type !== 'claude') throw new Error('Code submission is only available for Claude Code.');
-          if (runtime.active) throw new Error('Stop the active task before changing your provider sign-in.');
+          if (runtime.activeJobs().length) throw new Error('Stop the active task before changing your provider sign-in.');
           const login = logins.get(agent.id);
           if (!login?.loginId) throw new Error('Sign-in expired. Connect again.');
           await runtime.providers.get(agent.id).request('account/login/complete',{loginId:login.loginId,code:textInput((await json(req)).code,4000)});
@@ -497,7 +507,7 @@ export function createApp(options = {}) {
         }
         if (pathname.startsWith('/api/')) return response({ error: 'Endpoint not found.' }, 404);
         if (!['GET','HEAD'].includes(req.method)) return response({ error: 'Method not allowed.' }, 405);
-        const files = { '/': 'index.html', '/app.js': 'app.js', '/security-ui.js':'security-ui.js', '/workspace-settings.js':'workspace-settings.js', '/workspace-homes.js':'workspace-homes.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/room-policy.js':'room-policy.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
+        const files = { '/': 'index.html', '/app.js': 'app.js', '/security-ui.js':'security-ui.js', '/workspace-settings.js':'workspace-settings.js', '/workspace-homes.js':'workspace-homes.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/room-policy.js':'room-policy.js', '/room-work-ui.js':'room-work-ui.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
         if (!files[pathname]) return response({ error: 'Not found.' }, 404);
         return new Response(Bun.file(join(root, 'public', files[pathname])), { headers });
       } catch (error) { return response({ error: error.message || 'Something went wrong. Try again.' }, 400); }

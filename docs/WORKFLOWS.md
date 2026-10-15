@@ -18,6 +18,7 @@ Workflow settings hold launch inputs and the execution limit. Connecting back to
 | Condition | Compares values without executing expressions. |
 | Approval | Pauses for owner instructions and optional item selection. |
 | Output | Displays mapped text or JSON in chat. |
+| Room stage | Runs a configured room goal with participants, deliverables, reviewers, and optional owner approval. |
 
 Workflow tool selection does not grant access. Browser, terminal, and connector operations still require resource permissions and a configured executor. Raw provider MCP servers and their read-only annotations cannot authorize access; use reviewed connections and scoped resources.
 
@@ -71,3 +72,38 @@ In **Routines → New routine**, choose an agent and a Task, Skill, or Workflow.
 Each scheduled run uses the definition saved when it starts. Update routines when a command is renamed or deleted; invalid commands pause with an error.
 
 Editing a definition affects future runs. Failed, cancelled, or interrupted runs resume their current step through Review & resume; completed steps remain saved. Restarts interrupt unfinished workflows. Automatic retries require a retry count and confirmation that repeating the step is safe.
+
+## Room stages
+
+Create a workflow and add **Room stage** blocks. **Configure room** opens the
+existing room editor: choose Space, members, facilitator, reviewers, observers,
+required outputs, owner approval, and concurrency. Give each stage a goal and
+connect its Next step. Room stages belong together in a room workflow; ordinary
+agent/action workflows remain separate. No resource access is inherited.
+
+Supply launch inputs before running. The first room starts immediately. After its
+review gates pass, **Pass to next room** uses the snapshotted next stage settings
+and lets you select the package and optional checkpoint. The next room is created
+with **Start stage**; creating it does not start its agents. Final stages finish
+the workflow. Changing definitions affects future runs. Bounded loops work with
+the same explicit handoff gate. Stage instructions accept `{{inputs.name}}` and
+run metadata. Previous stages arrive through the selected package, not `steps.*`.
+
+For Studio, create the workspace, five agent profiles and five Spaces in Settings.
+Grant each agent only the resources needed in its Spaces. Configure these stages:
+
+| Stage | Participants and roles | Required package / gate |
+| --- | --- | --- |
+| Grooming | Lead facilitates; Backend, Frontend, QA contribute; Release observes | Contracts, TRDs, draft cases and tasks, UAT scenarios; Lead reviews drafts |
+| Planning | All five; Lead facilitates/reviews | Revised TRDs/contracts and plan; owner approval publishes development files |
+| Execution | Lead, Backend, Frontend; Lead reviews; optional concurrency | Implementation checkpoint and actual unit-test evidence |
+| Testing | Lead, Backend, Frontend, QA; QA and Lead review | Cases, defect fixes, passing retests at the current checkpoint |
+| Release | Lead, QA, Release Manager; Release Manager reviews | QA UAT evidence, approved TRDs and release package; green light to Lead |
+
+Put the responsibilities and ritual in each stage goal, including asking the
+owner about unclear requirements. Define evidence outputs for gates requiring
+actual test results. Reissue imported draft documents as the next stage's required
+outputs so its reviewers approve those exact versions. Transfer a checkpoint into
+an empty destination workspace resource and grant execution/read access there.
+Do not copy source grants. The same editor supports Research → Editorial review
+or any other reviewed deliverable flow; these stage names have no special logic.

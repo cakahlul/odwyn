@@ -680,6 +680,17 @@ button[data-mention-link]:hover { text-decoration:underline; }
 .room-review-card ul { padding-left:20px; }
 .room-review-card pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; }
 .room-review-card summary { cursor:pointer; }
+.room-work { margin:20px 0; padding:16px; border:1px solid var(--glass-rim); border-radius:12px; overflow-wrap:anywhere; font-size:12px; line-height:1.8; }
+.room-work h2,.room-work h3 { margin:12px 0; font-size:14px; }
+.room-work pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; max-height:320px; overflow:auto; }
+.room-deliverable { margin:12px 0; padding:12px; border:1px solid var(--glass-rim); border-radius:10px; }
+.room-work-actions { display:flex; flex-wrap:wrap; gap:10px; margin:12px 0; }
+.room-owner-review textarea { width:100%; }
+.room-file { display:block; margin:8px 0; }
+.room-output-row { margin:12px 0; padding:12px; border:1px solid var(--glass-rim); border-radius:10px; }
+.modal .room-work-choice { display:flex; align-items:center; gap:10px; overflow-wrap:anywhere; }
+.room-work-choice input { width:18px; flex-shrink:0; }
+#room-pass-next { margin-bottom:10px; }
 .working-row strong { display:block; font-size:11px; margin-bottom:5px; }
 @media (max-width:760px) {
   .room-details-open { font-size:11px; gap:7px; }

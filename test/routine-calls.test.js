@@ -93,5 +93,5 @@ test('routines select agents and execute skill or workflow calls with inputs',as
     expect(page.url()).toContain(skillJob.conversationId);
     expect(await page.locator('#view').textContent()).toContain('Scheduled check complete.');
     expect(errors).toEqual([]);
-  } finally {await browser.close();server.stop(true);app.close();rmSync(directory,{recursive:true,force:true});}
+  } finally {await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
 },20000);

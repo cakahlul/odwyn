@@ -1,11 +1,12 @@
 import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { textInput } from './security.js';
+import {validateRoomConfig} from './store.js';
 import {statePolicy} from './security/policy.js';
 
 const identifier = /^[a-z][a-z0-9_-]{0,59}$/;
 const forbidden = new Set(['__proto__','constructor','prototype']);
-export const stepTypes = ['agent','browser','terminal','condition','approval','output'];
+export const stepTypes = ['agent','browser','terminal','condition','approval','output','room'];
 const key = value => {
   if (typeof value !== 'string' || !identifier.test(value) || forbidden.has(value)) throw new Error('Use lowercase names starting with a letter; letters, numbers, hyphens and underscores only.');
   return value;
@@ -46,13 +47,14 @@ export function validateWorkflow(input,state) {
       if(!step.position || ['x','y'].some(axis=>!Number.isFinite(step.position[axis]) || step.position[axis]<0 || step.position[axis]>10000)) throw new Error('Canvas positions must be between 0 and 10,000.');
       result.position={x:step.position.x,y:step.position.y};
     }
-    if (['agent','approval','output'].includes(step.type) && !result.prompt) throw new Error('Add step instructions.');
+    if (['agent','approval','output','room'].includes(step.type) && !result.prompt) throw new Error('Add step instructions.');
     if (['agent','output'].includes(step.type) && step.responsePrompt?.trim()) {
       result.responsePrompt=textInput(step.responsePrompt,8000);
       result.responseLabel=optionalText(step.responseLabel,80) || 'Send selected items';
       result.responseItems=key(step.responseItems || 'items');
       if(step.type==='agent') result.format='json';
     }
+    if(step.type==='room'){result.room=validateRoomConfig(state,step.room||{});if(!result.room.governance)throw new Error('Room stages require explicit roles and review gates.');}
     if(step.type==='approval') result.options=structuredClone(step.options || []);
     if (step.type==='browser' || step.type==='terminal') {
       if (!step.action || Array.isArray(step.action) || typeof step.action!=='object') throw new Error('Add action parameters.');
@@ -64,6 +66,7 @@ export function validateWorkflow(input,state) {
     }
     return result;
   });
+  if(steps.some(s=>s.type==='room')&&steps.some(s=>s.type!=='room'))throw new Error('Use room stages together in a room workflow. Keep individual task workflows separate.');
   const ids = new Set(steps.map(s=>s.id));
   if (ids.size!==steps.length) throw new Error('Step IDs must be unique.');
   const start = input.start || steps[0].id;

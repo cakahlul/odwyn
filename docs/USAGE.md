@@ -16,7 +16,7 @@ Create a room with two to five agents and give them a shared goal. Agents discus
 
 Use `@agentname` to address a participant; names with spaces use `@"Agent Name"`. Send another message to redirect the discussion. **Stop discussion** stops the whole room; **Continue discussion** resumes after review.
 
-Rooms pause for owner questions, approvals, errors, restarts, or their discussion limit. Review what happened before continuing. Deleting a stopped room removes its messages and task history while keeping agents and saved files.
+Rooms pause for owner questions, approvals, errors, restarts, or their discussion limit. Review what happened before continuing. Deleting an unlinked stopped room removes its messages and task history while keeping agents and saved files. Linked handoff rooms retain their history and cannot be deleted.
 
 ### Room roles and required reviews
 
@@ -35,12 +35,35 @@ The review card shows pending decisions, change requests, and reviewer rationale
 Requested changes require a revised proposal before approval. Revisions clear
 confirmations and reviews for the new version while preserving earlier decisions.
 Changing participants or role configuration invalidates completion. Resolve room
-roles and membership before deleting a participating agent. Unconfigured rooms
+roles and membership before deleting a participating agent. Keep participants referenced by saved work, or pass approved work into a new room with different participants. Unconfigured rooms
 keep their existing consensus behavior.
 
-These gates currently review the shared text result. Draft artifact review,
-owner stage approval, and passing results to another room are not implemented
-yet. A recorded reviewer rationale does not prove that tests were executed.
+Add **Required outputs** with a responsible contributor and Document or Test
+evidence type. Agents save draft versions, request changes, and approve exact
+versions. Drafts stay visible in the room; final attachments appear only after
+review and publication. Enable **Require owner approval** for stages such as
+Planning: approve the reviewed result and files, or request changes. New versions
+invalidate earlier approval.
+
+Once complete, use **Pass to next room** beside the message field. Select the
+Space, participants, approved versions, open questions, and optional checkpoint.
+The destination receives an explicit classified package; resource grants stay
+unchanged. Source changes or export revocation invalidate downstream access.
+For reusable stage settings, see [Room stages](WORKFLOWS.md#room-stages).
+
+Agents define test cases and record actual commands against immutable checkpoints.
+Every defined case must pass on the current checkpoint before completion. Review
+recorded commands, output, defects, and retests in the room. **Record manual UAT
+evidence** records your result as owner-supplied evidence. It never claims an agent
+executed it. A fixed defect still needs a passing retest. New checkpoints require
+retesting. **Use this checkpoint** resolves a retained conflicting branch only
+after workspace tasks stop; it does not merge code.
+
+**Concurrent agents** in the room editor permits 1–5 simultaneous tasks, within
+the five-task global limit. Each agent has separate provider/question/approval
+state and an isolated pinned workspace. Workspace read permission can allow
+review without execution permission; all room members must be authorized to read
+shared evidence. See [Execution setup](../execution/README.md).
 
 ## Shared data lives in Workspace Settings
 

@@ -1,8 +1,7 @@
 # Reviewed room workflows
 
-Status: scope approved by the owner on 2026-10-15. Slices 1–2 implemented and
-application regressions verified. Isolation acceptance is blocked by the local
-runner configuration. Remaining slices are not implemented.
+Status: all implementation slices delivered. Final combined regression verification
+is in progress; the result and evidence path are recorded below when complete.
 
 ## Objective
 
@@ -206,41 +205,44 @@ build/lint command exists in the current package scripts.
 - Formal review proves who approved which version and evidence. It cannot
   guarantee that an agent's engineering judgment or test suite is complete.
 
-## Review decision
+## Implementation and operating limits
 
-The owner approved this scope. The initial implementation checkpoint is room
-roles plus enforced review gates; the remaining slices retain the full Studio
-workflow as the completion target.
+Implemented: configured roles and exact reviews; versioned draft deliverables;
+owner completion approval and publication; same- and cross-Space classified
+handoffs; durable isolated checkpoints; actual command test evidence and manual
+owner UAT evidence; bounded concurrent agent tasks; and reusable room-only
+workflows in the existing editor. Existing unconfigured rooms and individual
+workflows retain their behavior.
 
-## First implementation checkpoint
+Test cases must all have current passing evidence for the room target checkpoint.
+A new checkpoint or case revision requires retesting. Each recorded command starts
+from a fresh restored worker. Blocking dependencies stop dependent tests while
+unrelated cases can continue. Conflicting checkpoint branches remain recoverable;
+the owner explicitly selects a head after stopping workspace tasks. Selection
+invalidates completion and test results. There is no automatic merge.
 
-Implemented: optional room roles, facilitator opening, separate reviewer
-decisions, required contributor confirmations, non-blocking observers, exact
-proposal-version checks, change requests, retained prior proposals/reviews,
-configuration invalidation, and status UI. New owner messages begin a fresh
-discussion and invalidate earlier completion; previous configured discussions
-remain in history. Existing rooms retain selected-participant consensus.
+Room workflows contain only room stages. Instructions can interpolate launch
+inputs and run metadata. Prior-stage data arrives through the explicitly selected
+handoff, rather than unrestricted `steps.*` interpolation. Runs snapshot settings;
+editing a workflow changes future runs. The owner starts a newly created next room
+separately. Missing required launch inputs must be supplied before room creation.
+Completed final stages have no next-stage button. Loops obey the workflow limit.
 
-Not yet implemented: required artifact slots or artifact review/publication,
-owner stage approval, handoffs, durable execution, test-evidence records,
-concurrency, and reusable stage definitions. Current review evidence is a
-reviewer's recorded rationale, not independent proof of test execution.
+No new dependencies, production deployment, or live provider inference were used.
+Linux container commands and local Chromium are supported. Native iOS simulators,
+Android emulators, external test services, unrestricted networking, and arbitrary
+binary document extraction are not supplied by this change. Supported larger
+builds require the trusted execution profile and reviewed snapshot contents.
+A green light is recorded approval, never a production deployment permission.
 
-Focused checks cover real room tool dispatch, forged/stale decisions, changes
-requested, revisions, reload/restart, targeted-message bypass, current resource
-and Space grants, optional observers that start offline or disconnect, and a
-browser flow at 320/768/1024/1440 pixels. Review and confirmation rationale retains
-its source-task provenance; revoking source access blocks subsequent disclosure.
+Reverting to an older runtime removes these gates. Stop configured discussions
+before reverting; saved fields alone do not enforce them in an older binary.
 
-Verification on 2026-10-15: the fresh-process application regression run passed
-111 tests with zero failures/skips. The full `bun run test` run executed 223 tests
-with 24 failures and zero skips; worker-dependent security checks are blocked by
-missing pinned disposable images/runner declaration, and Docker is unreachable.
-Evidence: `artifacts/tests/1792047645379-83425/`, including the passing nested
-`phase5-regression/results.json` and full `regression.log`. Subsequent focused
-checks pass all five room-review tests and the room-review browser test.
-No live provider inference or production actions were used.
+## Verification
 
-Reverting this feature removes review-gate enforcement in the older runtime.
-Stop configured room discussions before reverting; saved fields alone do not
-make an older binary enforce reviews.
+Focused checks cover exact artifact revisions, reviewer identity, owner approval,
+publication rollback, draft files, bounded handoffs, transitive export revocation,
+conflict preservation, cancellation, fresh checkpoint tests, five-stage chaining,
+a non-software editorial flow, and responsive browser configuration/handoff/start.
+The real Docker checkpoint test is `tests/security/phase2/checkpoints.test.js`.
+Fixture providers verify orchestration and do not establish model judgment quality.

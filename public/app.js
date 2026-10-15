@@ -1,3 +1,4 @@
+import {setupRoomWork} from './room-work-ui.js';
 import {setupWorkspaceHomes} from './workspace-homes.js';
 import {setupWorkspaceSettings} from './workspace-settings.js';
 import {setupSecurity} from './security-ui.js';
@@ -138,7 +139,7 @@ function renderRooms() {
   $('#room-composer-hint').hidden = !inRoom;
   const roomRun=room?.roomWorkflowRunId && workspace.workflowRuns?.find(run=>run.id===room.roomWorkflowRunId);
   const roomStage=roomRun?.workflow.steps.find(step=>step.id===room.roomWorkflowStepId);
-  $('#room-pass-next').hidden=!inRoom||room.discussion?.status!=='completed'||!!roomRun&&(!roomStage?.next||roomRun.status!=='awaiting_handoff');
+  $('#room-pass-next').hidden=!inRoom||room.discussion?.status!=='completed'||!!roomRun&&(roomRun.conversationId!==room.id||!roomStage?.next||roomRun.status!=='awaiting_handoff');
   if (inRoom) $('#prompt').setAttribute('aria-describedby','room-composer-hint');
   else $('#prompt').removeAttribute('aria-describedby');
   renderMentions();
@@ -215,7 +216,8 @@ function renderRoomAgents(room = null) {
 }
 
 function roomRoleValues(){
-  return {facilitatorId:$('#room-facilitator').value||null,reviewerIds:[...document.querySelectorAll('#room-role-options input:checked')].map(node=>node.value),observerIds:[...document.querySelectorAll('#room-role-options select')].filter(node=>node.value==='observer').map(node=>node.dataset.agent)};
+  const outputs=[...document.querySelectorAll('#room-output-options .room-output-row')].map(row=>({id:row.dataset.outputId,title:row.querySelector('input').value,agentId:row.querySelector('[data-output-agent]').value,kind:row.querySelector('[data-output-kind]').value}));
+  return {facilitatorId:$('#room-facilitator').value||null,reviewerIds:[...document.querySelectorAll('#room-role-options input:checked')].map(node=>node.value),observerIds:[...document.querySelectorAll('#room-role-options select')].filter(node=>node.value==='observer').map(node=>node.dataset.agent),...(outputs.length?{outputs}:{}),...($('#room-owner-approval').checked?{ownerApproval:true}:{}),...(Number($('#room-concurrency').value)>1?{concurrency:Number($('#room-concurrency').value)}:{})};
 }
 
 function renderRoomRoles(governance={}){
@@ -228,8 +230,12 @@ function renderRoomRoles(governance={}){
     const name=agent.customization?.name||defaults.name,observer=governance.observerIds?.includes(agent.id);
     return `<fieldset class="room-role-row"><legend>${esc(name)}</legend><label for="room-role-${index}">Participation for ${esc(name)}</label><select id="room-role-${index}" data-agent="${esc(agent.id)}"><option value="contributor">Contributor</option><option value="observer" ${observer?'selected':''}>Observer</option></select><label class="room-review-choice"><input type="checkbox" value="${esc(agent.id)}" ${governance.reviewerIds?.includes(agent.id)?'checked':''}>Require review from ${esc(name)}</label></fieldset>`;
   }).join('');
+  $('#room-owner-approval').checked=!!governance.ownerApproval;$('#room-concurrency').value=String(governance.concurrency||1);
+  $('#room-output-options').innerHTML=(governance.outputs||[]).map(output=>roomOutputRow(output,members)).join('');
   updateRoomRoleAvailability();
 }
+
+function roomOutputRow(output,members){return `<div class="room-output-row" data-output-id="${esc(output.id)}"><label>Output title<input maxlength="120" required value="${esc(output.title)}"></label><label>Responsible agent<select data-output-agent><option value="">Choose contributor</option>${members.map(agent=>`<option value="${esc(agent.id)}" ${agent.id===output.agentId?'selected':''}>${esc(agent.customization?.name||defaults.name)}</option>`).join('')}</select></label><label>Output kind<select data-output-kind><option value="document">Document</option><option value="evidence" ${output.kind==='evidence'?'selected':''}>Passing check evidence</option></select></label><button type="button" class="text-button" data-output-remove>Remove output</button></div>`;}
 
 function updateRoomRoleAvailability(){
   const {observerIds}=roomRoleValues();
@@ -439,15 +445,10 @@ function render() {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
     const homeFocus = view === 'home' && $('#view').contains(document.activeElement) ? document.activeElement.dataset.conversation : null;
-    const pendingCard = $('#view .approval-card');
-    const pendingFocus = pendingCard?.contains(document.activeElement) ? document.activeElement : null;
+    const pendingCards=[...document.querySelectorAll('#view .approval-card[data-request],#view form[data-room-owner],#view form[data-room-uat]')].map(node=>({node,focus:node.contains(document.activeElement)?document.activeElement:null}));
     $('#view').innerHTML = view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state,filter) : view === 'workflows' ? renderWorkflows(state) : renderFiles(state);
     if (homeFocus) $('#view').querySelector(`[data-conversation="${CSS.escape(homeFocus)}"]`)?.focus({preventScroll:true});
-    const nextPendingCard = $('#view .approval-card');
-    if (pendingCard && nextPendingCard?.dataset.request === pendingCard.dataset.request) {
-      nextPendingCard.replaceWith(pendingCard);
-      pendingFocus?.focus({preventScroll:true});
-    }
+    for(const {node,focus} of pendingCards){const selector=node.dataset.request?`[data-request="${CSS.escape(node.dataset.request)}"]`:node.dataset.roomUat?`form[data-room-uat="${CSS.escape(node.dataset.roomUat)}"][data-checkpoint="${CSS.escape(node.dataset.checkpoint)}"][data-cases="${CSS.escape(node.dataset.cases)}"]`:`form[data-room-owner="${CSS.escape(node.dataset.roomOwner)}"][data-proposal="${CSS.escape(node.dataset.proposal)}"]`;const next=$('#view').querySelector(selector);if(next){if(node.dataset.roomUat)next.closest('details').open=node.closest('details').open;next.replaceWith(node);focus?.focus({preventScroll:true});}}
     if (view === 'chat') insertMessages(state,conversationId);
     updateBrowser(state);
     $('#view').scrollTop = view !== 'home' && nearBottom ? $('#view').scrollHeight : previousScroll;
@@ -708,6 +709,8 @@ $('#room-space').onchange = () => renderRoomAgents();
 $('#room-governance').onchange=()=>{$('#room-role-settings').hidden=!$('#room-governance').checked;};
 $('#room-agent-options').onchange=()=>renderRoomRoles(roomRoleValues());
 $('#room-role-options').onchange=updateRoomRoleAvailability;
+$('#room-output-add').onclick=()=>{const members=workspace.agents.filter(agent=>document.querySelector(`#room-agent-options input[value="${CSS.escape(agent.id)}"]`)?.checked);$('#room-output-options').insertAdjacentHTML('beforeend',roomOutputRow({id:crypto.randomUUID(),title:'',agentId:members[0]?.id,kind:'document'},members));};
+$('#room-output-options').onclick=event=>{if(event.target.closest('[data-output-remove]'))event.target.closest('.room-output-row').remove();};
 $('#room-form').oninput = () => { $('#room-status').textContent = ''; };
 $('#room-form').onsubmit = async event => {
   event.preventDefault(); const memberIds = new FormData(event.target).getAll('memberIds');
@@ -914,6 +917,7 @@ new ResizeObserver(() => {
 }).observe($('#composer-area'));
 
 $('#view').innerHTML = '<div class="loading-state" role="status"><img src="/mark.svg" width="48" height="48" alt=""><p>Making room for your day…</p></div>';
+setupRoomWork(()=>workspace,currentRoom,refresh,id=>navigate('chat',id));
 setupWorkspaceHomes();
 await refresh();
 if (state && agentId) { restoreDraft(); signature = ''; render(); }

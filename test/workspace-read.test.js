@@ -37,3 +37,18 @@ test('workspace evidence readers never gain execution and explicit read decision
     set([],[]);expect(decision('workspace.read')).toBe('deny');
   } finally {store.close();rmSync(directory,{recursive:true,force:true});}
 });
+
+test('retained execution evidence stays readable under explicit read access while execution is separately revoked',()=>{
+  const directory=mkdtempSync(join(tmpdir(),'odwyn-evidence-read-')),store=openStore(directory);
+  try{
+    const p=store.security,author=store.state.agents[0].id;store.state.agents.push({id:'reviewer'});p.configureExecution(true);
+    const resource=p.createResource({spaceId:p.legacySpaceId,type:'workspace',name:'Work'});
+    const grant=(agentId,execute,read)=>p.putAccess(agentId,{revision:p.revision,spaceIds:[p.legacySpaceId],grants:[{spaceId:p.legacySpaceId,resourceId:resource.id,action:'sandbox.exec',mode:execute},{spaceId:p.legacySpaceId,resourceId:resource.id,action:'workspace.read',mode:read}]});
+    grant(author,'auto','auto');grant('reviewer','deny','auto');
+    const source=createJob(store.state,{agentId:author,prompt:'Run checked command'});store.data.note(source,resource.id,'sandbox.exec');
+    const room=store.state.conversations.find(item=>item.id===source.conversationId);Object.assign(room,{kind:'room',memberIds:[author,'reviewer'],artifacts:[{id:'artifact',title:'Evidence',agentId:author,versions:[{id:'version',taskId:source.id,text:'Verified command result',reviews:{}}]}]});
+    const reader=createJob(store.state,{conversationId:room.id,agentId:'reviewer',prompt:'Review result'});
+    grant(author,'deny','auto');expect(store.data.artifact(reader,room.id,'artifact','version').version.text).toContain('Verified');expect(()=>p.authorize(reader,'sandbox.exec',resource.id)).toThrow();
+    grant(author,'deny','deny');expect(()=>store.data.artifact(reader,room.id,'artifact','version')).toThrow('provenance');
+  }finally{store.close();rmSync(directory,{recursive:true,force:true});}
+});

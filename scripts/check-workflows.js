@@ -26,6 +26,7 @@ const page=await context.newPage(),errors=[];
 page.on('pageerror',error=>errors.push(error.message));
 try {
   await page.goto(server.url.href);
+  await page.locator('#tools-open').click();
   await page.locator('[data-view="workflows"]').click();
   await page.getByRole('heading',{name:'Workflows & skills'}).waitFor();
   await page.locator('[data-skill-new]').click();
@@ -76,6 +77,7 @@ try {
   await page.locator('.answer-form .primary-button').click();
   await page.getByText('Final: Command worked',{exact:true}).waitFor();
   await page.reload();
+  await page.locator('#tools-open').click();
   await page.locator('[data-view="workflows"]').click();
   await page.locator('[data-workflow-history]').first().click();
   await page.locator('#workflow-history').waitFor();
@@ -140,7 +142,7 @@ try {
   assert.ok(saved.steps[1].position.y>300);
   assert.equal(saved.steps[2].otherwise,'output-4');
   assert.equal(saved.steps[2].next,'agent-2');
-  await page.reload();await page.locator('[data-view="workflows"]').click();
+  await page.reload();await page.locator('#tools-open').click();await page.locator('[data-view="workflows"]').click();
   await page.locator(`[data-workflow-edit="${saved.id}"]`).click();
   assert.equal(await page.locator('[data-node="agent-2"]').evaluate(node=>Number.parseFloat(node.style.top)),saved.steps[1].position.y);
   await page.setViewportSize({width:320,height:960});
