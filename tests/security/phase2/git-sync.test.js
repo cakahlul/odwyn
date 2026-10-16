@@ -53,7 +53,7 @@ test('linked Git adopts exact copied source safely, refuses mismatches and resto
  }finally{await f.close();}
 },120000);
 
-test('Git fetch rechecks revocation before unpack and classifies failed reads; unsafe trees never materialize',async()=>{
+test('Git fetch rechecks revocation, rejects corrupt packs and classifies failed reads; unsafe trees never materialize',async()=>{
  const f=await fixture();
  try{
   const p=f.store.security,root=join(f.directory,'revoke'),resource=p.createResource({spaceId:f.job.spaceId,type:'workspace',name:'Revocation probe',metadata:{sourceFolder:'project',repositoryId:f.repository.id}});
@@ -64,19 +64,27 @@ test('Git fetch rechecks revocation before unpack and classifies failed reads; u
   const revoked=await f.invoke('odwyn_repository_sync',args);expect(revoked.success).toBe(false);expect(f.requests.length).toBe(1);
   const worker=f.runtime.sandbox.workers.get(f.job.id);expect((await f.runtime.sandbox.inside(worker,['test','-e','/workspace/.git'],{})).exitCode).toBe(1);expect(f.job.workspaceDirty).toBe(true);
   const {Database}=await import('bun:sqlite'),db=new Database(join(f.directory,'app/odwyn.db'),{readonly:true});try{expect(db.query('SELECT action FROM data_sources WHERE task_id=? AND resource_id=?').get(f.job.id,f.repository.id)?.action).toBe('repository.read');}finally{db.close();}
-  gateway.request=request;access(true);writeFileSync(join(f.workspace,'.env'),'SYNTHETIC_UNSAFE_FILE');rawGit(f.workspace,['add','.env']);rawGit(f.workspace,['commit','-m','Unsafe fixture tree']);rawGit(f.workspace,['push',join(f.directory,'sample-alpha.git'),'main']);
+  access(true);gateway.request=async(...values)=>{const result=await request(...values);return values[2]==='POST'?Buffer.concat([Buffer.from('0008NAK\nPACK'),Buffer.alloc(20)]):result;};
+  const corrupt=await f.invoke('odwyn_repository_sync',args);expect(corrupt.success).toBe(false);expect(JSON.stringify(corrupt)).toContain('Cannot index fetched history');expect((await f.runtime.sandbox.inside(worker,['test','-e','/workspace/.git'],{})).exitCode).toBe(1);
+  gateway.request=request;writeFileSync(join(f.workspace,'.env'),'SYNTHETIC_UNSAFE_FILE');rawGit(f.workspace,['add','.env']);rawGit(f.workspace,['commit','-m','Unsafe fixture tree']);rawGit(f.workspace,['push',join(f.directory,'sample-alpha.git'),'main']);
   const unsafe=await f.invoke('odwyn_repository_sync',args);expect(unsafe.success).toBe(false);expect((await f.runtime.sandbox.inside(worker,['test','-e','/workspace/.env'],{})).exitCode).toBe(1);expect((await f.runtime.sandbox.inside(worker,['test','-e','/workspace/.git'],{})).exitCode).toBe(1);
  }finally{await f.close();}
 },120000);
 
-test('expanded Git history reports worker storage exhaustion without exposing repository stderr',async()=>{
+test('delta-compressed Git history stays packed, checkpoints, restores and pulls within existing worker limits',async()=>{
  const f=await fixture();
  try{
   const history=randomBytes(6*1024*1024);for(let version=0;version<4;version++){history[version]^=1;writeFileSync(join(f.workspace,'historical.bin'),history);rawGit(f.workspace,['add','historical.bin']);rawGit(f.workspace,['commit','-m','Synthetic history '+version]);}rawGit(f.workspace,['rm','historical.bin']);rawGit(f.workspace,['commit','-m','Small current tree']);rawGit(f.workspace,['push',join(f.directory,'sample-alpha.git'),'main']);
   const p=f.store.security,root=join(f.directory,'history-limit'),resource=p.createResource({spaceId:f.job.spaceId,type:'workspace',name:'History limit',metadata:{sourceFolder:'project',repositoryId:f.repository.id}});
   workspaceSource(root,'project',{create:true});f.runtime.sandbox.snapshotResolver=()=>join(root,'project');p.putAccess(f.job.agentId,{revision:p.revision,spaceIds:[f.job.spaceId],grants:[{spaceId:f.job.spaceId,resourceId:resource.id,action:'sandbox.exec',mode:'auto'},{spaceId:f.job.spaceId,resourceId:f.repository.id,action:'repository.read',mode:'auto'}]});
-  const result=await f.invoke('odwyn_repository_sync',{resourceId:f.repository.id,workspaceId:resource.id,branch:'main',operation:'checkout'}),text=JSON.stringify(result);
-  expect(result.success).toBe(false);expect(text).toContain('Cannot unpack fetched history');expect(text).toContain('worker storage exhausted');expect(text).toContain('16 MiB');expect(text).not.toContain(f.canary);expect(text).not.toContain('historical.bin');
-  const worker=f.runtime.sandbox.workers.get(f.job.id);expect((await f.runtime.sandbox.inside(worker,['test','-e','/workspace/.git'],{})).exitCode).toBe(1);expect((await f.runtime.sandbox.inside(worker,['ls','-A','/tmp'],{})).stdout.toString().trim()).toBe('');
+  const args={resourceId:f.repository.id,workspaceId:resource.id,branch:'main',operation:'checkout'},result=await f.invoke('odwyn_repository_sync',args);
+  expect(result.success).toBe(true);const first=JSON.parse(result.contentItems[0].text),worker=f.runtime.sandbox.workers.get(f.job.id);
+  expect(f.worker().HostConfig.Tmpfs['/tmp']).toContain('size=16m');expect(f.worker().HostConfig.NetworkMode).toBe('none');
+  const packed=await f.runtime.sandbox.loadCheckpoint(f.job,resource.id,first.checkpoint.id);expect(packed.files.some(file=>/^\.git\/objects\/pack\/pack-.*\.pack$/.test(file.path))).toBe(true);expect(packed.files.reduce((bytes,file)=>bytes+Buffer.from(file.data,'base64').length,0)).toBeLessThan(16*1024*1024);expect(JSON.stringify(packed)).not.toContain(f.canary);
+  expect((await f.runtime.sandbox.inside(worker,['ls','-A','/tmp'],{})).stdout.toString().trim()).toBe('');
+  writeFileSync(join(f.workspace,'later.txt'),'Later remote update');rawGit(f.workspace,['add','later.txt']);rawGit(f.workspace,['commit','-m','Later update']);rawGit(f.workspace,['push',join(f.directory,'sample-alpha.git'),'main']);
+  const pulled=await f.invoke('odwyn_repository_sync',{...args,operation:'pull'});expect(pulled.success).toBe(true);const saved=JSON.parse(pulled.contentItems[0].text);expect(saved.commit).not.toBe(first.commit);
+  await f.runtime.sandbox.stop(f.job.id);const next=createJob(f.store.state,{agentId:f.job.agentId,spaceId:f.job.spaceId,prompt:'Restore packed history'});
+  try{await f.runtime.sandbox.restore(next,resource.id,saved.checkpoint.id);expect((await f.runtime.sandbox.git(next,['rev-parse','HEAD'],{})).stdout.toString().trim()).toBe(saved.commit);const log=await f.runtime.sandbox.git(next,['log','--oneline','--all'],{});expect(log.exitCode).toBe(0);expect(log.stdout.toString()).toContain('Synthetic history 0');}finally{await f.runtime.sandbox.stop(next.id);}
  }finally{await f.close();}
 },120000);

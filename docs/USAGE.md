@@ -108,7 +108,7 @@ Source import/copy deliberately excludes `.git`. For a Git project:
 
 Git HEAD, branches and objects persist in checkpoints; credentials, Git config and hooks do not enter workers/checkpoints. Checkout can adopt imported files only if every file exactly matches the remote branch. Mismatches preserve the files and require a fresh empty workspace. Pull requires the current branch; updates refuse dirty/untracked/ignored files and divergent local commits. There is no automatic reset, cleanup or push.
 
-This supports bounded SHA-1 Git smart HTTP over public HTTPS, without SSH, redirects, submodules or Git LFS downloads. Each fetch currently transfers full history with an **8 MiB pack limit**. Existing **16 MiB / 4,096 checkpoint entries** also include Git objects. Large histories can exceed these limits even for small source trees. Git history is repository data: review it for secrets too.
+This supports bounded SHA-1 Git smart HTTP over public HTTPS, without SSH, redirects, submodules or Git LFS downloads. Each fetch currently transfers full history with an **8 MiB pack limit**. History stays packed during staging and in checkpoints to avoid expanding delta-compressed versions into separate loose objects. Existing **16 MiB / 4,096 checkpoint entries** also include Git objects. Large histories can exceed these limits even for small source trees. Git history is repository data: review it for secrets too.
 
 
 The displayed executor status is separate from source readiness. Folder import does not install Docker, toolchains or dependencies: those must already be available in the reviewed execution image. Workers have no network access. Existing server execution setup remains supported; see [Execution setup](../execution/README.md).

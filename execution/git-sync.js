@@ -28,17 +28,19 @@ export async function syncGitWorkspace(gateway,job,args,signal,canRun=()=>{}){
   try{
     await requireGit(['init','--bare','--template=',staging]);
     const staged=async(argv,options={})=>{check();const result=await sandbox.inside(worker,['git','--git-dir='+staging,'-c','core.hooksPath=/dev/null',...argv],{signal,...options});check();if(result.exitCode!==0||result.truncated||result.timedOut||result.cancelled){
-      const stage=argv[0]==='unpack-objects'?'unpack fetched history':'inspect fetched tree',stderr=result.stderr.toString();
+      const stage=argv[0]==='index-pack'?'index fetched history':'inspect fetched tree',stderr=result.stderr.toString();
       // Only fixed diagnostic labels leave the worker; stderr can contain repository data.
-      const reason=result.cancelled?'cancelled':result.timedOut?'15-second execution timeout':result.truncated?'diagnostic or tree output limit':/No space left on device/i.test(stderr)?'worker storage exhausted (temporary history staging is limited to 16 MiB)':/out of memory|cannot allocate memory|bad_alloc/i.test(stderr)?'worker memory exhausted':result.exitCode===137?'worker process killed (exit 137; memory exhaustion is possible)':/inflate|corrupt|bad object|invalid object|pack signature|pack checksum|early EOF|unresolved delta|SHA1 mismatch/i.test(stderr)?'invalid or incomplete Git objects':'Git command failed';
+      const reason=result.cancelled?'cancelled':result.timedOut?'15-second execution timeout':result.truncated?'diagnostic or tree output limit':/No space left on device/i.test(stderr)?`worker storage exhausted (temporary history staging limit: ${sandbox.executionProfile.temporary} MiB)`:/out of memory|cannot allocate memory|bad_alloc/i.test(stderr)?'worker memory exhausted':result.exitCode===137?'worker process killed (exit 137; memory exhaustion is possible)':/inflate|corrupt|bad object|invalid object|pack signature|pack checksum|early EOF|unresolved delta|SHA1 mismatch/i.test(stderr)?'invalid or incomplete Git objects':'Git command failed';
       throw Error(`Cannot ${stage}: ${reason}; exit ${Number.isInteger(result.exitCode)?result.exitCode:'unavailable'}. Checkout and pull remain unconfirmed.`);
     }return result.stdout;};
-    await staged(['unpack-objects','-q'],{input:response.subarray(8),timeoutMs:15000,limit:4096});
+    // Keep delta-compressed history packed; loose objects can exhaust staging for small transfers.
+    const indexPack=['index-pack','--stdin','--threads=1','--no-rev-index','--max-input-size=8388608','--strict'];
+    await staged(indexPack,{input:response.subarray(8),timeoutMs:15000,limit:4096});
     const tree=(await staged(['ls-tree','-rlz','--full-tree',commit],{limit:2*1024*1024})).toString();let bytes=0;const files=[];
     for(const line of tree.split('\0').filter(Boolean)){const match=line.match(/^(100644|100755) blob [a-f0-9]{40} +([0-9]+)\t([\s\S]+)$/);if(!match)throw Error('Git trees with symlinks or submodules are unsupported.');bytes+=Number(match[2]);files.push({path:match[3],data:'',executable:match[1]==='100755'});}
     if(!files.length||bytes>16*1024*1024||files.length>4096)throw Error('Repository working tree exceeds 16 MiB or 4,096 source files.');sandbox.validateCheckpointFiles(files);
     if(!initial.git){await requireGit(['init','--template=','--initial-branch='+args.branch]);initialized=true;}
-    await requireGit(['unpack-objects','-q'],{input:response.subarray(8),timeoutMs:15000,limit:4096});
+    await requireGit(indexPack,{input:response.subarray(8),timeoutMs:15000,limit:4096});
     await requireGit(['cat-file','-e',commit+'^{commit}']);
     if(!initial.git&&!initial.empty){
       // Adopt copied files only when their index exactly matches the selected upstream commit.
