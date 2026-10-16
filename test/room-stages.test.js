@@ -24,7 +24,7 @@ for(const names of [['Grooming','Planning','Execution','Testing','Release'],['Re
     const run=store.state.workflowRuns[0];let room=runtime.conversation(first);
     await runtime.cancelRoom(room.id);recoverJobs(store.state);expect(run.status).toBe('interrupted');const stopped=store.state.jobs.find(job=>job.conversationId===room.id&&['interrupted','cancelled'].includes(job.status));runtime.retry(stopped.id);await runtime.drain();expect(run.status).toBe('running');
     for(let i=0;i<names.length;i++){
-      expect(room.title).toBe(names[i]);expect(room.discussion.goal).toContain('Build a reviewed result');
+      expect(room.title).toBe('Build a reviewed result · '+names[i]);expect(room.discussion.goal).toContain('Build a reviewed result');
       // First turn routes to author; author drafts, designated reviewer signs exact bytes.
       await call('odwyn_room_next',{agentId:'peer',reason:'Prepare the required package'});runtime.finish(runtime.active,'completed');await runtime.drain();
       await call('odwyn_artifact_write',{outputId:'package',text:`Reviewed ${names[i]} package`});

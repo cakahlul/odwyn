@@ -178,6 +178,7 @@ export class Runtime {
   }
 
   launchWorkflow(workflow,input) {
+    input={...input,attachments:validateAttachments(this.state,input.attachments)};
     if (input.conversationId && this.state.conversations.find(c=>c.id===input.conversationId)?.kind==='room') throw new Error('Run workflows in an individual chat.');
     const agent = findAgent(this.state,input.agentId), supplied=input.inputs || {};
     if (!supplied || Array.isArray(supplied) || typeof supplied!=='object') throw new Error('Supply workflow inputs as an object.');

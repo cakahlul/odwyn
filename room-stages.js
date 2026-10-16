@@ -12,21 +12,24 @@ export function launchRoomWorkflow(runtime,workflow,input,inputs){
   workflow=validateWorkflow(workflow,runtime.state);
   if(workflow.inputs.some(field=>field.required&&(inputs[field.name]==null||inputs[field.name]==='')))throw new Error('Supply required room workflow inputs before starting.');
   const run={id:randomUUID(),workflow:structuredClone(workflow),skills:[],agentId:input.agentId||runtime.state.agents[0].id,inputs,outputs:{},outputTasks:{},roomIds:[],visits:0,scheduleId:input.scheduleId||null,interactionMode:input.interactionMode,status:'running',createdAt:new Date().toISOString()};
-  const step=workflow.steps.find(item=>item.id===workflow.start);
+  const identifier=inputs[workflow.inputs[0]?.name];
+  if(typeof identifier==='string'&&identifier.trim())for(const stage of run.workflow.steps)stage.room.title=(`${identifier.trim().replace(/\s+/g,' ').slice(0,40)} · ${stage.room.title}`).slice(0,70);
+  const step=run.workflow.steps.find(item=>item.id===workflow.start);
+  for(const id of input.attachments||[])runtime.store.data.assertFileSpace(id,step.room.spaceId);
   const prompt=stagePrompt(run,step);
   const room=createRoom(runtime.state,step.room);
   Object.assign(room,{roomWorkflowRunId:run.id,roomWorkflowStepId:step.id,stagePrompt:prompt});
   Object.assign(run,{conversationId:room.id,spaceId:room.spaceId,currentStep:step.id});run.roomIds.push(room.id);
   runtime.state.workflowRuns.unshift(run);
-  try{return startRoomStage(runtime,room.id,{});}
+  try{return startRoomStage(runtime,room.id,{},input.attachments);}
   catch(error){runtime.state.workflowRuns=runtime.state.workflowRuns.filter(item=>item!==run);runtime.state.conversations=runtime.state.conversations.filter(item=>item!==room);throw error;}
 }
 function stagePrompt(run,step){return interpolate(step.prompt,{inputs:run.inputs,run:{id:run.id,visits:run.visits}});}
-export function startRoomStage(runtime,id,input){
+export function startRoomStage(runtime,id,input,attachments=[]){
   if(!input||Object.keys(input).length)throw new Error('Start uses the configured stage goal.');
   const room=findRoom(runtime.state,id),run=runtime.state.workflowRuns.find(item=>item.id===room.roomWorkflowRunId);
   if(!room.stagePrompt||room.discussion||run&&(run.conversationId!==room.id||run.currentStep!==room.roomWorkflowStepId||run.status==='completed'))throw new Error('This room stage has already started or is unavailable.');
-  const jobs=runtime.submitRoom(id,{prompt:room.stagePrompt,scheduleId:run?.scheduleId,interactionMode:run?.interactionMode});
+  const jobs=runtime.submitRoom(id,{prompt:room.stagePrompt,attachments,scheduleId:run?.scheduleId,interactionMode:run?.interactionMode});
   if(run)run.status='running';runtime.changed();return jobs[0];
 }
 export function completeRoomStage(runtime,room){

@@ -107,3 +107,10 @@ outputs so its reviewers approve those exact versions. Transfer a checkpoint int
 an empty destination workspace resource and grant execution/read access there.
 Do not copy source grants. The same editor supports Research → Editorial review
 or any other reviewed deliverable flow; these stage names have no special logic.
+
+
+## Launch requirements and attachments
+
+For room workflows, put the run identifier first in Inputs (for example **Feature Identifier**), followed by the requirement or brief. The first input remains a short field and prefixes each generated room title: `Feature001 · Grooming`, `Feature001 · Planning`, and so on. Remaining room-workflow inputs use large, resizable multiline fields. Titles use up to 40 identifier characters and the existing 70-character room-title limit; saved workflow stage names stay unchanged.
+
+The Run workflow dialog accepts files through **Attach files**, image paste, or file drop. Review/remove attachment cards before running. Existing chat limits apply: up to 20 files, 20 MB each. Files are uploaded into the first step's Space and included in its first task/room message for the participants; later Spaces still require explicit room handoff/export. Cancelling or removing an attachment leaves its uploaded file in Files & results, as in chat. Supported text/images are supplied through the existing attachment reader; uploading a binary document does not add a new PDF/Word parser.
