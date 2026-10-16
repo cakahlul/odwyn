@@ -1,4 +1,5 @@
 import {test,expect} from 'bun:test';
+import {randomBytes} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {fixture} from './fixture.js';
@@ -65,5 +66,17 @@ test('Git fetch rechecks revocation before unpack and classifies failed reads; u
   const {Database}=await import('bun:sqlite'),db=new Database(join(f.directory,'app/odwyn.db'),{readonly:true});try{expect(db.query('SELECT action FROM data_sources WHERE task_id=? AND resource_id=?').get(f.job.id,f.repository.id)?.action).toBe('repository.read');}finally{db.close();}
   gateway.request=request;access(true);writeFileSync(join(f.workspace,'.env'),'SYNTHETIC_UNSAFE_FILE');rawGit(f.workspace,['add','.env']);rawGit(f.workspace,['commit','-m','Unsafe fixture tree']);rawGit(f.workspace,['push',join(f.directory,'sample-alpha.git'),'main']);
   const unsafe=await f.invoke('odwyn_repository_sync',args);expect(unsafe.success).toBe(false);expect((await f.runtime.sandbox.inside(worker,['test','-e','/workspace/.env'],{})).exitCode).toBe(1);expect((await f.runtime.sandbox.inside(worker,['test','-e','/workspace/.git'],{})).exitCode).toBe(1);
+ }finally{await f.close();}
+},120000);
+
+test('expanded Git history reports worker storage exhaustion without exposing repository stderr',async()=>{
+ const f=await fixture();
+ try{
+  const history=randomBytes(6*1024*1024);for(let version=0;version<4;version++){history[version]^=1;writeFileSync(join(f.workspace,'historical.bin'),history);rawGit(f.workspace,['add','historical.bin']);rawGit(f.workspace,['commit','-m','Synthetic history '+version]);}rawGit(f.workspace,['rm','historical.bin']);rawGit(f.workspace,['commit','-m','Small current tree']);rawGit(f.workspace,['push',join(f.directory,'sample-alpha.git'),'main']);
+  const p=f.store.security,root=join(f.directory,'history-limit'),resource=p.createResource({spaceId:f.job.spaceId,type:'workspace',name:'History limit',metadata:{sourceFolder:'project',repositoryId:f.repository.id}});
+  workspaceSource(root,'project',{create:true});f.runtime.sandbox.snapshotResolver=()=>join(root,'project');p.putAccess(f.job.agentId,{revision:p.revision,spaceIds:[f.job.spaceId],grants:[{spaceId:f.job.spaceId,resourceId:resource.id,action:'sandbox.exec',mode:'auto'},{spaceId:f.job.spaceId,resourceId:f.repository.id,action:'repository.read',mode:'auto'}]});
+  const result=await f.invoke('odwyn_repository_sync',{resourceId:f.repository.id,workspaceId:resource.id,branch:'main',operation:'checkout'}),text=JSON.stringify(result);
+  expect(result.success).toBe(false);expect(text).toContain('Cannot unpack fetched history');expect(text).toContain('worker storage exhausted');expect(text).toContain('16 MiB');expect(text).not.toContain(f.canary);expect(text).not.toContain('historical.bin');
+  const worker=f.runtime.sandbox.workers.get(f.job.id);expect((await f.runtime.sandbox.inside(worker,['test','-e','/workspace/.git'],{})).exitCode).toBe(1);expect((await f.runtime.sandbox.inside(worker,['ls','-A','/tmp'],{})).stdout.toString().trim()).toBe('');
  }finally{await f.close();}
 },120000);
