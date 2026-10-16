@@ -31,12 +31,16 @@ export class GitGateway {
   async sync(job,args,signal,canRun){return syncGitWorkspace(this,job,args,signal,canRun);}
   async push(job,args,signal){
     if(!args||Object.keys(args).some(k=>!['resourceId','ref'].includes(k))||typeof args.ref!=='string'||args.ref.length>256||!/^refs\/heads\/[a-zA-Z0-9][a-zA-Z0-9_./-]*$/.test(args.ref)||args.ref.includes('..')||args.ref.endsWith('/')||args.ref.includes('//'))throw new Error('Unsupported Git push target.');
-    const check=()=>{signal.throwIfAborted();return this.policy.authorize(job,'repository.branch.push',args.resourceId);};
-    check();
     const branch=args.ref.slice(11);
-    if(/^(main|master|release)(\/|$)/i.test(branch))throw new Error('Protected refs require owner step-up approval.');
-    const constraints=this.policy.constraints(job,'repository.branch.push',args.resourceId);
-    if(!constraints.branchPrefixes?.length||!constraints.branchPrefixes.some(p=>branch.startsWith(p))||constraints.forbiddenRefs?.some(ref=>ref.endsWith('*')?branch.startsWith(ref.slice(0,-1)):branch===ref))throw new Error('Git ref outside owner constraints.');
+    const check=()=>{
+      signal.throwIfAborted();const context=this.policy.authorize(job,'repository.branch.push',args.resourceId),resource=this.policy.resource(args.resourceId);
+      if(resource.grantResourceId){const worker=this.sandbox.existing(job);if(args.resourceId!==worker.resourceId+':git')throw Error('Push repository does not match the active project workspace.');this.policy.authorize(job,'repository.read',args.resourceId);this.policy.authorize(job,'sandbox.exec',worker.resourceId);}
+      if(/^(main|master|release)(\/|$)/i.test(branch))throw new Error('Protected refs require owner step-up approval.');
+      const constraints=this.policy.constraints(job,'repository.branch.push',args.resourceId);
+      if(!constraints.branchPrefixes?.length||!constraints.branchPrefixes.some(p=>branch.startsWith(p))||constraints.forbiddenRefs?.some(ref=>ref.endsWith('*')?branch.startsWith(ref.slice(0,-1)):branch===ref))throw new Error('Git ref outside owner constraints.');
+      return context;
+    };
+    check();
     const worker=this.sandbox.existing(job);
     const revision=await this.sandbox.git(job,['rev-parse','--verify',args.ref],{signal});
     const next=revision.stdout.toString().trim();if(revision.exitCode!==0||!/^[a-f0-9]{40}$/.test(next))throw new Error('Git branch unavailable.');

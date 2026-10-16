@@ -117,3 +117,15 @@ Owner Repository resources may set `gitUsername` for Basic username/token authen
 The host broker resolves/pins public HTTPS, refuses redirects, and fetches a bounded smart-HTTP SHA-1 pack; only workers validate and index packs using single-threaded `git index-pack`. History stays packed in staging, the workspace and checkpoints; indexing does not expand every historical version into a separate loose object. Workers remain network-none with no host mounts or provider credentials. Git configuration/hooks are excluded from checkpoints; restored workers use the broker again. Fetch staging is removed; no force reset or automatic cleanup of user files occurs. Initial copied source must exactly match the selected commit, including absence of ignored extras. Subsequent branch updates require clean files and fast-forward ancestry.
 
 shortcut: fetch requests full history (8 MiB pack); add bounded incremental negotiation when real repositories exceed this limit. Git objects count toward the existing 16 MiB/4096-entry checkpoint and worker tmpfs limits. SSH, redirects, submodules and LFS downloads are unsupported. See [UI setup](../docs/USAGE.md#git-checkout-and-pull).
+
+
+Saved isolated-workspace entries can store `metadata.repository` with an exact
+HTTPS `endpoint`, optional Scoped Git `connectionId`, and optional `gitUsername`.
+Resources select entries through `isolatedWorkspaceIds`; separate Repository
+resources are unnecessary. Their `repository.read` and `repository.branch.push`
+grants are checked on the owning Space resource, with push constraints resolved
+from that grant. Generated per-project Git target IDs retain exact worker matching,
+credential endpoint binding, approval scope and Space boundaries. Inline entries
+never infer Git authority from workspace read. Older `repositoryId` entries retain
+the read fallback only in the absence of an explicit Git-read decision. Catalog
+Git merge is unavailable; existing approved action-gateway merges are unchanged.

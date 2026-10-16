@@ -101,6 +101,7 @@ export function openPolicy(db,state,directory) {
     configureExecution(available){execution=available===true;},
     touch(){bump();},
     auditOwner(action,spaceId,reason){space(spaceId);events({action,spaceId},{mode:'deny',reason});},
+    actions(resource){return Object.values(capabilities).filter(c=>c.resourceType===resource.type||resource.type==='workspace'&&c.resourceType==='repository'&&resource.metadata.isolatedWorkspaceIds?.some(id=>{const entry=policy.isolatedWorkspaces.get(id);return entry.metadata.repository||entry.metadata.repositoryId;}));},
     catalog(){return Object.values(capabilities).map(c=>({...c,requiresApproval:approvalActions.includes(c.action),available:c.available||browserExecution&&['browser.read','browser.navigate','browser.interact'].includes(c.action)||execution&&['sandbox.exec','repository.branch.push'].includes(c.action)||approvalActions.includes(c.action)&&!!db.query("SELECT id FROM connectors WHERE type='action-gateway-v1' AND enabled=1 LIMIT 1").get()}));},
     listSpaces(){return db.query('SELECT id,name FROM spaces WHERE owner_id=?').all(meta().owner_id);},
     createSpace(input){strict(input,['name']);const value={id:randomUUID(),name:name(input.name)};db.transaction(()=>{db.query('INSERT INTO spaces VALUES(?,?,?)').run(value.id,meta().owner_id,value.name);bump();})();return value;},
@@ -122,13 +123,13 @@ export function openPolicy(db,state,directory) {
       const r=policy.resource(resourceId);
       db.query("UPDATE grants SET mode='deny',expires_at=NULL,constraints='{}' WHERE resource_id=?").run(resourceId);
       const wildcards=db.query("SELECT DISTINCT agent_id,action FROM grants WHERE space_id=? AND resource_id='*' AND mode!='deny'").all(r.spaceId);
-      for(const g of wildcards)if(capabilities[g.action].resourceType===r.type&&!db.query('SELECT 1 FROM grants WHERE agent_id=? AND resource_id=? AND action=?').get(g.agent_id,resourceId,g.action))db.query("INSERT INTO grants VALUES(?,?,?,?,?,'deny',NULL,'{}')").run(randomUUID(),g.agent_id,r.spaceId,resourceId,g.action);
+      for(const g of wildcards)if(policy.actions(r).some(c=>c.action===g.action)&&!db.query('SELECT 1 FROM grants WHERE agent_id=? AND resource_id=? AND action=?').get(g.agent_id,resourceId,g.action))db.query("INSERT INTO grants VALUES(?,?,?,?,?,'deny',NULL,'{}')").run(randomUUID(),g.agent_id,r.spaceId,resourceId,g.action);
     },
     updateResource(resourceId,input){
       strict(input,['name','metadata']);const previous=policy.resource(resourceId),metadata=Object.hasOwn(input,'metadata')?input.metadata:previous.metadata;
       const changed=canonical(metadata)!==canonical(previous.metadata);
       const value={id:resourceId,...(changed?resourceValue({spaceId:previous.spaceId,type:previous.type,name:Object.hasOwn(input,'name')?input.name:previous.name,metadata}):{...previous,name:name(Object.hasOwn(input,'name')?input.name:previous.name)})};if(changed){idle(previous.spaceId);for(const linked of policy.isolatedWorkspaces.dependents(resourceId))idle(linked.spaceId);}
-      db.transaction(()=>{if(changed)policy.revokeResourceAccess(resourceId);db.query('UPDATE resources SET name=?,metadata=? WHERE id=?').run(value.name,JSON.stringify(value.metadata),resourceId);bump();events({action:'resource.update',spaceId:value.spaceId,resourceId},{mode:'deny',reason:changed?'Owner changed configuration; resource access revoked for review.':'Owner renamed resource.'});})();return value;
+      db.transaction(()=>{db.query('UPDATE resources SET name=?,metadata=? WHERE id=?').run(value.name,JSON.stringify(value.metadata),resourceId);if(changed)policy.revokeResourceAccess(resourceId);bump();events({action:'resource.update',spaceId:value.spaceId,resourceId},{mode:'deny',reason:changed?'Owner changed configuration; resource access revoked for review.':'Owner renamed resource.'});})();return value;
     },
     deleteResource(resourceId){
       const r=policy.resource(resourceId);idle(r.spaceId);
@@ -138,7 +139,7 @@ export function openPolicy(db,state,directory) {
     },
     resource(resourceId){id(resourceId);const row=db.query('SELECT * FROM resources WHERE id=?').get(resourceId);if(!row)return policy.isolatedWorkspaces.resolve(resourceId);return {id:row.id,spaceId:row.space_id,type:row.type,name:row.name,metadata:JSON.parse(row.metadata)};},
     access(agentId){agent(agentId);return {schemaVersion:1,revision:policy.revision,defaultSpaceId:policy.defaultSpace(agentId),spaceIds:db.query('SELECT space_id AS spaceId FROM memberships WHERE agent_id=?').all(agentId).map(r=>r.spaceId),grants:db.query('SELECT id,space_id AS spaceId,resource_id AS resourceId,action,mode,expires_at AS expiresAt,constraints FROM grants WHERE agent_id=?').all(agentId).map(g=>({...g,constraints:JSON.parse(g.constraints)}))};},
-    preview(agentId,input){db.exec('SAVEPOINT policy_preview');try{policy.putAccess(agentId,input);return {decisions:policy.listResources().filter(r=>input.spaceIds.includes(r.spaceId)).flatMap(r=>Object.values(capabilities).filter(c=>c.resourceType===r.type).map(c=>({resourceId:r.id,action:c.action,...policy.simulate({agentId,spaceId:r.spaceId,resourceId:r.id,action:c.action})})))};}finally{db.exec('ROLLBACK TO policy_preview; RELEASE policy_preview');}},
+    preview(agentId,input){db.exec('SAVEPOINT policy_preview');try{policy.putAccess(agentId,input);return {decisions:policy.listResources().filter(r=>input.spaceIds.includes(r.spaceId)).flatMap(r=>policy.actions(r).map(c=>({resourceId:r.id,action:c.action,...policy.simulate({agentId,spaceId:r.spaceId,resourceId:r.id,action:c.action})})))};}finally{db.exec('ROLLBACK TO policy_preview; RELEASE policy_preview');}},
     putAccess(agentId,input){
       agent(agentId);strict(input,['schemaVersion','revision','spaceIds','grants','confirmWildcard','defaultSpaceId']);
       if(input.schemaVersion!==undefined&&input.schemaVersion!==1)throw new Error('Unsupported policy version.');
@@ -156,7 +157,7 @@ export function openPolicy(db,state,directory) {
           if(g.constraints?.denyWorkflowChanges!==undefined&&g.constraints.denyWorkflowChanges!==true)throw new Error('CI changes require owner approval.');
         }
         if(g.resourceId==='*'){if(g.mode!=='deny'&&input.confirmWildcard!==true)throw new Error('Confirm wildcard access explicitly.');}
-        else {id(g.resourceId);const r=db.query('SELECT * FROM resources WHERE id=? AND space_id=?').get(g.resourceId,g.spaceId);if(!r||r.type!==capabilities[g.action].resourceType)throw new Error('Resource/action mismatch.');}
+        else {id(g.resourceId);const r=db.query('SELECT * FROM resources WHERE id=? AND space_id=?').get(g.resourceId,g.spaceId);if(!r||!(policy.actions({type:r.type,metadata:JSON.parse(r.metadata)}).some(c=>c.action===g.action)||g.mode==='deny'&&r.type==='workspace'&&JSON.parse(r.metadata).isolatedWorkspaceIds&&capabilities[g.action].resourceType==='repository'))throw new Error('Resource/action mismatch.');}
         if(g.expiresAt!==undefined&&(!Number.isFinite(Date.parse(g.expiresAt))||typeof g.expiresAt!=='string'))throw new Error('Invalid grant expiry.');
         return g;
       });
@@ -182,19 +183,23 @@ export function openPolicy(db,state,directory) {
         let target;try{target=policy.resource(request.resourceId);}catch{return deny('Resource/action mismatch.');}
         if(target.spaceId!==request.spaceId)return deny('Resource/action mismatch.');
         if(target.grantResourceId){
-          if(target.type==='repository'&&request.action!=='repository.read')return deny('Catalog Git targets allow read and sync only.');
+          if(target.type==='repository'&&!['repository.read','repository.branch.push'].includes(request.action))return deny('Catalog Git merge requires a reviewed action gateway.');
           if(target.type!==capabilities[request.action].resourceType)return deny('Resource/action mismatch.');
           if(target.metadata.connectionId&&!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='git-https-v1' AND endpoint=? AND enabled=1").get(target.metadata.connectionId,target.connectionSpaceId,target.metadata.endpoint))return deny('Git connection disabled or outside scope.');
-          return policy.simulate({...request,resourceId:target.grantResourceId,action:request.action==='repository.read'?'workspace.read':request.action});
+          const legacyRead=target.legacyRepository&&request.action==='repository.read'&&!db.query("SELECT expires_at FROM grants WHERE agent_id=? AND space_id=? AND action='repository.read' AND (resource_id=? OR resource_id='*')").all(request.agentId,request.spaceId,target.grantResourceId).some(g=>!g.expires_at||Date.parse(g.expires_at)>Date.now());
+          return policy.simulate({...request,resourceId:target.grantResourceId,action:legacyRead?'workspace.read':request.action});
         }
         const r=db.query('SELECT * FROM resources WHERE id=? AND space_id=?').get(request.resourceId,request.spaceId);
-        if(!r||r.type!==capabilities[request.action].resourceType)return deny('Resource/action mismatch.');
+        if(!r||!policy.actions(target).some(c=>c.action===request.action))return deny('Resource/action mismatch.');
+        const groupedGit=target.type==='workspace'&&request.action.startsWith('repository.');
+        if(groupedGit&&request.action==='repository.merge')return deny('Catalog Git merge requires a reviewed action gateway.');
         const gs=db.query("SELECT * FROM grants WHERE agent_id=? AND space_id=? AND action=? AND (resource_id=? OR resource_id='*')").all(request.agentId,request.spaceId,request.action,request.resourceId).filter(g=>!g.expires_at||Date.parse(g.expires_at)>Date.now());
         if(gs.some(g=>g.mode==='deny'))return deny('Explicit owner deny.');
         if(!gs.length&&request.action==='workspace.read')return policy.simulate({...request,action:'sandbox.exec'});
+        if(!gs.length&&groupedGit&&request.action==='repository.read'&&policy.isolatedWorkspaces.targets(target).filter(r=>r.type==='repository').every(r=>r.legacyRepository))return policy.simulate({...request,action:'workspace.read'});
         if(!gs.length)return deny('No grant.');
-        if(request.action==='repository.read'&&!JSON.parse(r.metadata).endpoint)return deny('Repository endpoint unavailable.');
-        if(!approvalActions.includes(request.action)&&request.action.startsWith('repository.')&&JSON.parse(r.metadata).connectionId&&!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='git-https-v1' AND enabled=1").get(JSON.parse(r.metadata).connectionId,request.spaceId))return deny('Git connection disabled or outside scope.');
+        if(request.action==='repository.read'&&!groupedGit&&!JSON.parse(r.metadata).endpoint)return deny('Repository endpoint unavailable.');
+        if(!groupedGit&&!approvalActions.includes(request.action)&&request.action.startsWith('repository.')&&JSON.parse(r.metadata).connectionId&&!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='git-https-v1' AND enabled=1").get(JSON.parse(r.metadata).connectionId,request.spaceId))return deny('Git connection disabled or outside scope.');
         if(request.action==='file.download'&&!JSON.parse(r.metadata).path)return deny('Exact file path unavailable.');
         if(request.action.startsWith('browser.')&&!(JSON.parse(r.metadata).readUrls?.length||Array.isArray(JSON.parse(r.metadata).blockedDomains)))return deny('Browsing scope unavailable.');
         if(request.action==='mcp.invoke'&&!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='mcp-document-v1' AND enabled=1").get(JSON.parse(r.metadata).connectionId||'',request.spaceId))return deny('Reviewed connector unavailable.');
@@ -206,7 +211,7 @@ export function openPolicy(db,state,directory) {
         return {mode:high||readApproval||gs.some(g=>g.mode==='ask')?'ask':'auto',reason:readApproval?'Read page content requires approval.':'Matching resource grant.',revision:policy.revision};
       }catch{return deny('Invalid security context.');}
     },
-    constraints(job,action,resourceId){const c=policy.context(job);const grants=db.query("SELECT constraints,expires_at FROM grants WHERE agent_id=? AND space_id=? AND action=? AND (resource_id=? OR resource_id='*') AND mode!='deny'").all(c.agentId,c.spaceId,action,resourceId).filter(g=>!g.expires_at||Date.parse(g.expires_at)>Date.now()).map(g=>JSON.parse(g.constraints));
+    constraints(job,action,resourceId){const c=policy.context(job);resourceId=policy.resource(resourceId).grantResourceId||resourceId;const grants=db.query("SELECT constraints,expires_at FROM grants WHERE agent_id=? AND space_id=? AND action=? AND (resource_id=? OR resource_id='*') AND mode!='deny'").all(c.agentId,c.spaceId,action,resourceId).filter(g=>!g.expires_at||Date.parse(g.expires_at)>Date.now()).map(g=>JSON.parse(g.constraints));
       if(action!=='repository.branch.push')return {};
       const prefixes=grants.map(g=>g.branchPrefixes||[]);
       return {branchPrefixes:prefixes.flat().filter(p=>prefixes.every(ps=>ps.some(v=>p.startsWith(v)))),forbiddenRefs:grants.flatMap(g=>g.forbiddenRefs||[]),denyWorkflowChanges:true};},
