@@ -1280,7 +1280,8 @@ button.attachment-preview:hover { background:var(--paper); }
 .task-space-picker select {max-width:160px;min-width:0;padding:3px 6px;font-size:12px;}
 
 #settings-dialog { width:min(920px,calc(100% - 32px)); }
-.settings-layout { display:grid; grid-template-columns:180px minmax(0,1fr); flex:1; min-height:0; overflow:hidden; }
+.settings-layout { display:grid; grid-template-columns:180px minmax(0,1fr); grid-template-rows:minmax(0,1fr); flex:1; min-height:0; overflow:hidden; }
+.settings-layout .profile-sidebar { min-height:0; overflow-y:auto; }
 .settings-layout .settings-scroll { padding:20px; }
 .workspace-management-panel h3 { margin:0 0 10px; }
 .workspace-management-panel .access-buttons { flex-wrap:wrap; margin:14px 0; }

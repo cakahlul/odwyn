@@ -44,10 +44,22 @@ try{
  await page.locator('#settings-open').click();
  const artifacts=join('/tmp','odwyn-settings-preview');mkdirSync(artifacts,{recursive:true});
  for(const width of [320,768,1024,1440]){
-  await page.setViewportSize({width,height:900});await tab('resources');await page.locator('[data-manage-new="resources"]').click();await page.locator('#workspace-resource-type').selectOption('browser');await page.locator('#workspace-browsing-blocked').fill('example.com');
-  assert.equal(await page.evaluate(()=>document.querySelector('#settings-dialog').scrollWidth<=document.querySelector('#settings-dialog').clientWidth),true,`No horizontal overflow at ${width}px`);
+  await page.setViewportSize({width,height:600});await tab('resources');await page.locator('[data-manage-new="resources"]').click();
+  for(const type of ['memory','workspace']){
+   await page.locator('#workspace-resource-type').selectOption(type);await page.locator('.settings-scroll').evaluate(node=>node.scrollTop=0);
+   const fields=await page.locator('.settings-scroll').boundingBox();await page.mouse.move(fields.x+fields.width/2,fields.y+30);await page.mouse.wheel(0,4000);
+   await page.waitForFunction(()=>{const node=document.querySelector('.settings-scroll');return node.scrollTop>0;});
+   assert.equal(await page.locator('[data-manage-save="resources"]').evaluate(button=>{const rect=button.getBoundingClientRect();return button.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2));}),true,`Resource Save reachable by wheel at ${width}x600 (${type})`);
+   assert.equal(await page.evaluate(()=>document.querySelector('#settings-dialog').scrollWidth<=document.querySelector('#settings-dialog').clientWidth),true,`No horizontal overflow at ${width}px`);
+  }
+  if(width>680){
+   const sidebar=await page.locator('.settings-layout .profile-sidebar').boundingBox();await page.mouse.move(sidebar.x+sidebar.width/2,sidebar.y+30);await page.mouse.wheel(0,2000);
+   await page.waitForFunction(()=>document.querySelector('.settings-layout .profile-sidebar').scrollTop>0);
+   assert.equal(await page.locator('[data-settings-section="presets"]').evaluate(button=>{const rect=button.getBoundingClientRect();return button.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2));}),true,`Last settings tab reachable at ${width}x600`);
+  }
   await page.screenshot({path:join(artifacts,`settings-${width}.png`)});
  }
+
  await page.locator('#settings-dialog .modal-top button').click();await page.locator('#agents-open').click();await page.locator('.agent-menu summary').first().click();await page.locator('[data-agent-action=customize]').first().click();await page.locator('#agent-access-tab').click();await page.locator('#security-dialog[open]').waitFor();assert.equal(await page.locator('#access-create-space').count(),0);assert.equal(await page.locator('#connection-create').count(),0);assert.equal(await page.locator('#access-apply-preset').isVisible(),false);await page.locator('#access-advanced summary').click();assert.equal(await page.locator('#access-apply-preset').isVisible(),true);
- assert.deepEqual(errors,[]);console.log('Settings UI: CRUD, reset fields, access separation, preferences, 4 viewport widths passed. Screenshots: '+artifacts);
+ assert.deepEqual(errors,[]);console.log('Settings UI: CRUD, reset fields, access separation, preferences, wheel scrolling and Save visibility at 4 short viewport widths passed. Screenshots: '+artifacts);
 }finally{await browser?.close();await app?.close();server.stop(true);rmSync(directory,{recursive:true,force:true});}
