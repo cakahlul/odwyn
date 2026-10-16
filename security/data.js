@@ -18,7 +18,8 @@ export function openData(db,state,policy){
     CREATE TABLE IF NOT EXISTS room_proposal_sources(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,digest TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS task_exports(task_id TEXT NOT NULL,export_id TEXT NOT NULL,PRIMARY KEY(task_id,export_id));`);
   const sources=id=>db.query('SELECT resource_id AS resourceId,action FROM data_sources WHERE task_id=?').all(id);
-  const task=id=>{const j=state.jobs.find(j=>j.id===id);if(!j)throw new Error('Source task unavailable.');policy.identity(j);return j;};
+  // Retained SQLite identity supports handoffs only, never live task authority or room history.
+  const task=(id,retained=false)=>{const j=state.jobs.find(j=>j.id===id)||(retained&&db.query('SELECT task_id AS id,agent_id AS agentId,space_id AS spaceId FROM task_security_contexts WHERE task_id=?').get(id));if(!j)throw new Error('Source task unavailable.');policy.identity(j);return j;};
   const validExport=(spaceId,id,seen=new Set())=>{
     if(seen.has(id)||seen.size>=100)throw new Error('Export dependency cycle or limit.');seen.add(id);
     const row=db.query('SELECT * FROM data_exports WHERE id=?').get(id),message=row&&state.conversations.flatMap(c=>c.messages).find(m=>m.id===row.message_id),payload=row&&JSON.parse(row.payload),handoff=payload?.roomHandoff;
@@ -29,7 +30,7 @@ export function openData(db,state,policy){
     seen.delete(id);return row;
   };
   const handoffBlocker=(job,taskId)=>{try{
-    const c=policy.context(job);if(!taskId)return null;const source=task(taskId);if(source.spaceId!==c.spaceId)return {reason:'Source task belongs to another Space.'};
+    const c=policy.context(job);if(!taskId)return null;const source=task(taskId,true);if(source.spaceId!==c.spaceId)return {reason:'Source task belongs to another Space.'};
     for(const row of db.query('SELECT export_id FROM task_exports WHERE task_id=?').all(taskId))validExport(c.spaceId,row.export_id);
     for(const ref of sources(taskId)){
       for(const request of [{agentId:source.agentId,spaceId:c.spaceId,...ref,...(ref.action==='sandbox.exec'?{action:readAction(ref.action)}:{})},{agentId:c.agentId,spaceId:c.spaceId,resourceId:ref.resourceId,action:readAction(ref.action)}]){
@@ -76,7 +77,8 @@ export function openData(db,state,policy){
     assertHandoff(job,taskIds){for(const id of taskIds){if(!allowed(job,id))throw new Error('Classified workflow disclosure denied.');for(const r of sources(id))db.query('INSERT OR IGNORE INTO data_sources VALUES(?,?,?)').run(job.id,r.resourceId,readAction(r.action));for(const r of db.query('SELECT export_id FROM task_exports WHERE task_id=?').all(id))db.query('INSERT OR IGNORE INTO task_exports VALUES(?,?)').run(job.id,r.export_id);}},
     checkpointDenied(job,resourceId,checkpointId,record,failure){
       // Diagnostic labels stay in owner audit; agent-facing disclosure errors remain generic.
-      const source=state.jobs.find(item=>item.id===record?.taskId),blocker=record?.exportId?{reason:failure?.message||'Checkpoint export unavailable.'}:record?.taskId?handoffBlocker(job,record.taskId):{reason:'Checkpoint provenance unavailable.'};
+      let source;try{source=task(record?.taskId,true);}catch{}
+      const blocker=record?.exportId?{reason:failure?.message||'Checkpoint export unavailable.'}:record?.taskId?handoffBlocker(job,record.taskId):{reason:'Checkpoint provenance unavailable.'};
       const label=(items,id)=>{const item=items.find(value=>value.id===id);return `${item?.customization?.name||item?.name||'Unknown'} (${id||'unavailable'})`;};
       const details=[`Checkpoint ${checkpointId} restore denied.`,`Workspace: ${label(policy.listResources(),resourceId)}.`,`Source task: ${record?.taskId||'unavailable'}; source agent: ${label(state.agents,source?.agentId)}; receiving agent: ${label(state.agents,job.agentId)}.`];
       if(record?.exportId)details.push(`Export: ${record.exportId}.`);

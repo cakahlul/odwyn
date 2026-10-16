@@ -72,6 +72,7 @@ export function openStore(directory) {
     const conversations = state.conversations, jobs = state.jobs, workflowRuns = state.workflowRuns;
     try {
       state.conversations = conversations.filter(c=>c.id!==id);
+      // SQLite task identities, data sources and exports outlive chat jobs for checkpoint handoffs.
       state.jobs = jobs.filter(j=>j.conversationId!==id);
       state.workflowRuns = workflowRuns.filter(r=>r.conversationId!==id);
       for (const message of conversation.messages) indexed.delete(message.id);
