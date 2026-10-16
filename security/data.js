@@ -79,7 +79,7 @@ export function openData(db,state,policy){
       // Diagnostic labels stay in owner audit; agent-facing disclosure errors remain generic.
       let source;try{source=task(record?.taskId,true);}catch{}
       const blocker=record?.exportId?{reason:failure?.message||'Checkpoint export unavailable.'}:record?.taskId?handoffBlocker(job,record.taskId):{reason:'Checkpoint provenance unavailable.'};
-      const label=(items,id)=>{const item=items.find(value=>value.id===id);return `${item?.customization?.name||item?.name||'Unknown'} (${id||'unavailable'})`;};
+      const label=(items,id)=>{let item=items.find(value=>value.id===id);if(!item&&id?.includes(':'))try{item=policy.resource(id);}catch{}return `${item?.customization?.name||item?.name||'Unknown'} (${id||'unavailable'})`;};
       const details=[`Checkpoint ${checkpointId} restore denied.`,`Workspace: ${label(policy.listResources(),resourceId)}.`,`Source task: ${record?.taskId||'unavailable'}; source agent: ${label(state.agents,source?.agentId)}; receiving agent: ${label(state.agents,job.agentId)}.`];
       if(record?.exportId)details.push(`Export: ${record.exportId}.`);
       if(blocker?.resourceId)details.push(`Blocked agent: ${label(state.agents,blocker.agentId)}; resource: ${label(policy.listResources(),blocker.resourceId)}; permission: ${blocker.action}; decision: ${blocker.mode}.`);

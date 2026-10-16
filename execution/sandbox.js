@@ -55,6 +55,7 @@ export class Sandbox {
   }
   async worker(job,resourceId,signal){
     const context=this.policy.authorize(job,'sandbox.exec',resourceId);
+    if(this.policy.resource(resourceId).metadata?.isolatedWorkspaceIds)throw Error('Select a project target listed under this resource, not the resource group itself.');
     if(!this.configured)throw new Error('Isolated executor unavailable.');
     let worker=this.workers.get(job.id);
     if(worker){if(worker.resourceId!==resourceId)throw new Error('Task workspace cannot change.');await worker.ready;return worker;}

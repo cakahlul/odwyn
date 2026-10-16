@@ -135,3 +135,23 @@ test('cancellation during workspace restoration aborts before execution or check
     expect(executed).toBe(false);expect(f.state.executionHeads.resource).toBe(id(1));expect(f.runtime.executions.size).toBe(0);
   }
 });
+
+
+test('catalog project targets switch only after checkpointing and restore their own saved pins',async()=>{
+ const f=fixture();f.runtime.store.security.resource=resourceId=>({id:resourceId,grantResourceId:resourceId.startsWith('code:')?'code':'other'});
+ await ensureTaskWorkspace(f.runtime,f.job,'code:api');f.job.workspaceDirty=true;
+ await expect(ensureTaskWorkspace(f.runtime,f.job,'code:web')).rejects.toThrow('Save a checkpoint');
+ const saved=await saveTaskCheckpoint(f.runtime,f.job,{resourceId:'code:api'});
+ await ensureTaskWorkspace(f.runtime,f.job,'code:web');expect(f.job.workspacePin.resourceId).toBe('code:web');expect(f.job.workspacePin.headId).toBeNull();
+ await ensureTaskWorkspace(f.runtime,f.job,'code:api');expect(f.job.workspacePin).toEqual({resourceId:'code:api',headId:saved.id});expect(f.calls).toContainEqual(['restore',saved.id]);
+ await expect(ensureTaskWorkspace(f.runtime,f.job,'office:api')).rejects.toThrow('resource groups');
+});
+
+
+test('failed project switching retains the prior checkpoint pin even if another task advances its head',async()=>{
+ const f=fixture();f.runtime.store.security.resource=resourceId=>({id:resourceId,grantResourceId:'code'});
+ await ensureTaskWorkspace(f.runtime,f.job,'code:api');const saved=await saveTaskCheckpoint(f.runtime,f.job,{resourceId:'code:api'});
+ const worker=f.runtime.sandbox.worker;f.runtime.sandbox.worker=async(task,resourceId)=>{if(resourceId==='code:web')throw Error('Snapshot missing');return worker(task,resourceId);};
+ await expect(ensureTaskWorkspace(f.runtime,f.job,'code:web')).rejects.toThrow('Snapshot missing');f.state.executionHeads['code:api']=id(9);
+ await ensureTaskWorkspace(f.runtime,f.job,'code:api');expect(f.job.workspacePin.headId).toBe(saved.id);expect(f.calls).toContainEqual(['restore',saved.id]);
+});

@@ -1,3 +1,4 @@
+import {openIsolatedWorkspaces} from './isolated-workspaces.js';
 import {securityBackup} from './migration.js';
 import { randomUUID } from 'node:crypto';
 import { taskSecurityContext } from './task-context.js';
@@ -59,14 +60,15 @@ export function openPolicy(db,state,directory) {
   const resourceValue=input=>{
       strict(input,['spaceId','type','name','metadata']);space(input.spaceId);
       if(!Object.values(capabilities).some(c=>c.resourceType===input.type))throw new Error('Unknown resource type.');
-      const metadata=input.metadata || {};strict(metadata,input.type==='repository'?['endpoint','connectionId','upstreamId','gitUsername']:input.type==='workspace'?['sourceFolder','repositoryId']:input.type==='knowledge'?['version']:input.type==='file'?['path','workspaceId']:input.type==='browser'?['readUrls','blockedDomains']:['connector','payment','destination','environment'].includes(input.type)?['connectionId','upstreamId']:[]);
+      const metadata=input.metadata || {};strict(metadata,input.type==='repository'?['endpoint','connectionId','upstreamId','gitUsername']:input.type==='workspace'?['sourceFolder','repositoryId','isolatedWorkspaceIds']:input.type==='knowledge'?['version']:input.type==='file'?['path','workspaceId']:input.type==='browser'?['readUrls','blockedDomains']:['connector','payment','destination','environment'].includes(input.type)?['connectionId','upstreamId']:[]);
       if(['payment','destination','environment'].includes(input.type)||input.type==='repository'&&metadata.upstreamId!==undefined){id(metadata.connectionId);id(metadata.upstreamId);if(!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='action-gateway-v1' AND enabled=1").get(metadata.connectionId,input.spaceId))throw new Error('Reviewed action connection scope mismatch.');}
       else if(input.type==='repository'&&metadata.connectionId!==undefined){id(metadata.connectionId);if(!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='git-https-v1' AND endpoint=? AND enabled=1").get(metadata.connectionId,input.spaceId,metadata.endpoint))throw new Error('Git connection scope mismatch.');}
       if(input.type==='knowledge'&&(!Number.isSafeInteger(metadata.version)||metadata.version<1))throw new Error('Knowledge needs a valid version.');
       if(metadata.gitUsername!==undefined&&(typeof metadata.gitUsername!=='string'||!metadata.gitUsername.length||metadata.gitUsername.length>100||/[:\x00-\x20\x7f]/.test(metadata.gitUsername)))throw new Error('Use a Git HTTPS username without spaces or colons.');
-      if(metadata.repositoryId!==undefined){id(metadata.repositoryId);const repository=policy.resource(metadata.repositoryId);if(input.type!=='workspace'||repository.type!=='repository'||repository.spaceId!==input.spaceId||!repository.metadata.endpoint||repository.metadata.upstreamId)throw new Error('Choose a Git repository in the same Space.');}
+      if(metadata.isolatedWorkspaceIds!==undefined){if(input.type!=='workspace'||Object.keys(metadata).length!==1||!Array.isArray(metadata.isolatedWorkspaceIds)||!metadata.isolatedWorkspaceIds.length||metadata.isolatedWorkspaceIds.length>20||new Set(metadata.isolatedWorkspaceIds).size!==metadata.isolatedWorkspaceIds.length)throw Error('Select 1 to 20 distinct isolated workspaces.');for(const value of metadata.isolatedWorkspaceIds)policy.isolatedWorkspaces.get(value);}
+      if(metadata.repositoryId!==undefined){id(metadata.repositoryId);const repository=policy.resource(metadata.repositoryId);if(input.type!=='workspace'||repository.type!=='repository'||repository.grantResourceId||repository.spaceId!==input.spaceId||!repository.metadata.endpoint||repository.metadata.upstreamId)throw new Error('Choose a Git repository in the same Space.');}
       if(metadata.sourceFolder!==undefined)metadata.sourceFolder=sourceFolder(metadata.sourceFolder);
-      if(metadata.workspaceId!==undefined){id(metadata.workspaceId);if(!db.query("SELECT id FROM resources WHERE id=? AND space_id=? AND type='workspace'").get(metadata.workspaceId,input.spaceId))throw new Error('File workspace outside Space.');}
+      if(metadata.workspaceId!==undefined){id(metadata.workspaceId);const workspace=policy.resource(metadata.workspaceId);if(workspace.type!=='workspace'||workspace.spaceId!==input.spaceId||workspace.metadata.isolatedWorkspaceIds)throw new Error('File workspace outside Space or project target not selected.');}
       if(input.type==='browser'&&metadata.blockedDomains!==undefined){if(metadata.readUrls!==undefined||!Array.isArray(metadata.blockedDomains)||metadata.blockedDomains.length>100)throw new Error('Choose blocked domains or an existing URL allowlist, not both. Maximum 100 blocked domains.');metadata.blockedDomains=[...new Set(metadata.blockedDomains.map(blockedDomain))];}
       if(input.type==='browser'&&metadata.readUrls!==undefined){if(!Array.isArray(metadata.readUrls)||!metadata.readUrls.length||metadata.readUrls.length>20)throw new Error('Use bounded reviewed read-only URLs.');for(const raw of metadata.readUrls){id(raw);const u=new URL(raw);if(u.protocol!=='https:'||u.username||u.password||u.hash||u.href!==raw)throw new Error('Use exact credential-free HTTPS read URLs.');}}
       if(input.type==='connector'&&Object.keys(metadata).length){id(metadata.connectionId);id(metadata.upstreamId);if(!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='mcp-document-v1' AND enabled=1").get(metadata.connectionId,input.spaceId))throw new Error('Connection outside resource Space or MCP manifest.');}
@@ -116,6 +118,7 @@ export function openPolicy(db,state,directory) {
     },
     assertConfigurationIdle:idle,
     revokeResourceAccess(resourceId){
+      for(const linked of policy.isolatedWorkspaces.dependents(resourceId))policy.revokeResourceAccess(linked.id);
       const r=policy.resource(resourceId);
       db.query("UPDATE grants SET mode='deny',expires_at=NULL,constraints='{}' WHERE resource_id=?").run(resourceId);
       const wildcards=db.query("SELECT DISTINCT agent_id,action FROM grants WHERE space_id=? AND resource_id='*' AND mode!='deny'").all(r.spaceId);
@@ -124,15 +127,16 @@ export function openPolicy(db,state,directory) {
     updateResource(resourceId,input){
       strict(input,['name','metadata']);const previous=policy.resource(resourceId),metadata=Object.hasOwn(input,'metadata')?input.metadata:previous.metadata;
       const changed=canonical(metadata)!==canonical(previous.metadata);
-      const value={id:resourceId,...(changed?resourceValue({spaceId:previous.spaceId,type:previous.type,name:Object.hasOwn(input,'name')?input.name:previous.name,metadata}):{...previous,name:name(Object.hasOwn(input,'name')?input.name:previous.name)})};if(changed)idle(previous.spaceId);
+      const value={id:resourceId,...(changed?resourceValue({spaceId:previous.spaceId,type:previous.type,name:Object.hasOwn(input,'name')?input.name:previous.name,metadata}):{...previous,name:name(Object.hasOwn(input,'name')?input.name:previous.name)})};if(changed){idle(previous.spaceId);for(const linked of policy.isolatedWorkspaces.dependents(resourceId))idle(linked.spaceId);}
       db.transaction(()=>{if(changed)policy.revokeResourceAccess(resourceId);db.query('UPDATE resources SET name=?,metadata=? WHERE id=?').run(value.name,JSON.stringify(value.metadata),resourceId);bump();events({action:'resource.update',spaceId:value.spaceId,resourceId},{mode:'deny',reason:changed?'Owner changed configuration; resource access revoked for review.':'Owner renamed resource.'});})();return value;
     },
     deleteResource(resourceId){
       const r=policy.resource(resourceId);idle(r.spaceId);
-      if(policy.listResources().some(other=>other.metadata.workspaceId===resourceId||other.metadata.repositoryId===resourceId))throw new Error('Delete or unlink resources using this target first.');
+      if(policy.isolatedWorkspaces.list().some(row=>row.metadata.repositoryId===resourceId))throw Error('Unlink catalog workspaces using this repository first.');
+      if(policy.listResources().some(other=>(other.metadata.workspaceId===resourceId||other.metadata.workspaceId?.startsWith(resourceId+':'))||other.metadata.repositoryId===resourceId))throw new Error('Delete or unlink resources using this target first.');
       db.transaction(()=>{db.query('DELETE FROM grants WHERE resource_id=?').run(resourceId);db.query('DELETE FROM resources WHERE id=?').run(resourceId);bump();events({action:'resource.delete',spaceId:r.spaceId,resourceId},{mode:'deny',reason:'Owner deleted resource and revoked its access; history preserved.'});})();
     },
-    resource(resourceId){id(resourceId);const row=db.query('SELECT * FROM resources WHERE id=?').get(resourceId);if(!row)throw new Error('Resource not found.');return {id:row.id,spaceId:row.space_id,type:row.type,name:row.name,metadata:JSON.parse(row.metadata)};},
+    resource(resourceId){id(resourceId);const row=db.query('SELECT * FROM resources WHERE id=?').get(resourceId);if(!row)return policy.isolatedWorkspaces.resolve(resourceId);return {id:row.id,spaceId:row.space_id,type:row.type,name:row.name,metadata:JSON.parse(row.metadata)};},
     access(agentId){agent(agentId);return {schemaVersion:1,revision:policy.revision,defaultSpaceId:policy.defaultSpace(agentId),spaceIds:db.query('SELECT space_id AS spaceId FROM memberships WHERE agent_id=?').all(agentId).map(r=>r.spaceId),grants:db.query('SELECT id,space_id AS spaceId,resource_id AS resourceId,action,mode,expires_at AS expiresAt,constraints FROM grants WHERE agent_id=?').all(agentId).map(g=>({...g,constraints:JSON.parse(g.constraints)}))};},
     preview(agentId,input){db.exec('SAVEPOINT policy_preview');try{policy.putAccess(agentId,input);return {decisions:policy.listResources().filter(r=>input.spaceIds.includes(r.spaceId)).flatMap(r=>Object.values(capabilities).filter(c=>c.resourceType===r.type).map(c=>({resourceId:r.id,action:c.action,...policy.simulate({agentId,spaceId:r.spaceId,resourceId:r.id,action:c.action})})))};}finally{db.exec('ROLLBACK TO policy_preview; RELEASE policy_preview');}},
     putAccess(agentId,input){
@@ -166,7 +170,7 @@ export function openPolicy(db,state,directory) {
         bump();
       })();return policy.access(agentId);
     },
-    visible(agentId,spaceId){if(!member(agentId,spaceId))throw new Error('Space membership denied.');if(policy.isPaused(agentId,spaceId))throw new Error('Automation paused by owner.');return {space:{id:spaceId,name:space(spaceId).name},resources:db.query('SELECT id,space_id AS spaceId,type,name FROM resources WHERE space_id=?').all(spaceId).filter(r=>Object.keys(capabilities).some(action=>policy.simulate({agentId,spaceId,resourceId:r.id,action}).mode!=='deny'))};},
+    visible(agentId,spaceId){if(!member(agentId,spaceId))throw new Error('Space membership denied.');if(policy.isPaused(agentId,spaceId))throw new Error('Automation paused by owner.');return {space:{id:spaceId,name:space(spaceId).name},resources:policy.listResources().filter(r=>r.spaceId===spaceId).flatMap(r=>policy.isolatedWorkspaces.targets(r)).filter(r=>Object.values(capabilities).filter(c=>c.resourceType===r.type).some(c=>policy.simulate({agentId,spaceId,resourceId:r.id,action:c.action}).mode!=='deny')).map(r=>({id:r.id,spaceId:r.spaceId,type:r.type,name:r.name,...(r.grantResourceId?{grantResourceId:r.grantResourceId,isolatedWorkspaceId:r.isolatedWorkspaceId,...(r.metadata.repositoryId?{repositoryId:r.metadata.repositoryId}:{})}:{})}))};},
     simulate(request){
       const deny=reason=>({mode:'deny',reason,revision:policy.revision});
       try{
@@ -175,6 +179,14 @@ export function openPolicy(db,state,directory) {
         if(!member(request.agentId,request.spaceId))return deny('Space membership denied.');
         if(policy.isPaused(request.agentId,request.spaceId))return deny('Automation paused by owner.');
         id(request.resourceId);
+        let target;try{target=policy.resource(request.resourceId);}catch{return deny('Resource/action mismatch.');}
+        if(target.spaceId!==request.spaceId)return deny('Resource/action mismatch.');
+        if(target.grantResourceId){
+          if(target.type==='repository'&&request.action!=='repository.read')return deny('Catalog Git targets allow read and sync only.');
+          if(target.type!==capabilities[request.action].resourceType)return deny('Resource/action mismatch.');
+          if(target.metadata.connectionId&&!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='git-https-v1' AND endpoint=? AND enabled=1").get(target.metadata.connectionId,target.connectionSpaceId,target.metadata.endpoint))return deny('Git connection disabled or outside scope.');
+          return policy.simulate({...request,resourceId:target.grantResourceId,action:request.action==='repository.read'?'workspace.read':request.action});
+        }
         const r=db.query('SELECT * FROM resources WHERE id=? AND space_id=?').get(request.resourceId,request.spaceId);
         if(!r||r.type!==capabilities[request.action].resourceType)return deny('Resource/action mismatch.');
         const gs=db.query("SELECT * FROM grants WHERE agent_id=? AND space_id=? AND action=? AND (resource_id=? OR resource_id='*')").all(request.agentId,request.spaceId,request.action,request.resourceId).filter(g=>!g.expires_at||Date.parse(g.expires_at)>Date.now());
@@ -217,8 +229,10 @@ export function openPolicy(db,state,directory) {
     },
     auditIsolation(job,resourceId){const c=policy.context(job);events({...c,action:'network.fetch',resourceId},{mode:'deny',reason:'Worker egress disabled by OS network namespace.'});},
     auditExecution(context,resourceId,usage){events({...context,action:'sandbox.exec',resourceId},{mode:'auto',reason:JSON.stringify(usage)});},
-    auditData(job,action,resourceId,reason='Classified data or task-scoped operation denied.'){try{const c=policy.identity(job);events({...c,action,resourceId:/^[a-f0-9-]{36}$/.test(resourceId||'')?resourceId:null},{mode:'deny',reason});}catch{}},
+    auditData(job,action,resourceId,reason='Classified data or task-scoped operation denied.'){try{const c=policy.identity(job);events({...c,action,resourceId:/^[a-f0-9-]{36}(?::[a-f0-9-]{36}(?::git)?)?$/.test(resourceId||'')?resourceId:null},{mode:'deny',reason});}catch{}},
   };
+  if(!db.query("SELECT name FROM sqlite_master WHERE name='isolated_workspaces'").get())securityBackup(db,directory,'pre-isolated-workspaces-');
+  policy.isolatedWorkspaces=openIsolatedWorkspaces(db,state,policy);
   Object.defineProperty(state,statePolicy,{value:policy});
   for(const conversation of state.conversations)conversation.spaceId ||= policy.legacySpaceId;
   for(const job of state.jobs){

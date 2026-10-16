@@ -36,6 +36,14 @@ function adopt(room,id){
 export async function ensureTaskWorkspace(runtime,job,resourceId,selectedId,signal){
   signal?.throwIfAborted();activeTask(job);textInput(resourceId,200);runtime.store.security.authorize(job,'sandbox.exec',resourceId);
   runtime.store.data.roomCheck(job,[{resourceId,action:'sandbox.exec'}]);
+  if(job.workspacePin&&job.workspacePin.resourceId!==resourceId){
+    const previous=runtime.store.security.resource(job.workspacePin.resourceId),next=runtime.store.security.resource(resourceId);
+    if(!previous.grantResourceId||previous.grantResourceId!==next.grantResourceId)throw Error('Task workspace cannot switch resource groups.');
+    if(job.workspaceDirty)throw Error('Save a checkpoint before switching project targets.');
+    (job.workspacePins ||= {})[job.workspacePin.resourceId]=job.workspacePin;
+    await runtime.sandbox.stop(job.id);job.workspacePin=job.workspacePins[resourceId];
+  }
+  if(!job.workspacePin&&job.workspacePins?.[resourceId])job.workspacePin=job.workspacePins[resourceId];
   const pin=job.workspacePin;
   if(pin&&(pin.resourceId!==resourceId||selectedId!==undefined&&selectedId!==pin.headId))throw new Error('Task workspace cannot switch resources or checkpoints.');
   const id=pin?pin.headId:(selectedId===undefined?head(runtime,resourceId):checkpointId(selectedId));

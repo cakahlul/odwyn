@@ -174,7 +174,7 @@ export async function handoffRoom(runtime,id,input){
     if(input.checkpointId){
       const checkpoint=source.checkpoints?.find(item=>item.id===input.checkpointId);
       const target=runtime.store.security.resource(input.workspaceResourceId);
-      if(!checkpoint||target.type!=='workspace'||target.spaceId!==destination.spaceId)throw new Error('Choose a recorded checkpoint and destination workspace resource.');
+      if(!checkpoint||target.type!=='workspace'||target.metadata.isolatedWorkspaceIds||target.spaceId!==destination.spaceId)throw new Error('Choose a recorded checkpoint and destination workspace resource.');
       if(runtime.state.executionHeads?.[target.id])throw new Error('Destination workspace already has a checkpoint. Choose an empty workspace to avoid overwriting progress.');
       const copied=runtime.sandbox.copyCheckpoint(checkpoint.id,{sourceSpaceId:source.spaceId,sourceResourceId:checkpoint.resourceId,destinationSpaceId:destination.spaceId,destinationResourceId:target.id});
       const record={id:copied.id,spaceId:copied.spaceId,resourceId:copied.resourceId,parentId:null,createdAt:copied.createdAt,label:'Handoff checkpoint',exportId};

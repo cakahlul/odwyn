@@ -257,7 +257,7 @@ export function createApp(options = {}) {
         const presetMatch=pathname.match(/^\/api\/security\/presets\/([^/]+)$/);
         if(presetMatch&&req.method==='DELETE'){store.security.deletePreset(decodeURIComponent(presetMatch[1]));return response({ok:true});}
         if(pathname === '/api/audit'&&req.method==='GET')return response({events:store.connectors.sanitize(store.security.audit())});
-        if(pathname === '/api/resources'&&req.method==='GET')return response(store.connectors.sanitize(store.security.listResources()));
+        if(pathname === '/api/resources'&&req.method==='GET')return response(store.connectors.sanitize(url.searchParams.get('targets')==='true'?store.security.listResources().flatMap(row=>store.security.isolatedWorkspaces.targets(row)):store.security.listResources()));
         if(pathname === '/api/connectors' && req.method==='GET')return response({connectors:store.connectors.list()});
         if(pathname === '/api/connectors' && req.method==='POST'){const {ownerPassword,...body}=await json(req);freshOwner(ownerPassword);return response(store.connectors.create(body),201);}
         const connectionMatch=pathname.match(/^\/api\/connectors\/([a-f0-9-]{36})$/);
@@ -295,13 +295,24 @@ export function createApp(options = {}) {
           const input=await json(req);if(Object.keys(input).some(key=>key!=='sourceFolder'))throw new Error('Only a source folder is accepted.');
           return response({...workspaceSource(runtime.sandbox.snapshotRoot,sourceFolder(input.sourceFolder)),configured:runtime.sandbox.configured});
         }
-        const sourceImport=pathname.match(/^\/api\/resources\/([a-f0-9-]{36})\/source$/);
+        const isolated=store.security.isolatedWorkspaces;
+        if(pathname==='/api/isolated-workspaces'&&req.method==='GET')return response(store.connectors.sanitize(isolated.list()));
+        const isolatedMatch=pathname.match(/^\/api\/isolated-workspaces\/([a-f0-9-]{36})$/);
+        if((pathname==='/api/isolated-workspaces'&&req.method==='POST')||(isolatedMatch&&req.method==='PUT')){
+          const input=isolated.validate(await json(req)),id=isolatedMatch?.[1]||randomUUID();
+          if(isolatedMatch)isolated.idle(id);
+          const source={...workspaceSource(runtime.sandbox.snapshotRoot,input.metadata.sourceFolder||'isolated/'+id,{create:true}),configured:runtime.sandbox.configured};
+          const result=isolatedMatch?isolated.update(id,input):isolated.create(input,id);
+          runtime.changed();return response({...result,workspaceSource:source},isolatedMatch?200:201);
+        }
+        if(isolatedMatch&&req.method==='DELETE'){isolated.delete(isolatedMatch[1]);runtime.changed();return response({ok:true});}
+        const sourceImport=pathname.match(/^\/api\/(resources|isolated-workspaces)\/([a-f0-9-]{36})\/source$/);
         if(sourceImport&&req.method==='POST'){
-          const resource=store.security.resource(sourceImport[1]);if(resource.type!=='workspace')throw new Error('Choose an isolated workspace resource.');
-          const beforeWrite=()=>{const current=store.security.resource(resource.id);if(canonical(current.metadata)!==canonical(resource.metadata)||store.state.executionHeads?.[resource.id]||store.state.jobs.some(job=>job.spaceId===resource.spaceId&&['queued','running','waiting','takeover','stopping'].includes(job.status)))throw new Error('Stop Space tasks and use a workspace without an existing checkpoint or changed source.');};
+          const catalogSource=sourceImport[1]==='isolated-workspaces',entry=catalogSource?isolated.get(sourceImport[2]):null,resource=catalogSource?{...entry,type:'workspace'}:store.security.resource(sourceImport[2]);if(resource.metadata.isolatedWorkspaceIds)throw Error('Import source in Settings → Isolated workspaces.');if(resource.type!=='workspace')throw new Error('Choose an isolated workspace resource.');
+          const beforeWrite=()=>{if(catalogSource){isolated.idle(resource.id);if(canonical(isolated.get(resource.id).metadata)!==canonical(resource.metadata)||isolated.linked(resource.id).some(row=>store.state.executionHeads?.[row.id+':'+resource.id]))throw Error('Use an unchanged catalog workspace without existing checkpoints.');return;}const current=store.security.resource(resource.id);if(canonical(current.metadata)!==canonical(resource.metadata)||store.state.executionHeads?.[resource.id]||store.state.jobs.some(job=>job.spaceId===resource.spaceId&&['queued','running','waiting','takeover','stopping'].includes(job.status)))throw new Error('Stop Space tasks and use a workspace without an existing checkpoint or changed source.');};
           if(req.headers.get('content-type')?.startsWith('application/json')){
             const input=await json(req);if(Object.keys(input).some(key=>key!=='serverFolder'))throw new Error('Only a server project folder is accepted.');
-            const result=await importServerWorkspaceSource(runtime.sandbox.snapshotRoot,resource.metadata.sourceFolder||`${resource.spaceId}/${resource.id}`,input.serverFolder,{run:(argv,options)=>runtime.sandbox.process(argv,options),protectedRoots:sourceProtectedRoots,assertBytes:bytes=>store.connectors.assertNoSecret(bytes),beforeWrite});
+            const result=await importServerWorkspaceSource(runtime.sandbox.snapshotRoot,resource.metadata.sourceFolder||(catalogSource?'isolated/'+resource.id:`${resource.spaceId}/${resource.id}`),input.serverFolder,{run:(argv,options)=>runtime.sandbox.process(argv,options),protectedRoots:sourceProtectedRoots,assertBytes:bytes=>store.connectors.assertNoSecret(bytes),beforeWrite});
             runtime.changed();return response({...result,workspaceSource:{...result.workspaceSource,configured:runtime.sandbox.configured}},201);
           }
           const length=Number(req.headers.get('content-length'));if(length>21*1024*1024)throw new Error('Source upload exceeds 21 MiB.');
@@ -310,7 +321,7 @@ export function createApp(options = {}) {
           try{while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>21*1024*1024){await reader.cancel();throw new Error('Source upload exceeds 21 MiB.');}chunks.push(value);}}finally{reader.releaseLock();}
           const data=await new Request(req.url,{method:'POST',headers:req.headers,body:Buffer.concat(chunks)}).formData();if([...data.keys()].some(key=>key!=='files'))throw new Error('Only source files are accepted.');
           const files=data.getAll('files');if(files.some(file=>!(file instanceof File)))throw new Error('Choose source files.');
-          const result=await importWorkspaceSource(runtime.sandbox.snapshotRoot,resource.metadata.sourceFolder||`${resource.spaceId}/${resource.id}`,files,{assertBytes:bytes=>store.connectors.assertNoSecret(bytes),beforeWrite});
+          const result=await importWorkspaceSource(runtime.sandbox.snapshotRoot,resource.metadata.sourceFolder||(catalogSource?'isolated/'+resource.id:`${resource.spaceId}/${resource.id}`),files,{assertBytes:bytes=>store.connectors.assertNoSecret(bytes),beforeWrite});
           runtime.changed();return response({...result,workspaceSource:{...result.workspaceSource,configured:runtime.sandbox.configured}},201);
         }
         const resourceMatch=pathname.match(/^\/api\/resources\/([a-f0-9-]{36})$/);
@@ -319,18 +330,18 @@ export function createApp(options = {}) {
           const input=await json(req),previous=store.security.resource(resourceMatch[1]);
           if(Object.keys(input).some(key=>!['name','metadata'].includes(key)))throw new Error('Invalid resource fields.');
           const candidate=store.security.validateResource({spaceId:previous.spaceId,type:previous.type,name:Object.hasOwn(input,'name')?input.name:previous.name,metadata:Object.hasOwn(input,'metadata')?input.metadata:previous.metadata});
-          if(previous.type==='workspace'&&canonical(previous.metadata)!==canonical(candidate.metadata)){
+          if(previous.type==='workspace'&&store.state.executionHeads?.[previous.id]&&canonical(previous.metadata)!==canonical(candidate.metadata))throw Error('This workspace has a checkpoint. Keep this resource and create a separate catalog resource.');
+          if(previous.type==='workspace'&&!candidate.metadata.isolatedWorkspaceIds&&canonical(previous.metadata)!==canonical(candidate.metadata)){
             if(store.state.jobs.some(job=>job.spaceId===previous.spaceId&&['queued','running','waiting','takeover','stopping'].includes(job.status)))throw new Error('Stop tasks in this Space before changing its source.');
-            if(store.state.executionHeads?.[previous.id])throw new Error('This workspace has a checkpoint. Create a fresh resource to load a different source.');
             workspaceSource(runtime.sandbox.snapshotRoot,candidate.metadata.sourceFolder||`${previous.spaceId}/${previous.id}`,{create:true});
           }
-          const result=store.security.updateResource(resourceMatch[1],input);runtime.changed();return response(store.connectors.sanitize({...result,...(result.type==='workspace'?{workspaceSource:{...workspaceSource(runtime.sandbox.snapshotRoot,result.metadata.sourceFolder||`${result.spaceId}/${result.id}`),configured:runtime.sandbox.configured}}:{})}));
+          const result=store.security.updateResource(resourceMatch[1],input);runtime.changed();return response(store.connectors.sanitize({...result,...(result.type==='workspace'&&!result.metadata.isolatedWorkspaceIds?{workspaceSource:{...workspaceSource(runtime.sandbox.snapshotRoot,result.metadata.sourceFolder||`${result.spaceId}/${result.id}`),configured:runtime.sandbox.configured}}:{})}));
         }
         if(resourceMatch&&req.method==='DELETE'){if(store.knowledge.managed(resourceMatch[1]))throw new Error('Manage this resource in Settings → Knowledge.');store.security.deleteResource(resourceMatch[1]);runtime.changed();return response({ok:true});}
         if (pathname === '/api/resources' && req.method === 'POST') {
           const input=store.security.validateResource(await json(req)),resourceId=randomUUID();
           if(input.type==='knowledge')throw new Error('Create knowledge in Settings → Knowledge.');
-          const source=input.type==='workspace'?{...workspaceSource(runtime.sandbox.snapshotRoot,input.metadata.sourceFolder||`${input.spaceId}/${resourceId}`,{create:true}),configured:runtime.sandbox.configured}:null;
+          const source=input.type==='workspace'&&!input.metadata.isolatedWorkspaceIds?{...workspaceSource(runtime.sandbox.snapshotRoot,input.metadata.sourceFolder||`${input.spaceId}/${resourceId}`,{create:true}),configured:runtime.sandbox.configured}:null;
           const result=store.security.createResource(input,resourceId);runtime.changed();return response({...result,...(source?{workspaceSource:source}:{})},201);
         }
         if (pathname === '/api/policy/preview' && req.method==='POST'){const body=await json(req);if(Object.keys(body).some(k=>!['agentId','access'].includes(k)))throw new Error('Invalid preview.');return response(store.security.preview(body.agentId,body.access));}
