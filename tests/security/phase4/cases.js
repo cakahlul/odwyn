@@ -81,6 +81,7 @@ caseTest('UX-001 Arbitrary name UX',()=>probe('UX-001',async f=>ui(f,async page=
   const spaceId=await createManagedNotes(page,'Space for '+name,'Notes for '+name);
   await page.locator('#agents-open').click();await page.locator(`[data-manage-agent="${agent.id}"] summary`).click();await page.locator(`[data-agent-action="customize"][data-agent-id="${agent.id}"]`).click();await page.getByRole('button',{name:'Access & Autonomy',exact:true}).click();
   await page.locator('#access-space').selectOption(spaceId);
+  await page.locator(`[data-access-space="${spaceId}"]`).check();
   await page.locator('[data-access-action="memory.read"] select').selectOption('auto');await page.locator('#access-preview').click();await page.locator('#access-effective').filter({hasText:'Auto'}).waitFor();await page.locator('#access-save').click();await page.locator('#access-status').filter({hasText:'Saved'}).waitFor();
   const access=await(await f.request('/api/agents/'+agent.id+'/access')).json();expect(access.grants.some(g=>g.action==='memory.read'&&g.mode==='auto')).toBe(true);expect(access.defaultSpaceId).toBeDefined();await page.locator('#security-dialog').press('Escape');await page.locator('#customize-dialog').press('Escape');
  }

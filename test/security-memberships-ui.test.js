@@ -1,0 +1,59 @@
+import {test,expect} from 'bun:test';
+import {chromium} from 'playwright';
+import {EventEmitter} from 'node:events';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createApp} from '../server.js';
+import {defaults} from '../public/profile.js';
+
+test('unchecking the selected Space removes its membership and grants in a separate workspace',async()=>{
+  const directory=mkdtempSync(join(tmpdir(),'odwyn-memberships-'));
+  const codex=Object.assign(new EventEmitter(),{request:async()=>({account:null}),stop(){}});
+  let app;const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
+  app=createApp({directory,user:'owner',password:'test-password-long-enough',origin:server.url.origin,providerOptions:{codex},browser:{close:async()=>{}}});
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},extraHTTPHeaders:{origin:server.url.origin}});
+  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(6000);
+  let query='';
+  const request=async(path,method='GET',data)=>{
+    const response=await context.request.fetch(new URL(path+(path.includes('?')?query.replace('?','&'):query),server.url).href,{method,data});
+    expect(response.ok()).toBe(true);return response.json();
+  };
+  try{
+    const home=await request('/api/workspaces','POST',{name:'E-Studio'});query=`?workspace=${home.id}`;
+    await request('/api/customization','PUT',{...defaults,name:'QA engineer'});
+    await request('/api/provider?scope=global','PUT',{type:'codex',model:'gpt-6.1-sol'});
+    const state=await request('/api/state'),agent=state.agents[0].id;
+    const execution=await request('/api/spaces','POST',{name:'Execution'}),research=await request('/api/spaces','POST',{name:'Research'});
+    const resource=await request('/api/resources','POST',{spaceId:execution.id,type:'memory',name:'Execution notes'});
+    const retained=await request('/api/resources','POST',{spaceId:research.id,type:'memory',name:'Research notes'});
+    const access=await request(`/api/agents/${agent}/access`);
+    await request(`/api/agents/${agent}/access`,'PUT',{revision:access.revision,spaceIds:[execution.id,research.id],defaultSpaceId:execution.id,grants:[resource,retained].map(r=>({spaceId:r.spaceId,resourceId:r.id,action:'memory.read',mode:'auto'}))});
+    await page.goto(new URL('/'+query,server.url).href);
+    await page.locator('#agents-open').click();await page.locator('.agent-menu summary').first().click();
+    await page.getByRole('button',{name:'Customize agent',exact:true}).first().click();
+    await page.getByRole('button',{name:'Access & Autonomy',exact:true}).click();
+    await page.locator('#security-dialog').waitFor({state:'visible'});
+    const membership=page.locator(`[data-access-space="${execution.id}"]`);
+    expect(await page.locator('#access-space').inputValue()).toBe(execution.id);
+    await membership.uncheck();
+    await page.locator('#access-preview').click();await page.locator('#access-status').filter({hasText:'Preview only'}).waitFor();
+    expect(await page.locator(`[data-preview-resource="${resource.id}"]`).count()).toBe(0);
+    expect(await page.locator(`[data-preview-resource="${retained.id}"]`).count()).toBe(1);
+    await page.locator('#access-save').click();await page.locator('#access-status').filter({hasText:'Saved.'}).waitFor();
+    const saved=await request(`/api/agents/${agent}/access`);
+    expect(saved.spaceIds).toEqual([research.id]);
+    expect(saved.defaultSpaceId).toBe(state.security.legacySpaceId);
+    expect(saved.grants.map(g=>g.resourceId)).toEqual([retained.id]);
+    expect((await request('/api/policy/simulate','POST',{agentId:agent,spaceId:execution.id,resourceId:resource.id,action:'memory.read'})).mode).toBe('deny');
+    await page.locator('#access-close').click();await page.getByRole('button',{name:'Access & Autonomy',exact:true}).click();
+    await page.locator('#security-dialog').waitFor({state:'visible'});
+    expect(await membership.isChecked()).toBe(false);
+    expect(await page.locator(`[data-access-space="${research.id}"]`).isChecked()).toBe(true);
+    await page.locator(`[data-access-space="${research.id}"]`).uncheck();
+    await page.locator('#access-save').click();await page.locator('#access-status').filter({hasText:'Saved.'}).waitFor();
+    const empty=await request(`/api/agents/${agent}/access`);
+    expect(empty.spaceIds).toEqual([]);expect(empty.grants).toEqual([]);
+    expect(errors).toEqual([]);
+  }finally{await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
+},30000);
