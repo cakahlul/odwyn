@@ -199,7 +199,8 @@ function openRoomEditor(room = null, save = null) {
   saveRoomStage=save;
   editingRoomId = room?.id || null; $('#room-header').close(); setNavigation(false);
   $('#room-dialog-title').textContent = save ? 'Configure room stage' : room ? 'Edit conversation room' : 'Create a conversation room';
-  $('#room-save').childNodes[0].textContent = save ? 'Save stage' : room ? 'Save' : 'Create room';
+  $('#room-save').childNodes[0].textContent = save ? 'Apply stage' : room ? 'Save' : 'Create room';
+  $('#room-dialog .modal-description').textContent = save ? 'Apply this stage to your draft, then click Save at the top of the workflow editor to save the whole workflow.' : 'Choose a name and 2–5 agents to share the conversation.';
   $('#room-name').value = room?.title || ''; $('#room-status').textContent = '';
   $('#room-space').innerHTML = workspace.security.spaces.map(space=>`<option value="${esc(space.id)}">${esc(space.name)}</option>`).join('');
   $('#room-space').value = room?.spaceId || workspace.security.defaults[agentId] || workspace.security.legacySpaceId;

@@ -33,6 +33,27 @@ test('create and switch homes, preserve drafts, link settings, and scope downloa
       await fetch('/api/provider'+location.search+'&scope=global',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({type:'codex',model:'gpt-6.1-sol'})});
     },{...defaults,name:'Research agent'});
     await page.reload();await page.locator('#workspace-home:not([disabled])').waitFor();
+    await page.locator('#tools-open').click();await page.locator('[data-view="workflows"]').click();
+    await page.locator('[data-workflow-new]').click();
+    const reviewer=await page.evaluate(async profile=>(await(await fetch('/api/agents'+location.search,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(profile)})).json()),{...defaults,name:'Reviewer'});
+    await page.locator(`#reply-agent option[value="${reviewer.id}"]`).waitFor({state:'attached'});
+    await page.locator('#workflow-name').fill('feature delivery');
+    await page.locator('.workflow-first-step').click();await page.locator('[data-wf-add-type="room"]').click();
+    await page.locator('[data-wf-field="step.prompt"]').fill('Deliver the reviewed feature.');
+    await page.locator('[data-wf-room-configure]').click();
+    expect(await page.locator('#room-dialog .modal-description').textContent()).toContain('click Save at the top of the workflow editor');
+    await page.locator('#room-name').fill('Feature review');
+    await page.locator(`#room-agent-options input[value="${reviewer.id}"]`).check();
+    await page.getByRole('button',{name:'Apply stage',exact:true}).click();
+    await page.locator('#room-dialog').waitFor({state:'hidden'});
+    expect(await page.locator('#workflow-editor').evaluate(node=>node.open)).toBe(true);
+    expect(await page.evaluate(async()=>(await(await fetch('/api/workflows'+location.search)).json()).length)).toBe(0);
+    await page.locator('#workflow-form button[type="submit"]').click();
+    await page.locator('#workflow-editor').waitFor({state:'hidden'});
+    await page.locator('.workflow-row h3').filter({hasText:'feature delivery'}).waitFor();
+    expect(await page.evaluate(async()=>(await(await fetch('/api/workflows'+location.search)).json()).map(w=>w.name))).toEqual(['feature delivery']);
+    expect(await page.evaluate(async()=>(await(await fetch('/api/workflows')).json()).length)).toBe(0);
+    await page.reload();await page.locator('.workflow-row h3').filter({hasText:'feature delivery'}).waitFor();
     await page.locator('#new-chat').click();
     await page.locator('#prompt').fill('Research draft');
     const uploaded=await page.evaluate(async()=>{
