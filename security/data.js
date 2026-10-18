@@ -3,7 +3,7 @@ import {randomUUID,randomBytes,createHash} from 'node:crypto';
 export const stateData=Symbol('server classified data');
 const digest=text=>createHash('sha256').update(text).digest('hex');
 const uuid=id=>typeof id==='string'&&/^[a-f0-9-]{36}$/.test(id);
-const readAction=action=>({'sandbox.exec':'workspace.read','browser.navigate':'browser.read','browser.interact':'browser.read','memory.write':'memory.read','repository.branch.push':'repository.read'}[action]||action);
+const readAction=action=>({'sandbox.exec':'workspace.read','browser.navigate':'browser.read','browser.interact':'browser.read','memory.write':'memory.read','repository.branch.push':'repository.read','repository.branch.create':'repository.read','repository.merge':'repository.read','repository.review':'repository.read'}[action]||action);
 const proposalDigest=outcome=>digest(JSON.stringify(outcome.artifacts===undefined?[outcome.result,outcome.nextPlan]:[outcome.result,outcome.nextPlan,outcome.artifacts,...(outcome.checks===undefined?[]:[outcome.checks])]));
 const roomExportDigest=(room,message)=>digest(JSON.stringify([room?.discussion?.id,room?.discussion?.status,room?.discussion?.invalidatedReason,message?.text,room?.discussion?.outcome?.id,room?.discussion?.outcome?.ownerDecision,(room?.artifacts||[]).map(item=>[item.id,item.versions.at(-1)?.id,item.versions.at(-1)?.reviews])]));
 export function openData(db,state,policy){

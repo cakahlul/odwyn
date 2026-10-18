@@ -10,7 +10,7 @@ import {saveFileBytes} from './files.js';
 import {roomCompletion,artifactApproved,artifactSnapshot} from './public/room-policy.js';
 
 const strict=(input,keys)=>{if(!input||Array.isArray(input)||typeof input!=='object'||Object.keys(input).some(key=>!keys.includes(key)))throw new Error('Invalid room work fields.');};
-const roomEvidence=(room,ids)=>(room.evidence||[]).filter(item=>ids.includes(item.id)).map(({id,source,checkpointId,caseId,caseRevision,status,command,scenario,output,stdout,stderr,exitCode,createdAt})=>({id,source,checkpointId,caseId,caseRevision,status,command,scenario,output,stdout,stderr,exitCode,createdAt}));
+const roomEvidence=(room,ids)=>(room.evidence||[]).filter(item=>ids.includes(item.id)).map(({id,source,checkpointId,caseId,caseRevision,status,command,scenario,output,stdout,stderr,exitCode,createdAt,gitCommit,gitBranch,purpose})=>({id,source,checkpointId,caseId,caseRevision,status,command,scenario,output,stdout,stderr,exitCode,createdAt,gitCommit,gitBranch,purpose}));
 const active=runtime=>runtime.activeJobs?.()||[runtime.active].filter(Boolean);
 function workingRoom(runtime,job){
   runtime.store.security.context(job);const room=findRoom(runtime.state,job.conversationId);
@@ -83,7 +83,8 @@ export function roomWorkContext(runtime,job){
     for(const id of tasks){const source=runtime.state.jobs.find(item=>item.id===id);if(!source)throw new Error('Room evidence source unavailable.');runtime.store.data.roomCheck(source);}
     if(record.exportId)runtime.store.data.readExport(job,record.exportId);
   }
-  return {requiredOutputs:room.governance?.outputs||[],ownerApproval:!!room.governance?.ownerApproval,artifacts,handoff,evidence:room.evidence||[],checkpoints:room.checkpoints||[],cases:room.cases||[]};
+  const merges=(runtime.store.security.gitWork?.list(room.spaceId)||[]).filter(request=>request.roomId===room.id&&request.roundId===job.roomRoundId).map(request=>{runtime.store.security.authorize(job,'repository.read',request.resourceId);runtime.store.data.assertHandoff(job,[request.taskId,...request.reviews.map(review=>review.taskId)]);const {diff,...summary}=request;return summary;});
+  return {merges,requiredOutputs:room.governance?.outputs||[],ownerApproval:!!room.governance?.ownerApproval,artifacts,handoff,evidence:room.evidence||[],checkpoints:room.checkpoints||[],cases:room.cases||[]};
 }
 
 export function finalizeRoom(runtime,room,job){

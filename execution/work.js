@@ -96,7 +96,7 @@ export function defineRoomCase(runtime,job,input){
   invalidateRoomResult(room,'Test cases changed. Execute the current cases before review.');runtime.changed();return item;
 }
 export async function runRecordedTest(runtime,job,input){
-  strict(input,['resourceId','checkpointId','command','reason','scenario','caseId','timeoutMs']);const room=workingRoom(runtime,job);
+  strict(input,['resourceId','checkpointId','command','reason','scenario','caseId','timeoutMs','purpose']);if(input.purpose!==undefined&&!['test','uat'].includes(input.purpose))throw Error('Choose test or uat purpose.');const room=workingRoom(runtime,job);
   const resourceId=textInput(input.resourceId,200),id=checkpointId(input.checkpointId),command=validateCommand(input),scenario=input.scenario===undefined?'':textInput(input.scenario,2000);
   const item=input.caseId===undefined?null:room.cases?.find(item=>item.id===input.caseId);
   if(input.caseId!==undefined&&!item)throw new Error('Test case not found.');
@@ -108,12 +108,26 @@ export async function runRecordedTest(runtime,job,input){
     if(pending.length)throw new Error('Test blocked by a dependency awaiting a passing retest.');
   }
   const revision=item?.revision,controller=new AbortController(),run={job,controller},startedAt=new Date().toISOString();runtime.executions.add(run);
-  let result,error;
+  let result,error,gitCommit,gitBranch,verifyUat;
   try{
     // Every test starts at the immutable checkpoint; prior test commands cannot alter its input.
     await runtime.sandbox.stop(job.id);
     await ensureTaskWorkspace(runtime,job,resourceId,id,controller.signal);
+    const attest=async()=>{try{const revision=await runtime.sandbox.git(job,['rev-parse','HEAD'],{signal:controller.signal});const value=revision.stdout.toString().trim();return revision.exitCode===0&&/^[a-f0-9]{40}$/.test(value)&&await runtime.sandbox.gitClean(job,controller.signal)?value:null;}catch{return null;}};
+    gitCommit=await attest();
+    if(input.purpose==='uat'){
+      const resource=runtime.store.security.resource(resourceId+':git'),rule=resource.metadata.branchPolicy;
+      if(!rule?.qaAgentIds.includes(job.agentId))throw Error('UAT requires a configured QA agent and reviewed Git project.');
+      const branch=await runtime.sandbox.git(job,['symbolic-ref','--short','HEAD'],{signal:controller.signal});gitBranch=branch.stdout.toString().trim();
+      if(!gitCommit||branch.exitCode!==0||gitBranch!==rule.integrationBranch)throw Error('UAT must run on the exact clean integration branch.');
+      runtime.store.security.authorize(job,'repository.read',resource.id);
+      const check=()=>{controller.signal.throwIfAborted();runtime.store.security.authorize(job,'repository.read',resource.id);runtime.store.security.authorize(job,'sandbox.exec',resourceId);runtime.store.data.roomCheck(job,[{resourceId:resource.id,action:'repository.read'}]);};
+      verifyUat=async()=>{const remote=await runtime.gitGateway.refs(job,resource.id,'repository.read',controller.signal,check);if(remote.refs['refs/heads/'+rule.integrationBranch]!==gitCommit)throw Error('Integration branch changed. Synchronize before UAT.');};await verifyUat();
+      runtime.store.data.note(job,resource.id,'repository.read');
+    }
     result=await runtime.sandbox.run(job,{resourceId,...command},controller.signal);
+    if(gitCommit!==await attest())gitCommit=null;
+    if(verifyUat){if(!gitCommit)throw Error('UAT changed tracked source or introduced files. The tested integration commit is unverified.');await verifyUat();}
   }
   catch(failure){error=failure;result={exitCode:null,stdout:'',stderr:failure.message||'Execution failed.'};}
   finally{await runtime.sandbox.stop(job.id);runtime.executions.delete(run);}
@@ -122,7 +136,7 @@ export async function runRecordedTest(runtime,job,input){
   const bounded=(value,limit)=>new TextDecoder().decode(Buffer.from(runtime.store.connectors.redact(value||'')).subarray(0,limit),{stream:true});
   const stdout=bounded(result.stdout,32768),stderr=bounded(result.stderr,32768-Buffer.byteLength(stdout));
   const stale=room.targetCheckpointId!==id||item&&item.revision!==revision;
-  const evidence={id:randomUUID(),checkpointId:id,resourceId,taskId:job.id,agentId:job.agentId,command:runtime.store.connectors.redact(command.command),scenario:runtime.store.connectors.redact(scenario),...(item?{caseId:item.id,caseRevision:revision}:{}),status:cancelled?'cancelled':passed?'passed':'failed',exitCode:result.exitCode,stdout,stderr,timedOut:!!result.timedOut,truncated:!!result.truncated,startedAt,createdAt:new Date().toISOString(),...(stale?{stale:true}:{})};
+  const evidence={id:randomUUID(),...(gitCommit?{gitCommit}:{}),...(gitBranch?{gitBranch}:{}),purpose:input.purpose||'test',checkpointId:id,resourceId,taskId:job.id,agentId:job.agentId,command:runtime.store.connectors.redact(command.command),scenario:runtime.store.connectors.redact(scenario),...(item?{caseId:item.id,caseRevision:revision}:{}),status:cancelled?'cancelled':passed?'passed':'failed',exitCode:result.exitCode,stdout,stderr,timedOut:!!result.timedOut,truncated:!!result.truncated,startedAt,createdAt:new Date().toISOString(),...(stale?{stale:true}:{})};
   (room.evidence ||= []).push(evidence);
   if(item&&!stale){item.status=passed?'passed':'failed';item.checkpointId=id;item.evidenceId=evidence.id;}
   invalidateRoomResult(room,'Test evidence changed. Review the current execution results.');runtime.changed();return evidence;

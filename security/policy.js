@@ -1,3 +1,4 @@
+import {openGitWork} from './git-work.js';
 import {openIsolatedWorkspaces} from './isolated-workspaces.js';
 import {securityBackup} from './migration.js';
 import { randomUUID } from 'node:crypto';
@@ -12,7 +13,7 @@ export const statePolicy = Symbol('server policy');
 // Unavailable capabilities remain denied even with a grant or legacy allow mode.
 export const capabilities = Object.freeze(Object.fromEntries([
   ['knowledge.read','knowledge',true], ['memory.read','memory',true], ['memory.write','memory',true],
-  ['repository.read','repository',true], ['repository.branch.push','repository',false], ['repository.merge','repository',false],
+  ['repository.branch.create','repository',false], ['repository.review','repository',true], ['repository.read','repository',true], ['repository.branch.push','repository',false], ['repository.merge','repository',false],
   ['workspace.read','workspace',true], ['sandbox.exec','workspace',false], ['filesystem.read','file',false], ['filesystem.write','file',false],
   ['file.download','file',true], ['browser.read','browser',false], ['browser.navigate','browser',false], ['browser.interact','browser',false],
   ['mcp.invoke','connector',true], ['routine.create','routine',false], ['room.share','room',false],
@@ -101,8 +102,10 @@ export function openPolicy(db,state,directory) {
     configureExecution(available){execution=available===true;},
     touch(){bump();},
     auditOwner(action,spaceId,reason){space(spaceId);events({action,spaceId},{mode:'deny',reason});},
+    branchPolicies(endpoint){return policy.isolatedWorkspaces.list().filter(entry=>(!endpoint||entry.metadata.repository?.endpoint===endpoint)&&entry.metadata.repository?.branchPolicy).map(entry=>({projectId:entry.id,...entry.metadata.repository.branchPolicy}));},
+    reviewed(resource){return resource.metadata.branchPolicy||resource.metadata.isolatedWorkspaceIds?.some(id=>policy.isolatedWorkspaces.get(id).metadata.repository?.branchPolicy);},
     actions(resource){return Object.values(capabilities).filter(c=>c.resourceType===resource.type||resource.type==='workspace'&&c.resourceType==='repository'&&resource.metadata.isolatedWorkspaceIds?.some(id=>{const entry=policy.isolatedWorkspaces.get(id);return entry.metadata.repository||entry.metadata.repositoryId;}));},
-    catalog(){return Object.values(capabilities).map(c=>({...c,requiresApproval:approvalActions.includes(c.action),available:c.available||browserExecution&&['browser.read','browser.navigate','browser.interact'].includes(c.action)||execution&&['sandbox.exec','repository.branch.push'].includes(c.action)||approvalActions.includes(c.action)&&!!db.query("SELECT id FROM connectors WHERE type='action-gateway-v1' AND enabled=1 LIMIT 1").get()}));},
+    catalog(){return Object.values(capabilities).map(c=>({...c,requiresApproval:approvalActions.includes(c.action),available:c.available||browserExecution&&['browser.read','browser.navigate','browser.interact'].includes(c.action)||execution&&['sandbox.exec','repository.branch.push','repository.branch.create','repository.merge'].includes(c.action)||approvalActions.includes(c.action)&&!!db.query("SELECT id FROM connectors WHERE type='action-gateway-v1' AND enabled=1 LIMIT 1").get()}));},
     listSpaces(){return db.query('SELECT id,name FROM spaces WHERE owner_id=?').all(meta().owner_id);},
     createSpace(input){strict(input,['name']);const value={id:randomUUID(),name:name(input.name)};db.transaction(()=>{db.query('INSERT INTO spaces VALUES(?,?,?)').run(value.id,meta().owner_id,value.name);bump();})();return value;},
     validateResource(input){return resourceValue(input);},
@@ -150,12 +153,14 @@ export function openPolicy(db,state,directory) {
       const grants=input.grants.map(g=>{
         strict(g,['spaceId','resourceId','action','mode','constraints','expiresAt']);
         if(!input.spaceIds.includes(g.spaceId)||!Object.hasOwn(capabilities,g.action)||!['deny','auto','ask'].includes(g.mode))throw new Error('Invalid grant.');
-        strict(g.constraints || {},g.action==='repository.branch.push'?['branchPrefixes','forbiddenRefs','denyWorkflowChanges']:[]);
+        strict(g.constraints || {},g.action==='repository.branch.push'?['branchPrefixes','forbiddenRefs','denyWorkflowChanges']:g.action==='repository.branch.create'?['kinds']:g.action==='repository.merge'?['transitions']:[]);
         if(g.action==='repository.branch.push') {
           for(const key of ['branchPrefixes','forbiddenRefs'])if(g.constraints?.[key]!==undefined&&(!Array.isArray(g.constraints[key])||g.constraints[key].length>20||g.constraints[key].some(v=>typeof v!=='string'||!v||v.length>100||!/^[A-Za-z0-9_./*-]+$/.test(v))))throw new Error('Invalid Git ref constraint.');
           if(g.constraints?.branchPrefixes?.some(v=>!v.endsWith('/')||v.includes('*')||v.includes('..')))throw new Error('Use exact branch prefixes.');
           if(g.constraints?.denyWorkflowChanges!==undefined&&g.constraints.denyWorkflowChanges!==true)throw new Error('CI changes require owner approval.');
         }
+        if(g.action==='repository.branch.create'&&g.constraints?.kinds!==undefined&&(!Array.isArray(g.constraints.kinds)||!g.constraints.kinds.length||g.constraints.kinds.some(kind=>!['feature','task','integration'].includes(kind))))throw Error('Choose permitted branch creation kinds.');
+        if(g.action==='repository.merge'&&g.constraints?.transitions!==undefined&&(!Array.isArray(g.constraints.transitions)||!g.constraints.transitions.length||g.constraints.transitions.some(kind=>!['task-feature','feature-integration'].includes(kind))))throw Error('Choose permitted merge directions.');
         if(g.resourceId==='*'){if(g.mode!=='deny'&&input.confirmWildcard!==true)throw new Error('Confirm wildcard access explicitly.');}
         else {id(g.resourceId);const r=db.query('SELECT * FROM resources WHERE id=? AND space_id=?').get(g.resourceId,g.spaceId);if(!r||!(policy.actions({type:r.type,metadata:JSON.parse(r.metadata)}).some(c=>c.action===g.action)||g.mode==='deny'&&r.type==='workspace'&&JSON.parse(r.metadata).isolatedWorkspaceIds&&capabilities[g.action].resourceType==='repository'))throw new Error('Resource/action mismatch.');}
         if(g.expiresAt!==undefined&&(!Number.isFinite(Date.parse(g.expiresAt))||typeof g.expiresAt!=='string'))throw new Error('Invalid grant expiry.');
@@ -183,7 +188,9 @@ export function openPolicy(db,state,directory) {
         let target;try{target=policy.resource(request.resourceId);}catch{return deny('Resource/action mismatch.');}
         if(target.spaceId!==request.spaceId)return deny('Resource/action mismatch.');
         if(target.grantResourceId){
-          if(target.type==='repository'&&!['repository.read','repository.branch.push'].includes(request.action))return deny('Catalog Git merge requires a reviewed action gateway.');
+          if(request.action==='repository.review'&&!target.metadata.branchPolicy?.reviewerIds.includes(request.agentId))return deny('Only designated project reviewers may review merges.');
+          if(['repository.branch.create','repository.review','repository.merge'].includes(request.action)&&!target.metadata.branchPolicy)return deny('Configure this project’s reviewed branch workflow first.');
+          if(target.type==='repository'&&!['repository.read','repository.branch.push','repository.branch.create','repository.review','repository.merge'].includes(request.action))return deny('Catalog Git merge requires a reviewed action gateway.');
           if(target.type!==capabilities[request.action].resourceType)return deny('Resource/action mismatch.');
           if(target.metadata.connectionId&&!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='git-https-v1' AND endpoint=? AND enabled=1").get(target.metadata.connectionId,target.connectionSpaceId,target.metadata.endpoint))return deny('Git connection disabled or outside scope.');
           const legacyRead=target.legacyRepository&&request.action==='repository.read'&&!db.query("SELECT expires_at FROM grants WHERE agent_id=? AND space_id=? AND action='repository.read' AND (resource_id=? OR resource_id='*')").all(request.agentId,request.spaceId,target.grantResourceId).some(g=>!g.expires_at||Date.parse(g.expires_at)>Date.now());
@@ -192,7 +199,9 @@ export function openPolicy(db,state,directory) {
         const r=db.query('SELECT * FROM resources WHERE id=? AND space_id=?').get(request.resourceId,request.spaceId);
         if(!r||!policy.actions(target).some(c=>c.action===request.action))return deny('Resource/action mismatch.');
         const groupedGit=target.type==='workspace'&&request.action.startsWith('repository.');
-        if(groupedGit&&request.action==='repository.merge')return deny('Catalog Git merge requires a reviewed action gateway.');
+        const reviewed=groupedGit&&policy.reviewed(target);
+        if(['repository.branch.create','repository.review'].includes(request.action)&&!reviewed)return deny('Configure a reviewed branch workflow first.');
+        if(groupedGit&&request.action==='repository.merge'&&!reviewed)return deny('Configure a reviewed branch workflow first.');
         const gs=db.query("SELECT * FROM grants WHERE agent_id=? AND space_id=? AND action=? AND (resource_id=? OR resource_id='*')").all(request.agentId,request.spaceId,request.action,request.resourceId).filter(g=>!g.expires_at||Date.parse(g.expires_at)>Date.now());
         if(gs.some(g=>g.mode==='deny'))return deny('Explicit owner deny.');
         if(!gs.length&&request.action==='workspace.read')return policy.simulate({...request,action:'sandbox.exec'});
@@ -203,15 +212,16 @@ export function openPolicy(db,state,directory) {
         if(request.action==='file.download'&&!JSON.parse(r.metadata).path)return deny('Exact file path unavailable.');
         if(request.action.startsWith('browser.')&&!(JSON.parse(r.metadata).readUrls?.length||Array.isArray(JSON.parse(r.metadata).blockedDomains)))return deny('Browsing scope unavailable.');
         if(request.action==='mcp.invoke'&&!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='mcp-document-v1' AND enabled=1").get(JSON.parse(r.metadata).connectionId||'',request.spaceId))return deny('Reviewed connector unavailable.');
-        const high=approvalActions.includes(request.action);
+        const high=approvalActions.includes(request.action)&&!(reviewed&&request.action==='repository.merge');
         if(high&&!db.query("SELECT id FROM connectors WHERE id=? AND space_id=? AND type='action-gateway-v1' AND enabled=1").get(JSON.parse(r.metadata).connectionId||'',request.spaceId))return deny('Reviewed action gateway unavailable.');
-        if(!high&&!capabilities[request.action].available&&!(execution&&['sandbox.exec','repository.branch.push'].includes(request.action))&&!(browserExecution&&['browser.read','browser.navigate','browser.interact'].includes(request.action)))return deny('Scoped executor unavailable.');
+        if(!high&&!capabilities[request.action].available&&!(execution&&(['sandbox.exec','repository.branch.push','repository.branch.create'].includes(request.action)||reviewed&&request.action==='repository.merge'))&&!(browserExecution&&['browser.read','browser.navigate','browser.interact'].includes(request.action)))return deny('Scoped executor unavailable.');
         let readApproval=false;
         if(request.action.startsWith('browser.')&&request.action!=='browser.read'){const read=policy.simulate({...request,action:'browser.read'});if(read.mode==='deny')return deny('Read page content access required.');readApproval=read.mode==='ask';}
         return {mode:high||readApproval||gs.some(g=>g.mode==='ask')?'ask':'auto',reason:readApproval?'Read page content requires approval.':'Matching resource grant.',revision:policy.revision};
       }catch{return deny('Invalid security context.');}
     },
     constraints(job,action,resourceId){const c=policy.context(job);resourceId=policy.resource(resourceId).grantResourceId||resourceId;const grants=db.query("SELECT constraints,expires_at FROM grants WHERE agent_id=? AND space_id=? AND action=? AND (resource_id=? OR resource_id='*') AND mode!='deny'").all(c.agentId,c.spaceId,action,resourceId).filter(g=>!g.expires_at||Date.parse(g.expires_at)>Date.now()).map(g=>JSON.parse(g.constraints));
+      if(action==='repository.branch.create'||action==='repository.merge'){const key=action==='repository.branch.create'?'kinds':'transitions',values=grants.map(g=>g[key]||[]);return {[key]:values.flat().filter(value=>values.every(list=>list.includes(value)))};}
       if(action!=='repository.branch.push')return {};
       const prefixes=grants.map(g=>g.branchPrefixes||[]);
       return {branchPrefixes:prefixes.flat().filter(p=>prefixes.every(ps=>ps.some(v=>p.startsWith(v)))),forbiddenRefs:grants.flatMap(g=>g.forbiddenRefs||[]),denyWorkflowChanges:true};},
@@ -238,6 +248,8 @@ export function openPolicy(db,state,directory) {
   };
   if(!db.query("SELECT name FROM sqlite_master WHERE name='isolated_workspaces'").get())securityBackup(db,directory,'pre-isolated-workspaces-');
   policy.isolatedWorkspaces=openIsolatedWorkspaces(db,state,policy);
+  if(!db.query("SELECT name FROM sqlite_master WHERE name='git_merge_requests'").get())securityBackup(db,directory,'pre-git-work-');
+  policy.gitWork=openGitWork(db);
   Object.defineProperty(state,statePolicy,{value:policy});
   for(const conversation of state.conversations)conversation.spaceId ||= policy.legacySpaceId;
   for(const job of state.jobs){

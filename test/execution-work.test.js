@@ -155,3 +155,5 @@ test('failed project switching retains the prior checkpoint pin even if another 
  await expect(ensureTaskWorkspace(f.runtime,f.job,'code:web')).rejects.toThrow('Snapshot missing');f.state.executionHeads['code:api']=id(9);
  await ensureTaskWorkspace(f.runtime,f.job,'code:api');expect(f.job.workspacePin.headId).toBe(saved.id);expect(f.calls).toContainEqual(['restore',saved.id]);
 });
+
+test('invalid recorded test purpose cannot leave an active execution behind',async()=>{const f=fixture();await expect(runRecordedTest(f.runtime,f.job,{purpose:'unsupported'})).rejects.toThrow('purpose');expect(f.runtime.executions.size).toBe(0);});

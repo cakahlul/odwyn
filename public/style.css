@@ -1329,3 +1329,5 @@ button.attachment-preview:hover { background:var(--paper); }
 #workflow-run-form>.modal-fields { flex:1; }
 #workflow-run-inputs textarea { min-height:180px; resize:vertical; }
 #workflow-run-attachments { margin:12px 0; }
+
+.access-action > .access-membership { grid-column:1 / -1; }

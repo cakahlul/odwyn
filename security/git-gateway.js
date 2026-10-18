@@ -29,12 +29,38 @@ export class GitGateway {
     });
   }
   async sync(job,args,signal,canRun){return syncGitWorkspace(this,job,args,signal,canRun);}
+  async refs(job,resourceId,action,signal,check){
+    check();const resource=this.policy.resource(resourceId),target=await this.resolver(resource.metadata.endpoint);check();
+    const token=await this.credentialResolver(resourceId,this.policy.context(job),action);check();
+    if(token!==null&&(typeof token!=='string'||token.length>4096||/[\r\n]/.test(token)))throw Error('Invalid scoped credential.');
+    const path=target.url.pathname.replace(/\/$/,''),options={username:resource.metadata.gitUsername};
+    const entries=lines(await this.request(target,path+'/info/refs?service=git-receive-pack','GET',undefined,token,signal,options));check();
+    const advertised=entries.filter(line=>/^[a-f0-9]{40} /.test(line)),capabilities=advertised.flatMap(line=>line.split('\0')[1]?.trim().split(/\s+/)||[]);
+    const refs=Object.fromEntries(advertised.map(line=>[line.split(' ')[1].split(/[\0\n]/)[0],line.slice(0,40)]));
+    return {target,token,path,options,capabilities,refs};
+  }
+  async atomic(job,resourceId,action,{source,sourceCommit,target:branch,oldCommit,commit},signal,check){
+    const session=await this.refs(job,resourceId,action,signal,check),sourceRef='refs/heads/'+source,targetRef='refs/heads/'+branch;
+    if(!session.capabilities.includes('atomic')||!session.capabilities.includes('report-status'))throw Error('Repository must support atomic Git updates with verified receipts.');
+    if(session.refs[sourceRef]!==sourceCommit||(session.refs[targetRef]||'0'.repeat(40))!==oldCommit)throw Error('Remote branches changed. Prepare and review again.');
+    const packed=await this.sandbox.git(job,['pack-objects','--stdout','--revs'],{input:Buffer.from(commit+'\n'),signal,limit:8*1024*1024});
+    if(packed.exitCode!==0||packed.truncated||packed.stdout.subarray(0,4).toString()!=='PACK')throw Error('Bounded Git pack unavailable.');check();
+    const response=lines(await this.request(session.target,session.path+'/git-receive-pack','POST',Buffer.concat([pkt(`${oldCommit} ${commit} ${targetRef}\0report-status atomic\n`),pkt(`${sourceCommit} ${sourceCommit} ${sourceRef}\n`),Buffer.from('0000'),packed.stdout]),session.token,signal,session.options));
+    if(response.length!==3||new Set(response).size!==3||!response.includes('unpack ok\n')||![sourceRef,targetRef].every(ref=>response.includes(`ok ${ref}\n`)))throw Error('Atomic Git receipt did not confirm both branches. Inspect remote state before retrying.');check();
+    return {ref:targetRef,commit,receiptVerified:true};
+  }
   async push(job,args,signal){
     if(!args||Object.keys(args).some(k=>!['resourceId','ref'].includes(k))||typeof args.ref!=='string'||args.ref.length>256||!/^refs\/heads\/[a-zA-Z0-9][a-zA-Z0-9_./-]*$/.test(args.ref)||args.ref.includes('..')||args.ref.endsWith('/')||args.ref.includes('//'))throw new Error('Unsupported Git push target.');
     const branch=args.ref.slice(11);
     const check=()=>{
       signal.throwIfAborted();const context=this.policy.authorize(job,'repository.branch.push',args.resourceId),resource=this.policy.resource(args.resourceId);
       if(resource.grantResourceId){const worker=this.sandbox.existing(job);if(args.resourceId!==worker.resourceId+':git')throw Error('Push repository does not match the active project workspace.');this.policy.authorize(job,'repository.read',args.resourceId);this.policy.authorize(job,'sandbox.exec',worker.resourceId);}
+      // shortcut: reserve configured namespaces across aliases; verified repository identities can narrow this for unrelated legacy remotes.
+      const reserved=this.policy.branchPolicies().filter(rule=>branch===rule.integrationBranch||branch===rule.baseBranch||branch.startsWith(rule.featurePrefix)||branch.startsWith(rule.taskPrefix));
+      if(reserved.length){
+        const rule=resource.metadata.branchPolicy,record=rule&&this.policy.gitWork.branch(resource,branch);
+        if(!record||record.kind!=='task'||record.agentId!==job.agentId||!branch.startsWith(rule.taskPrefix))throw Error('Reviewed workflow branches require the registered task owner or the reviewed merge broker.');
+      }
       if(/^(main|master|release)(\/|$)/i.test(branch))throw new Error('Protected refs require owner step-up approval.');
       const constraints=this.policy.constraints(job,'repository.branch.push',args.resourceId);
       if(!constraints.branchPrefixes?.length||!constraints.branchPrefixes.some(p=>branch.startsWith(p))||constraints.forbiddenRefs?.some(ref=>ref.endsWith('*')?branch.startsWith(ref.slice(0,-1)):branch===ref))throw new Error('Git ref outside owner constraints.');
@@ -44,6 +70,8 @@ export class GitGateway {
     const worker=this.sandbox.existing(job);
     const revision=await this.sandbox.git(job,['rev-parse','--verify',args.ref],{signal});
     const next=revision.stdout.toString().trim();if(revision.exitCode!==0||!/^[a-f0-9]{40}$/.test(next))throw new Error('Git branch unavailable.');
+    const record=this.policy.gitWork.branch(this.policy.resource(args.resourceId),branch);
+    if(record){const base=await this.sandbox.git(job,['merge-base','--is-ancestor',record.baseCommit,next],{signal});if(base.exitCode!==0)throw Error('Task branch lost its registered base.');}
     const ancestry=await this.sandbox.git(job,['merge-base','--is-ancestor',worker.base,next],{signal});if(ancestry.exitCode!==0)throw new Error('Unrelated repository history denied.');
     const changed=await this.sandbox.git(job,['diff','--no-ext-diff','--no-textconv','--name-only','-z',worker.base,next,'--'],{signal});
     if(changed.exitCode!==0||changed.truncated)throw new Error('Git change validation unavailable.');

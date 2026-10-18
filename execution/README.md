@@ -128,4 +128,21 @@ from that grant. Generated per-project Git target IDs retain exact worker matchi
 credential endpoint binding, approval scope and Space boundaries. Inline entries
 never infer Git authority from workspace read. Older `repositoryId` entries retain
 the read fallback only in the absence of an explicit Git-read decision. Catalog
-Git merge is unavailable; existing approved action-gateway merges are unchanged.
+Git merges require an explicit reviewed branch policy; existing approved action-gateway merges are unchanged. See [reviewed branch setup](../docs/USAGE.md#reviewed-feature-task-and-integration-branches).
+
+
+Reviewed project policies add `repository.branch.create`, `repository.review` and
+`repository.merge` to the same Space resource. Grants constrain creation `kinds`
+and merge `transitions`. SQLite retains registered branch ownership and immutable
+merge requests/reviews independently of model-visible state. Candidates bind
+source/target commits, checkpoint, policy revision, room/round and exact current
+case/evidence snapshot. Execute claims the request once and verifies atomic
+source no-op plus target CAS receipts; failed/uncertain attempts are indeterminate.
+Git replacements are disabled; grafts, shallow history and alternate object stores
+are refused. Raw tracked blobs, modes and absence of additional workspace files
+are checked for test attestation. Integration promotion requires configured QA;
+UAT explicitly attests the current integration branch before and after execution.
+Namespace reservations apply across endpoints to prevent alias write bypasses;
+this intentionally restricts unrelated legacy resources using the same names.
+Native Git tests cover actual receive-pack transactions but do not establish
+container or hosted-provider compatibility.

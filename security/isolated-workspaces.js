@@ -1,3 +1,4 @@
+import {validateBranchPolicy} from './git-work.js';
 import {randomUUID} from 'node:crypto';
 import {sourceFolder} from '../execution/workspace-source.js';
 import {canonical} from './approvals.js';
@@ -13,7 +14,8 @@ export function openIsolatedWorkspaces(db,state,policy){
     const metadata={...input.metadata};if(!input.metadata||typeof input.metadata!=='object'||Array.isArray(input.metadata)||Object.keys(metadata).some(key=>!['sourceFolder','repositoryId','repository'].includes(key)))throw Error('Invalid isolated workspace configuration.');
     if(metadata.sourceFolder!==undefined)metadata.sourceFolder=sourceFolder(metadata.sourceFolder);
     if(metadata.repository!==undefined){
-      const git=metadata.repository;if(metadata.repositoryId!==undefined||!git||Array.isArray(git)||typeof git!=='object'||Object.keys(git).some(key=>!['endpoint','connectionId','gitUsername'].includes(key))||typeof git.endpoint!=='string'||git.endpoint.length>2000)throw Error('Invalid Git repository configuration.');
+      const git=metadata.repository;if(metadata.repositoryId!==undefined||!git||Array.isArray(git)||typeof git!=='object'||Object.keys(git).some(key=>!['endpoint','connectionId','gitUsername','branchPolicy'].includes(key))||typeof git.endpoint!=='string'||git.endpoint.length>2000)throw Error('Invalid Git repository configuration.');
+      if(git.branchPolicy!==undefined)git.branchPolicy=validateBranchPolicy(git.branchPolicy,state);
       const url=new URL(git.endpoint);if(url.protocol!=='https:'||url.username||url.password||url.hash||url.search||url.hostname.includes('*'))throw Error('Use an exact credential-free Git HTTPS URL.');
       if(git.gitUsername!==undefined&&(typeof git.gitUsername!=='string'||!git.gitUsername||git.gitUsername.length>100||/[:\x00-\x20\x7f]/.test(git.gitUsername)))throw Error('Use a Git HTTPS username without spaces or colons.');
       if(git.connectionId!==undefined&&!db.query("SELECT id FROM connectors WHERE id=? AND type='git-https-v1' AND endpoint=? AND enabled=1").get(git.connectionId,git.endpoint))throw Error('Choose an enabled Git connection matching this exact repository URL.');
@@ -21,7 +23,7 @@ export function openIsolatedWorkspaces(db,state,policy){
     if(metadata.repositoryId!==undefined){const repository=policy.resource(metadata.repositoryId);if(repository.type!=='repository'||repository.grantResourceId||!repository.metadata.endpoint||repository.metadata.upstreamId)throw Error('Choose a configured Git repository.');}
     return {name:input.name.trim(),metadata};
   };
-  const repositoryConfig=metadata=>metadata.repository||(metadata.repositoryId?policy.resource(metadata.repositoryId).metadata:null);
+  const repositoryConfig=metadata=>{const config=metadata.repository||(metadata.repositoryId?policy.resource(metadata.repositoryId).metadata:null);if(!config)return null;const {branchPolicy,...identity}=config;return identity;};
   const idle=id=>{for(const resource of linked(id))policy.assertConfigurationIdle(resource.spaceId);};
   const target=(resource,entry)=>{
     const id=entry.id,targetId=resource.id+':'+id,repository=entry.metadata.repository?{metadata:entry.metadata.repository,spaceId:entry.metadata.repository.connectionId?db.query('SELECT space_id FROM connectors WHERE id=?').get(entry.metadata.repository.connectionId)?.space_id:null}:entry.metadata.repositoryId?policy.resource(entry.metadata.repositoryId):null;

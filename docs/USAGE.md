@@ -166,10 +166,99 @@ Use **Task runs** to inspect progress. **Stop** ends execution; **Review & resum
 
 1. Open **Settings → Isolated workspaces → Create isolated workspace**. Give the project a name. Enable **Connect to repository** to enter its Git HTTPS URL, select a Scoped Git connection (optional for public access), and optionally set the Git username for Basic token authentication. No Repository resource is required. Leave the option off to use source files only. Leave the source folder blank for an automatically managed empty folder. Save, then Edit to import a local project folder or copy a server project. Start empty for Git checkout; import/copy excludes `.git`.
 2. In **Settings → Resources**, select a Space, create an **Isolated workspace** resource named, for example, **Personal-Code**, and select one or more saved projects. Repeat in Grooming, Planning, Execution or Testing using the same project entries. No repeated source setup is needed.
-3. In each agent's **Access & Autonomy**, configure **workspace.read**, **Run commands**, **Read repository**, and **Push a branch** together on the named resource. These decisions cover every selected project with the corresponding capability. New inline Git configurations require an explicit repository-read grant; code-read permission alone does not grant Git access. Sync additionally requires execution permission. Push uses the same saved Git connection and requires read and execution access to that exact project. Set allowed branch prefixes (for example `feature/`) under **Permission templates & restrictions**; an empty list blocks every push. Protected main/master/release refs, forbidden refs, CI changes, and non-fast-forward pushes remain blocked. Ask-first push approvals bind the exact project, branch, parameters and policy revision and execute once. Git-only catalog connections cannot merge: the Merge row remains blocked. Existing reviewed merge gateways and standalone Repository resources continue working.
+3. In each agent's **Access & Autonomy**, configure **workspace.read**, **Run commands**, **Read repository**, and **Push a branch** together on the named resource. These decisions cover every selected project with the corresponding capability. New inline Git configurations require an explicit repository-read grant; code-read permission alone does not grant Git access. Sync additionally requires execution permission. Push uses the same saved Git connection and requires read and execution access to that exact project. Set allowed branch prefixes (for example `feature/`) under **Permission templates & restrictions**; an empty list blocks every push. Protected main/master/release refs, forbidden refs, CI changes, and non-fast-forward pushes remain blocked. Ask-first push approvals bind the exact project, branch, parameters and policy revision and execute once. Enable the reviewed branch workflow below for candidate-tested, Lead-approved merges. Without that option the catalog Merge row remains blocked. Existing reviewed merge gateways remain supported.
 
 Agents receive an exact target ID for each selected project and its linked Git repository. Each project has its own task working copy and per-resource checkpoint history. A task can switch projects within its resource after saving its current checkpoint. The catalog shares initial configuration/source, not live edits or checkpoint authority: pass changes between Spaces using explicit reviewed checkpoint handoffs or a chosen Git commit/branch. A room's test/review target remains one checkpoint at a time.
 
 Creating a project or resource grants no access. Changing selected projects or source/repository configuration revokes affected resource grants for review. Credential/endpoint changes on the source Git connection also revoke dependent grants; disabling the connection blocks subsequent Git calls. Stop affected Space tasks before configuration changes. Changing an existing Git target or source folder with retained checkpoints requires a fresh catalog entry. Unlink entries before deletion; deleting entries preserves source files and history.
 
 Existing directly configured resources, IDs, grants and checkpoints remain unchanged. Older catalog entries linked through a Repository resource keep their read fallback from workspace access until you save an explicit Git-read decision; push still needs a new explicit grant. Editing unchanged Git fields preserves that legacy link. Inline configuration can replace an equivalent link without discarding checkpoint history. Connecting Git to a source-only catalog entry preserves its checkpoints and revokes resource grants for review. They open in **Direct source (existing setup)** mode. Keep resources with checkpoints; create a separate catalog resource when adopting this feature. The additive catalog table is backed up before its first creation. For rollback, restore that backup with the matching older release; older releases cannot use newly created catalog resources. Existing source-file limits and isolated-executor requirements still apply.
+
+### Reviewed feature, task and integration branches
+
+In **Settings → Isolated workspaces**, edit the saved project, enable
+**Connect to repository → Reviewed branch workflow**, and set:
+
+- Production base: `main` (use `master` if that is your actual production baseline).
+- Feature prefix: `feature/`; task prefix: `task/`.
+- Integration branch for UAT: `development`.
+- Required merge reviewers: **Team Lead Engineer**.
+- QA agents: **QA Engineer**.
+
+Save, then regrant access on the Code resource in each Space. Changing branch
+rules revokes linked resource access and invalidates existing merge reviews;
+source folders and checkpoints remain. No separate Repository resource is needed.
+
+| Agent / Space | Create branches | Push | Review merge candidate | Merge changes |
+| --- | --- | --- | --- | --- |
+| FE/BE · Execution | Automatic: Feature, Own task; Integration for initial bootstrap | Automatic, prefix `task/` | Blocked | After required review: Task → feature |
+| FE/BE · Testing | Automatic: Own task | Automatic, prefix `task/` | Blocked | After required review: Task → feature, Feature → integration |
+| Lead · Execution / Testing | Blocked | Blocked | Automatic | Blocked |
+| QA · Testing / Release | Blocked | Blocked | Blocked | Blocked |
+
+All participants need **workspace.read** and **Read repository** on their Space's
+Code resource. FE/BE and QA also need **Run commands**. Lead can review stored
+candidate diffs and evidence without command execution. Select allowed creation
+kinds and merge directions beneath their action controls. Saving delegated merge
+access asks for your password once; each merge then waits for recorded Lead
+review. **Ask first** adds your exact-action approval as well. Room agreement and
+`odwyn_room_review` do not approve repository merges.
+
+Agents use these broker tools inside an active configured room:
+
+1. Synchronize the production base using `odwyn_repository_sync` and retain its
+   returned commit. Use `odwyn_repository_branch` with that exact `baseCommit` to
+   create `feature/Feature001`; create each task from that feature's synchronized
+   commit. Task names become `task/Feature001/<agent-id>/<task>`, owned by that
+   agent. Bootstrap `development` from the base only if it does not exist.
+2. Implement, commit, test and push task branches with `odwyn_repository_push`.
+   Save checkpoints. Direct task-branch creation/pushes outside the registry are
+   denied; feature and integration updates require the merge broker.
+3. Synchronize the merge target, then the source, so both histories are present.
+   `odwyn_repository_merge` with `action: prepare` builds a conflict-free merge
+   commit, checks it out detached and saves an immutable candidate checkpoint.
+   Conflicts require fixing/rebasing in the task branch and preparing again.
+4. Run `odwyn_run_test` against the returned candidate checkpoint. Every current
+   room case must pass. Feature → integration additionally requires nonempty
+   defined cases passed by configured QA. Testing a source branch alone does not
+   pass the merge gate. Commands must preserve tracked files and remove generated
+   workspace files; use `/tmp` for temporary output. Dependencies belong in the
+   reviewed worker image, not untracked workspace inputs.
+5. Lead inspects the request's exact diff, commits and recorded evidence using
+   `odwyn_repository_merge` with `action: inspect`, then records their own
+   `odwyn_repository_review`. FE/BE executes the same request with
+   `odwyn_repository_merge`, `action: execute`. Every designated reviewer must
+   approve; authors cannot approve their own candidate. New evidence, case edits,
+   policy changes, room rounds or changed remote branches require fresh review
+   or a new candidate. A fresh task may restore the candidate checkpoint to execute
+   it without losing its previous saved work.
+6. Testing starts from the feature branch. Fix defects through new task branches
+   and repeat task → feature review. After QA passes, prepare and test the
+   feature → development candidate, obtain Lead approval, and merge.
+7. Release synchronizes `development`. QA uses `odwyn_run_test` with
+   `purpose: uat`, the exact development checkpoint and each scenario's `caseId`.
+   This checks QA identity, clean source and the remote integration commit before
+   and after the command. Record the returned full `gitCommit` in the release
+   package. This does not deploy or merge development into production.
+
+Include these tool requirements in your Execution, Testing and Release room goals.
+Custom existing workflow steps are not rewritten. If an agent step restricts
+allowed tools, enable the new repository branch, merge and review tools plus
+checkpoint and recorded-test tools.
+
+The Git server must advertise atomic updates and return unambiguous success for
+both the destination update and source-commit guard. Unsupported servers and
+branch protection failures remain blocked. An interrupted or ambiguous merge is
+marked **indeterminate**, never replayed; inspect remote source/target commits
+before preparing a new request. Branch creation with an uncertain receipt also
+requires inspecting the remote before retrying. Credentials never enter workers.
+Git 2.38+ is required in the worker for `merge-tree --write-tree`; older images
+must be rebuilt and repinned. Existing pack/checkpoint limits still apply.
+
+**Namespace scope:** configured base/feature/task/integration names are reserved
+across this Odwyn workspace's Git resources, including alternate URLs. This
+prevents bypasses through aliases; it also blocks ordinary legacy pushes to those
+names in unrelated repositories. Use reviewed project resources for those pushes,
+or choose distinct prefixes. Repositories without reviewed configuration retain
+their existing behavior outside reserved namespaces. Existing owner-approved
+merge gateways remain supported.
