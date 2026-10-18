@@ -48,12 +48,15 @@ export async function ensureTaskWorkspace(runtime,job,resourceId,selectedId,sign
   if(pin&&(pin.resourceId!==resourceId||selectedId!==undefined&&selectedId!==pin.headId))throw new Error('Task workspace cannot switch resources or checkpoints.');
   const id=pin?pin.headId:(selectedId===undefined?head(runtime,resourceId):checkpointId(selectedId));
   if(id){checkpointId(id);provenance(runtime,job,resourceId,id);}
-  const existing=runtime.sandbox.workers.get(job.id);
+  let existing=runtime.sandbox.workers.get(job.id);
   if(existing&&(existing.resourceId!==resourceId||(existing.checkpointId||null)!==(id||null)))throw new Error('Existing task workspace does not match the pinned checkpoint.');
+  const recovering=selectedId!==undefined&&(!existing||existing.stopped);
+  if(recovering&&existing){await runtime.sandbox.stop(job.id);existing=null;}
   const worker=existing?await runtime.sandbox.worker(job,resourceId,signal):id?await runtime.sandbox.restore(job,resourceId,id,signal):await runtime.sandbox.worker(job,resourceId,signal);
   signal?.throwIfAborted();activeTask(job);runtime.store.security.authorize(job,'sandbox.exec',resourceId);runtime.store.data.roomCheck(job);
   const room=roomFor(runtime,job);if(room?.governance)workingRoom(runtime,job);
   job.workspacePin={resourceId,headId:id||null};
+  if(recovering)job.workspaceDirty=false;
   runtime.store.data.note(job,resourceId,'sandbox.exec');
   if(id&&(!room?.targetCheckpointId||head(runtime,resourceId)===id))adopt(room,id);
   runtime.changed();return worker;

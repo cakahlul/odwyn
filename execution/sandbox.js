@@ -7,6 +7,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { validateCommand } from '../terminal.js';
 
 export const shellQuote=value=>"'"+String(value).replaceAll("'","'\\''")+"'";
+const stoppedWorkspace=worker=>`Isolated workspace stopped. Unsaved changes were lost. ${worker.checkpointId?`Use odwyn_checkpoint with action restore, resourceId ${JSON.stringify(worker.resourceId)} and checkpointId ${worker.checkpointId} to continue from saved work.`:'No saved checkpoint is available; start a new task.'}`;
 export class Sandbox {
   constructor(policy,{image,snapshotRoot,snapshotResolver,checkpointRoot,executionProfile={},validateCheckpointBytes}={}){
     if(validateCheckpointBytes!==undefined&&typeof validateCheckpointBytes!=='function')throw new Error('Invalid checkpoint validator.');
@@ -58,7 +59,7 @@ export class Sandbox {
     if(this.policy.resource(resourceId).metadata?.isolatedWorkspaceIds)throw Error('Select a project target listed under this resource, not the resource group itself.');
     if(!this.configured)throw new Error('Isolated executor unavailable.');
     let worker=this.workers.get(job.id);
-    if(worker){if(worker.resourceId!==resourceId)throw new Error('Task workspace cannot change.');await worker.ready;return worker;}
+    if(worker){if(worker.resourceId!==resourceId)throw new Error('Task workspace cannot change.');await worker.ready;if(worker.stopped)throw new Error(stoppedWorkspace(worker));return worker;}
     worker={id:`odwyn-${randomUUID()}`,resourceId,context,base:null,checkpointId:null};this.workers.set(job.id,worker);
     worker.ready=(async()=>{
       await this.create(worker,{signal});
@@ -89,7 +90,10 @@ export class Sandbox {
     try{await worker.ready;return worker;}catch(error){await this.docker(['rm','-f',worker.id]).catch(()=>{});if(this.workers.get(job.id)===worker)this.workers.delete(job.id);throw error;}
   }
   async inside(worker,argv,options){
-    return this.docker(['exec','-i',worker.id,'env','-i','PATH=/usr/local/bin:/usr/bin:/bin','HOME=/tmp','GIT_CONFIG_NOSYSTEM=1','GIT_CONFIG_GLOBAL=/dev/null',...argv],options);
+    if(worker.stopped)throw new Error(stoppedWorkspace(worker));
+    const result=await this.docker(['exec','-i',worker.id,'env','-i','PATH=/usr/local/bin:/usr/bin:/bin','HOME=/tmp','GIT_CONFIG_NOSYSTEM=1','GIT_CONFIG_GLOBAL=/dev/null',...argv],options);
+    if(result.exitCode!==0&&/^Error response from daemon:.*(?:is not running|No such container)/m.test(result.stderr?.toString()||'')){worker.stopped=true;throw new Error(stoppedWorkspace(worker));}
+    return result;
   }
   async run(job,args,signal){
     const {command,timeoutMs}=validateCommand(args);
@@ -105,11 +109,12 @@ export class Sandbox {
       // Digests and usage retain an audit without persisting command literals or output secrets.
       this.policy.auditExecution(worker.context,args.resourceId,{commandSha256:createHash('sha256').update(command).digest('hex'),wallMs:Date.now()-started,stdoutBytes:result.stdout.length,stderrBytes:result.stderr.length,exitCode:result.exitCode,timedOut:result.timedOut,cancelled:result.cancelled,truncated:result.truncated});
       this.policy.authorize(job,'sandbox.exec',args.resourceId);
-      return {...result,stdout:result.stdout.toString(),stderr:result.stderr.toString()};
+      return {...result,stdout:result.stdout.toString(),stderr:result.stderr.toString()+(worker.stopped?'\n'+stoppedWorkspace(worker):'')};
     }finally{clearInterval(watch);signal?.removeEventListener('abort',abort);}
   }
   async killExec(worker){
     // Kill the complete cgroup on cancellation; timeout also cannot leave descendants.
+    worker.stopped=true;
     await this.docker(['kill',worker.id]).catch(()=>{});
   }
   existing(job){this.policy.context(job);const worker=this.workers.get(job.id);if(!worker?.base)throw new Error('Task Git workspace unavailable.');return worker;}
