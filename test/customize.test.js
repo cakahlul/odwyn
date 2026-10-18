@@ -24,8 +24,8 @@ test('agent editor saves across sections, retains failed drafts, and preserves i
   const previousDocument=globalThis.document, previousFormData=globalThis.FormData;
   globalThis.document={querySelector:select,querySelectorAll:selector=>selector==='[data-profile-step]' ? panels : selector==='[data-custom-step]' ? sections : []};
   globalThis.FormData=class { *[Symbol.iterator](){for(const [key,field] of fields) if(!field.disabled && key!=='overrideWorkspace') yield [key,field.value];} };
-  const requests=[]; let fail=false;
-  mock.module('../public/ui.js',()=>({$:select,esc:value=>String(value),api:async(url,body,method)=>{requests.push({url,body,method});if(fail)throw Error('Save failed');return body;},toast(){}}));
+  const requests=[],notifications=[]; let fail=false;
+  mock.module('../public/ui.js',()=>({$:select,esc:value=>String(value),api:async(url,body,method)=>{requests.push({url,body,method});if(fail)throw Error('Save failed');return body;},toast(message,tone='success'){notifications.push({message,tone});},handleError(error){notifications.push({message:error.message,tone:'error'});}}));
   const {setupCustomization,openCustomization}=await import('../public/customize.js');
   const state={agentId:'scout',agents:[{id:'scout'}],customization:{...defaults,name:'Scout'},appearance:{palette:'fern',motion:'reduced'},owner:{ownerName:'Alex',language:'id',detail:'brief',userContext:'Shared background'}};
   const submit=async()=>{form.onsubmit({preventDefault(){}});await new Promise(resolve=>setTimeout(resolve,0));};
@@ -46,7 +46,7 @@ test('agent editor saves across sections, retains failed drafts, and preserves i
     expect(panels.find(panel=>panel.dataset.profileStep==='1').hidden).toBe(false);
     name.value='Updated Scout';fields.get('shape').value='fox';fields.get('bodyColor').value='#81ae76';change();
     sections.find(section=>section.dataset.customStep==='0').onclick();fail=true;await submit();
-    expect(dialog.open).toBe(true);expect(nodes.get('#customize-status').textContent).toBe('Save failed');
+    expect(dialog.open).toBe(true);expect(notifications.at(-1)).toEqual({message:'Save failed',tone:'error'});
     expect(name.value).toBe('Updated Scout');expect(nodes.get('#customize-save').disabled).toBe(false);
     fail=false;await submit();expect(dialog.open).toBe(false);
     expect(requests.at(-1)).toMatchObject({url:'/api/customization?agentId=scout',method:'PUT',body:{name:'Updated Scout',shape:'fox',bodyColor:'#81ae76',ownerName:'Captain',overrideWorkspace:true}});

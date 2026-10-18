@@ -5,6 +5,14 @@
 Click the workspace name beside the Odwyn logo to switch workspaces, create one,
 or open workspace management. The current workspace is marked in the menu.
 
+Save notifications appear at the bottom center of the page, including above open
+settings dialogs. Green confirms success; red reports failure; yellow flags an
+item needing attention, such as an incorrect owner password or revoked grants.
+Use the close button to dismiss a notification. Notifications pause while their
+close button has keyboard focus. Failed saves keep the editor available to retry.
+Owner verification uses your Odwyn owner password and clears it after confirming
+or cancelling the request.
+
 ## Agents and conversations
 
 Create up to five agents. Give each a name, avatar, specialization, reply style, and optional provider override. Use the agent's **⋯** menu to customize it, change its provider, or delete it.

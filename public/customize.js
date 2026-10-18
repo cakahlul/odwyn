@@ -1,4 +1,4 @@
-import { $, api, toast, esc } from './ui.js';
+import { $, api, toast, esc, handleError } from './ui.js';
 import { defaults, resolveProfile, ownerPreferenceKeys, palettes, choices, paletteDetails, materialDefaults, customColorKeys, appearanceVars, validateAppearance, specializations, avatarSvg, sampleReply, validateProfile } from './profile.js';
 
 let getState, saved, providerDraft = () => undefined, step = 0, firstRun = false, adding = false, editingId = null, lastApplied = '', appearanceOnly = false;
@@ -100,7 +100,7 @@ async function save(profile, resetAppearance = false) {
     const result = workspaceSetup ? await api('/api/appearance',{...(resetAppearance ? {} : getState().appearance),palette:profile.palette,motion:profile.motion},'PUT') : await api(newAgent ? '/api/agents' : `/api/customization?agentId=${editingId}`,{...validateProfile(profile),provider:providerDraft()},newAgent ? 'POST' : 'PUT');
     $('#customize-dialog').close(); await saved(result,newAgent,agentSetup); toast(workspaceSetup ? 'Appearance saved.' : newAgent || agentSetup ? 'Agent created.' : 'Agent saved. Changes apply to its next task.');
     if (continueSetup) openCustomization(true);
-  } catch (error) { $('#customize-status').textContent = error.message; }
+  } catch (error) { $('#customize-status').textContent = ''; handleError(error); }
   finally { buttons.forEach(button=>button.disabled=false); }
 }
 

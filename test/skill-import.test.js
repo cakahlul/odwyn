@@ -35,7 +35,7 @@ test('Import skill previews SKILL.md, handles command collisions, saves a new sk
     expect(await page.locator('#skill-form [name=instructions]').inputValue()).toBe(body);
     expect(app.runtime.state.skills).toHaveLength(1);
     await page.getByRole('button',{name:'Save skill',exact:true}).click();
-    await page.locator('#skill-error').filter({hasText:'Command already exists'}).waitFor();
+    await page.locator('#toast').filter({hasText:'Command already exists'}).waitFor();
     expect(app.runtime.state.skills).toHaveLength(1);
     await page.locator('#skill-form [name=command]').fill('imported-review');
     await page.getByRole('button',{name:'Save skill',exact:true}).click();

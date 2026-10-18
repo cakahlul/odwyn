@@ -1,4 +1,4 @@
-import { $, esc, api, handleError, workspaceId, icon } from './ui.js';
+import { $, esc, api, handleError, workspaceId, icon, toast } from './ui.js';
 import { freshPassword } from './security-ui.js';
 
 export function setupWorkspaceHomes() {
@@ -41,8 +41,8 @@ export function setupWorkspaceHomes() {
         sessionStorage.removeItem(`odwyn-drafts:${row.id}`);dispatchEvent(new CustomEvent('workspace-deleted',{detail:row.id}));
         if(row.id===workspaceId){location.href='/';return;}
       }
-      managing=false;await load();$('#workspace-homes-status').textContent=deleting?'Workspace deleted.':'Workspace renamed.';
-    }catch(error){$('#workspace-homes-status').textContent=error.message;}
+      managing=false;await load();toast(deleting?'Workspace deleted.':'Workspace renamed.');
+    }catch(error){handleError(error);}
     finally{managing=false;$('#settings-workspaces-controls').querySelectorAll('input,select,button').forEach(node=>node.disabled=false);drawManagement();}
   }
   $('#workspace-rename').onclick=()=>manage(false);$('#workspace-delete').onclick=()=>manage(true);
@@ -50,17 +50,18 @@ export function setupWorkspaceHomes() {
     event.preventDefault(); const button=event.submitter; button.disabled=true;
     try {
       const row=await api('/api/workspaces',{name:$('#workspace-home-name').value});
-      location.href=`/?workspace=${encodeURIComponent(row.id)}`;
-    } catch(error) { $('#workspace-create-status').textContent=error.message; button.disabled=false; }
+      try{sessionStorage.setItem('odwyn-workspace-created',row.id);}catch{}location.href=`/?workspace=${encodeURIComponent(row.id)}`;
+    } catch(error) { handleError(error); button.disabled=false; }
   };
   for (const checkbox of document.querySelectorAll('[data-share-setting]')) checkbox.onchange = async () => {
     const kind=checkbox.dataset.shareSetting, enabled=checkbox.checked;
     if (enabled && !confirm(`Share saved ${kind} settings with all workspaces? Current settings in every workspace will be replaced. Future changes stay linked.`)) { checkbox.checked=false; return; }
     checkbox.disabled=true;
-    try { const ownerPassword=kind==='provider' ? await freshPassword() : undefined; await api('/api/workspaces/share',{kind,enabled,ownerPassword}); $('#workspace-sharing-status').textContent=enabled ? 'Shared. Future changes apply to all workspaces.' : 'Separate. Existing settings stay in each workspace.'; }
-    catch(error) { checkbox.checked=!enabled; $('#workspace-sharing-status').textContent=error.message; }
+    try { const ownerPassword=kind==='provider' ? await freshPassword() : undefined; await api('/api/workspaces/share',{kind,enabled,ownerPassword}); toast(enabled ? 'Shared. Future changes apply to all workspaces.' : 'Separate. Existing settings stay in each workspace.'); }
+    catch(error) { checkbox.checked=!enabled; handleError(error); }
     finally { checkbox.disabled=false; }
   };
   $('#settings-dialog').addEventListener('toggle',event=>{if(event.newState==='open')void load().catch(handleError);});
+  try{if(sessionStorage.getItem('odwyn-workspace-created')===workspaceId){sessionStorage.removeItem('odwyn-workspace-created');toast('Workspace created.');}}catch{}
   void load().catch(error=>{$('#workspace-picker-status').textContent=error.message;handleError(error);});
 }

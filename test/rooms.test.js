@@ -51,7 +51,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     await page.goto(server.url.href+'#chat'); await page.getByRole('heading',{name:'Message Pip',exact:true}).waitFor();
     if(!await page.locator('#search-dialog').evaluate(node=>node.open)) await page.locator('#menu-button').click();
     await page.locator('#new-room').click(); await page.locator('#room-name').fill('Weekend council');
-    await page.locator('#room-save').click(); expect(await page.locator('#room-status').textContent()).toContain('at least two');
+    await page.locator('#room-save').click(); expect(await page.locator('#toast').textContent()).toContain('at least two');
     await page.locator(`#room-agent-options input[value="${scout.id}"]`).check();
     await page.screenshot({path:join(artifacts,'room-create.png'),fullPage:true});
     await page.locator('#room-save').click(); await page.locator('#room-label').filter({hasText:'Weekend council'}).waitFor();
@@ -257,12 +257,12 @@ test('room editor selects a permanent Space, filters agents, and rejects stale m
     await page.locator('#room-details-open').click();await page.locator('#edit-room').click();
     expect(await page.locator('#room-space').isDisabled()).toBe(true);expect(await page.locator('#room-space').inputValue()).toBe(A.id);
     await page.locator('#room-space').evaluate((node,id)=>{node.disabled=false;node.value=id;},B.id);
-    await page.locator('#room-save').click();await page.locator('#room-status').filter({hasText:'Room Space cannot change'}).waitFor();
+    await page.locator('#room-save').click();await page.locator('#toast').filter({hasText:'Room Space cannot change'}).waitFor();
     expect(room.spaceId).toBe(A.id);
     await page.locator('#room-space').evaluate((node,id)=>{node.value=id;node.disabled=true;},A.id);
     membership(scout.id,[B.id]);
     await page.locator('#room-name').fill('Rejected stale edit');await page.locator('#room-save').click();
-    await page.locator('#room-status').filter({hasText:'Space membership denied'}).waitFor();
+    await page.locator('#toast').filter({hasText:'Space membership denied'}).waitFor();
     expect(room.title).toBe('Selected Space room');expect(room.memberIds).toEqual([primary,scout.id]);
     expect(p.access(primary).grants).toEqual([]);expect(p.access(scout.id).grants).toEqual([]);
   }finally{await browser.close();await server.stop();await app.close();rmSync(directory,{recursive:true,force:true});}

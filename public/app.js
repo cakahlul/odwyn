@@ -705,7 +705,7 @@ $('#rename-form').onsubmit = async event => {
     await api(`/api/conversations/${renamingConversationId}`,{title:$('#conversation-name').value},'PATCH');
     $('#rename-dialog').close(); await refresh(); toast('Conversation renamed.');
     (currentRoom() ? $('#room-details-open') : $('#page-title')).focus();
-  } catch(error) { $('#rename-status').textContent=error.message; }
+  } catch(error) { $('#rename-status').textContent='';handleError(error); }
   finally { $('#rename-save').disabled=false; }
 };
 $('#room-details-open').onclick = () => $('#room-header').showModal();
@@ -721,15 +721,15 @@ $('#room-output-options').onclick=event=>{if(event.target.closest('[data-output-
 $('#room-form').oninput = () => { $('#room-status').textContent = ''; };
 $('#room-form').onsubmit = async event => {
   event.preventDefault(); const memberIds = new FormData(event.target).getAll('memberIds');
-  if (memberIds.length < 2) { $('#room-status').textContent = 'Choose at least two agents.'; return; }
+  if (memberIds.length < 2) { toast('Choose at least two agents.','warning'); return; }
   $('#room-save').disabled = true; $('#room-status').textContent = 'Saving…';
   try {
     const governance=$('#room-governance').checked ? roomRoleValues() : null;
     const config={title:$('#room-name').value,spaceId:$('#room-space').value,memberIds,governance};
-    if(saveRoomStage){saveRoomStage(config);$('#room-dialog').close();return;}
+    if(saveRoomStage){saveRoomStage(config);$('#room-dialog').close();toast('Stage updated in the draft. Save the workflow to keep changes.','warning');return;}
     const room = await api(editingRoomId ? `/api/rooms/${editingRoomId}` : '/api/rooms',config,editingRoomId ? 'PATCH' : 'POST');
     $('#room-dialog').close(); await refresh(); navigate('chat',room.id); toast(editingRoomId ? 'Room updated.' : 'Room ready. Send a message to start the discussion.');
-  } catch (error) { $('#room-status').textContent = error.message; }
+  } catch (error) { $('#room-status').textContent = '';handleError(error); }
   finally { $('#room-save').disabled = false; }
 };
 $('#room-discuss').onclick = () => {
@@ -785,7 +785,7 @@ $('#prompt').addEventListener('paste',event => {
   const images = Array.from(event.clipboardData?.items || []).filter(item=>item.kind === 'file' && item.type.startsWith('image/')).map(item=>item.getAsFile()).filter(Boolean);
   if (!images.length) return;
   event.preventDefault();
-  if (busy) { toast('Wait for the current action before attaching images.'); return; }
+  if (busy) { toast('Wait for the current action before attaching images.','warning'); return; }
   void attachFiles(images);
 });
 $('#composer').onsubmit = async event => {
@@ -831,8 +831,8 @@ $('#preferences-form').onsubmit = async event => {
     await api('/api/preferences',{ ...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$(`#global-${key}`).value])), provider:providerInput(), text:$('#preferences').value, currency:$('#preferred-currency').value, appearance:readWorkspaceAppearance() },'PUT');
     await refresh(); $('#provider-api-key').value = ''; $('#settings-dialog').close();
     if (continueSetup) openCustomization(true);
-    else toast('Settings saved. Applies to your next task.');
-  } catch (error) { $('#settings-status').textContent = error.message; }
+    toast('Settings saved. Applies to your next task.');
+  } catch (error) { $('#settings-status').textContent = '';handleError(error); }
   finally { button.disabled = false; }
 };
 $('#connect-account').onclick = () => perform(async () => {
