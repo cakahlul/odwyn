@@ -26,7 +26,7 @@ export function setupWorkflows(getState,getAgent,onRun,refresh) {
       const step=running.steps.find(step=>step.id===running.start),spaceId=step.room?.spaceId||step.spaceId||getState().security?.defaults?.[step.agentId||getAgent()]||$('#task-space').value;
       for(const file of files){const form=new FormData();form.append('file',file);form.append('spaceId',spaceId);runFiles.push(await api('/api/files',form));drawRunFiles();}
       $('#workflow-run-error').textContent='';
-    }catch(error){$('#workflow-run-error').textContent=error.message;}
+    }catch(error){$('#workflow-run-error').textContent='';handleError(error);}
     finally{uploading=false;$('#workflow-run-attachments').setAttribute('aria-busy','false');$('#workflow-run-form button.primary-button').disabled=false;$('#workflow-run-attach').disabled=false;$('#workflow-run-files').value='';}
   }
   $('#workflow-run-attach').onclick=()=>$('#workflow-run-files').click();
@@ -37,7 +37,7 @@ export function setupWorkflows(getState,getAgent,onRun,refresh) {
   $('#workflow-run-form').ondrop=event=>{const files=Array.from(event.dataTransfer?.files||[]);if(files.length){event.preventDefault();void attachRunFiles(files);}};
   $('#workflow-run-dialog').addEventListener('cancel',event=>{if(uploading)event.preventDefault();});
   const editor=createWorkflowEditor(getState,refresh,openRun);
-  const showError=(id,error)=>{$(id).textContent=error.message || String(error);};
+  const showError=(id,error)=>{handleError(error);};
   $('.prompt-editor').insertAdjacentHTML('afterend','<div id="command-suggestions" class="command-suggestions" role="group" aria-label="Workflow and skill commands" hidden></div>');
   const suggest=()=>{const state=getState(),match=$('#prompt').value.match(/^([/$])([a-z0-9_-]*)$/);const commands=state && match ? [...state.workflows,...state.skills].filter(item=>item.command.startsWith(match[2])):[];$('#command-suggestions').innerHTML=commands.map(item=>`<button type="button" data-workflow-command="${esc(match[1]+item.command)}"><strong class="skill-mention">${esc(match[1]+item.command)}</strong><small>${esc(item.name)}</small></button>`).join('');$('#command-suggestions').hidden=!commands.length;};
   $('#prompt').addEventListener('input',suggest);

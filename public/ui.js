@@ -38,12 +38,44 @@ export const activeStatuses = ['queued','running','waiting','takeover','stopping
 export const statusLabels = { queued:'In line', running:'Working', waiting:'Needs you', takeover:'You’re in control', completed:'Done', failed:'Blocked', interrupted:'Interrupted', cancelled:'Stopped', resumed:'Resumed', stopping:'Stopping' };
 export const badge = status => `<span class="badge badge-${esc(status)}"><span></span>${esc(statusLabels[status] || status)}</span>`;
 export async function api(path, body, method = 'POST') {
+  if(!['GET','HEAD'].includes(method))dismissToast();
   const response = await fetch(workspaceUrl(path), { method, headers: body instanceof FormData ? {} : { 'content-type':'application/json' }, body: ['GET','HEAD'].includes(method) ? undefined : body instanceof FormData ? body : JSON.stringify(body || {}) });
-  const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Request failed.'); return result;
+  const result = await response.json(); if (!response.ok) { const error=new Error(result.error || 'Request failed.');error.status=response.status;throw error; } return result;
 }
-let toastTimer;
-export function toast(message) { const node = $('#toast'); node.textContent = message; node.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { node.hidden = true; }, 5000); }
-export function handleError(error) { toast(error.message || 'Something went wrong. Try again.'); }
+let toastTimer,toastRemaining=0,toastStarted=0,toastPaused=false;
+export function dismissToast(){clearTimeout(toastTimer);const node=$('#toast');if(!node)return;if(node.matches(':popover-open'))node.hidePopover();node.hidden=true;node.querySelector('.toast-message')?.replaceChildren();}
+export function toast(message,tone='success'){
+  const node=$('#toast');if(!node||!message)return;
+  dismissToast();
+  if(!node.querySelector('.toast-message')){
+    node.setAttribute('popover','manual');node.setAttribute('aria-atomic','true');
+    node.innerHTML='<span class="toast-symbol" aria-hidden="true"></span><span class="toast-message"></span><button type="button" class="toast-dismiss" aria-label="Dismiss notification">'+icon('close')+'</button>';
+    node.querySelector('button').onclick=dismissToast;
+    const pause=()=>{if(toastPaused)return;toastPaused=true;clearTimeout(toastTimer);toastRemaining=Math.max(0,toastRemaining-(performance.now()-toastStarted));};
+    const resume=()=>{if(node.hidden||!toastPaused||node.matches(':hover')||node.contains(document.activeElement))return;toastPaused=false;toastStarted=performance.now();toastTimer=setTimeout(dismissToast,toastRemaining);};
+    node.addEventListener('pointerenter',pause);node.addEventListener('pointerleave',resume);node.addEventListener('focusin',pause);node.addEventListener('focusout',()=>queueMicrotask(resume));
+  }
+  const modal=document.activeElement?.closest('dialog:modal')||[...document.querySelectorAll('dialog:modal')].at(-1);
+  (modal||document.body).append(node);
+  node.dataset.tone=['success','error','warning'].includes(tone)?tone:'success';
+  node.setAttribute('role',tone==='error'?'alert':'status');node.setAttribute('aria-live',tone==='error'?'assertive':'polite');
+  node.querySelector('.toast-symbol').innerHTML=icon(tone==='success'?'check':tone==='warning'?'shield':'close');
+  node.querySelector('.toast-message').textContent=message;node.hidden=false;
+  node.showPopover();toastPaused=false;toastRemaining=tone==='success'?5000:10000;toastStarted=performance.now();toastTimer=setTimeout(dismissToast,toastRemaining);
+}
+export function handleError(error){
+  const message=error?.message||'Something went wrong. Try again.';
+  const authentication=message==='Fresh owner password required.';
+  toast(authentication?'Incorrect owner password. Try again.':message,authentication||message==='Authentication cancelled.'||error?.tone==='warning'?'warning':'error');
+}
+
+if(typeof document!=='undefined')document.addEventListener('toggle',event=>{
+  if(!event.target.matches('dialog'))return;const node=$('#toast');if(!node||node.hidden||event.newState!=='open'&&node.closest('dialog')!==event.target)return;
+  if(node.matches(':popover-open'))node.hidePopover();
+  const modal=event.newState==='open'?event.target:document.activeElement?.closest('dialog:modal')||[...document.querySelectorAll('dialog:modal')].at(-1);
+  (modal||document.body).append(node);node.showPopover();
+},true);
+if(typeof document!=='undefined')document.addEventListener('invalid',event=>{const field=event.target,form=field.closest('form');if(!form||form.querySelector('input:invalid,textarea:invalid,select:invalid')===field)toast(field.validationMessage||'Check the required fields.','warning');},true);
 
 function answerLink(href, label, title = '', protocols = ['http:','https:','mailto:']) {
   try { if (!protocols.includes(new URL(href).protocol)) return label; }

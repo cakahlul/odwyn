@@ -5,6 +5,14 @@
 Click the workspace name beside the Odwyn logo to switch workspaces, create one,
 or open workspace management. The current workspace is marked in the menu.
 
+Save notifications appear at the bottom center of the page, including above open
+settings dialogs. Green confirms success; red reports failure; yellow flags an
+item needing attention, such as an incorrect owner password or revoked grants.
+Use the close button to dismiss a notification. Notifications pause while their
+close button has keyboard focus. Failed saves keep the editor available to retry.
+Owner verification uses your Odwyn owner password and clears it after confirming
+or cancelling the request.
+
 ## Agents and conversations
 
 Create up to five agents. Give each a name, avatar, specialization, reply style, and optional provider override. Use the agent's **⋯** menu to customize it, change its provider, or delete it.
@@ -105,6 +113,15 @@ Source import/copy deliberately excludes `.git`. For a Git project:
 3. Create a fresh **Isolated workspace** in the same Space, leave its source empty, and select that Repository in **Git repository**. Save it. A workspace that already has checkpoints cannot change its source/link; use a fresh resource.
 4. Grant each coding agent **repository.read → Automatic** on the Repository and **sandbox.exec → Automatic** on the linked workspace. Workflows must allow **repository_sync**. In rooms, every participant also needs automatic repository read and workspace read access, including reviewers who do not execute commands.
 5. Ask the agent: “Use the linked workspace, checkout `main`, then pull its latest update.” The agent uses `odwyn_repository_sync`; terminal Git commands have no network access.
+
+For Git targets, **Read repository** returns branch metadata through Git smart
+HTTP, including the configured production baseline when available. This needs
+repository-read permission only; it does not start a worker or grant command
+execution. Git's default branch is reported separately and is not assumed to be
+production. Agents receive the saved branch workflow in their resource context;
+they should not ask `main` versus `master` again when the baseline is configured.
+Source inspection still requires checkout/sync and command access. A metadata
+transport/format error does not establish that a permission was revoked.
 
 Git HEAD, branches and objects persist in checkpoints; credentials, Git config and hooks do not enter workers/checkpoints. Checkout can adopt imported files only if every file exactly matches the remote branch. Mismatches preserve the files and require a fresh empty workspace. Pull requires the current branch; updates refuse dirty/untracked/ignored files and divergent local commits. There is no automatic reset, cleanup or push.
 

@@ -64,7 +64,7 @@ test('create and switch homes, preserve drafts, link settings, and scope downloa
     expect(await page.evaluate(async fileId=>(await fetch('/api/files/'+fileId+location.search)).text(),uploaded.id)).toBe('Research file');
     await page.locator('#settings-open').click();await page.locator('[data-settings-section=sharing]').click();
     await page.locator('[data-share-setting=appearance]').check();
-    await page.locator('#workspace-sharing-status').filter({hasText:'Shared.'}).waitFor();
+    await page.locator('#toast').filter({hasText:'Shared.'}).waitFor();
     await page.locator('[data-share-setting=provider]').check();
     await page.locator('#security-password').fill(options.password);
     const shared=page.waitForResponse(response=>response.url().includes('/api/workspaces/share') && response.request().postData()?.includes('"kind":"provider"'));
@@ -91,7 +91,7 @@ test('create and switch homes, preserve drafts, link settings, and scope downloa
     await page.locator('#settings-open').click();await page.locator('[data-settings-section=workspaces]').click();
     await page.locator('#workspace-manage-home').selectOption('default');expect(await page.locator('#workspace-delete').isDisabled()).toBe(true);
     await page.locator('#workspace-manage-home').selectOption(id);await page.locator('#workspace-rename-name').fill('Research lab');await page.locator('#workspace-rename-name').press('Enter');
-    await page.locator('#workspace-homes-status').filter({hasText:'Workspace renamed.'}).waitFor();
+    await page.locator('#toast').filter({hasText:'Workspace renamed.'}).waitFor();
     expect(await page.locator('#workspace-current-name').textContent()).toBe('Research lab');
     page.removeAllListeners('dialog');page.once('dialog',async dialog=>{expect(dialog.message()).toContain('Research lab');expect(dialog.message()).toContain('cannot be undone');await dialog.dismiss();});
     await page.locator('#workspace-delete').click();expect(await page.evaluate(()=>new URL(location.href).searchParams.get('workspace'))).toBe(id);

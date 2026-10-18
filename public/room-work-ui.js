@@ -1,4 +1,4 @@
-import {$,esc,api,workspaceUrl,handleError} from './ui.js';
+import {$,esc,api,workspaceUrl,handleError,toast} from './ui.js';
 import {artifactApproved,roomCompletion} from './room-policy.js';
 
 export function renderRoomWork(state,room){
@@ -40,13 +40,13 @@ export function setupRoomWork(getState,getRoom,refresh,onOpen){
       const sourceRoles=source.governance,governance=sourceRoles?{facilitatorId:memberIds.includes(sourceRoles.facilitatorId)?sourceRoles.facilitatorId:null,reviewerIds:sourceRoles.reviewerIds.filter(id=>memberIds.includes(id)),observerIds:sourceRoles.observerIds.filter(id=>memberIds.includes(id))}:undefined;
       const room=stage?structuredClone(stage.room):{title:data.get('title'),spaceId:data.get('spaceId'),memberIds,...(governance?{governance}:{})};
       const result=await api(`/api/rooms/${source.id}/handoff`,{room,artifactIds:data.getAll('artifactIds'),openQuestions:data.get('openQuestions'),...(data.get('checkpointId')?{checkpointId:data.get('checkpointId'),workspaceResourceId:data.get('workspaceResourceId')}:{})});
-      $('#room-handoff-dialog').close();await refresh();onOpen(result.id);
-    }catch(error){$('#room-handoff-error').textContent=error.message;}finally{button.disabled=false;}
+      $('#room-handoff-dialog').close();await refresh();onOpen(result.id);toast('Next room created.');
+    }catch(error){handleError(error);}finally{button.disabled=false;}
   };
   document.addEventListener('submit',async event=>{
-    const uat=event.target.closest('[data-room-uat]');if(uat){event.preventDefault();const data=new FormData(uat),option=uat.querySelector('select[name=caseId]').selectedOptions[0];try{await api(`/api/rooms/${uat.dataset.roomUat}/evidence`,{checkpointId:uat.dataset.checkpoint,caseId:data.get('caseId'),caseRevision:Number(option.dataset.revision),status:data.get('status'),summary:data.get('summary')});await refresh();}catch(error){uat.querySelector('[role=status]').textContent=error.message;}return;}
+    const uat=event.target.closest('[data-room-uat]');if(uat){event.preventDefault();const data=new FormData(uat),option=uat.querySelector('select[name=caseId]').selectedOptions[0];try{await api(`/api/rooms/${uat.dataset.roomUat}/evidence`,{checkpointId:uat.dataset.checkpoint,caseId:data.get('caseId'),caseRevision:Number(option.dataset.revision),status:data.get('status'),summary:data.get('summary')});await refresh();toast('UAT evidence saved.');}catch(error){handleError(error);}return;}
     const form=event.target.closest('[data-room-owner]');if(!form)return;event.preventDefault();const buttons=[...form.querySelectorAll('button')];buttons.forEach(button=>button.disabled=true);
-    try{await api(`/api/rooms/${form.dataset.roomOwner}/decision`,{proposalId:form.dataset.proposal,decision:event.submitter?.value||'approve',summary:new FormData(form).get('summary')});await refresh();}catch(error){form.querySelector('[role=status]').textContent=error.message;buttons.forEach(button=>button.disabled=false);}
+    try{await api(`/api/rooms/${form.dataset.roomOwner}/decision`,{proposalId:form.dataset.proposal,decision:event.submitter?.value||'approve',summary:new FormData(form).get('summary')});await refresh();toast(event.submitter?.value==='changes_requested'?'Changes requested.':'Room result approved.',event.submitter?.value==='changes_requested'?'warning':'success');}catch(error){handleError(error);buttons.forEach(button=>button.disabled=false);}
   });
   document.addEventListener('click',async event=>{
     const button=event.target.closest('button');if(!button)return;

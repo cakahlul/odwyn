@@ -37,10 +37,10 @@ test('unchecking the selected Space removes its membership and grants in a separ
     const membership=page.locator(`[data-access-space="${execution.id}"]`);
     expect(await page.locator('#access-space').inputValue()).toBe(execution.id);
     await membership.uncheck();
-    await page.locator('#access-preview').click();await page.locator('#access-status').filter({hasText:'Preview only'}).waitFor();
+    await page.locator('#access-preview').click();await page.locator('#toast').filter({hasText:'Preview only'}).waitFor();
     expect(await page.locator(`[data-preview-resource="${resource.id}"]`).count()).toBe(0);
     expect(await page.locator(`[data-preview-resource="${retained.id}"]`).count()).toBe(1);
-    await page.locator('#access-save').click();await page.locator('#access-status').filter({hasText:'Saved.'}).waitFor();
+    await page.locator('#access-save').click();await page.locator('#toast').filter({hasText:'Saved.'}).waitFor();
     const saved=await request(`/api/agents/${agent}/access`);
     expect(saved.spaceIds).toEqual([research.id]);
     expect(saved.defaultSpaceId).toBe(state.security.legacySpaceId);
@@ -51,7 +51,7 @@ test('unchecking the selected Space removes its membership and grants in a separ
     expect(await membership.isChecked()).toBe(false);
     expect(await page.locator(`[data-access-space="${research.id}"]`).isChecked()).toBe(true);
     await page.locator(`[data-access-space="${research.id}"]`).uncheck();
-    await page.locator('#access-save').click();await page.locator('#access-status').filter({hasText:'Saved.'}).waitFor();
+    await page.locator('#access-save').click();await page.locator('#toast').filter({hasText:'Saved.'}).waitFor();
     const empty=await request(`/api/agents/${agent}/access`);
     expect(empty.spaceIds).toEqual([]);expect(empty.grants).toEqual([]);
     expect(errors).toEqual([]);
