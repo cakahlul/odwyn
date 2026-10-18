@@ -73,7 +73,8 @@ export function reviewArtifact(runtime,job,input){
 }
 
 export function roomWorkContext(runtime,job){
-  const room=runtime.conversation(job);if(room.kind!=='room')return null;
+  const room=runtime.conversation(job);if(room.kind!=='room')throw new Error('This tool requires a room.');
+  runtime.store.data.roomCheck(job);
   const artifacts=(room.artifacts||[]).map(artifact=>runtime.store.data.artifact(job,room.id,artifact.id,artifact.versions.at(-1).id));
   const handoff=room.handoff?runtime.store.data.readExport(job,room.handoff.exportId).roomHandoff:null;
   const records=[...(room.evidence||[]),...(room.checkpoints||[]),...(room.cases||[])];
@@ -84,7 +85,7 @@ export function roomWorkContext(runtime,job){
     if(record.exportId)runtime.store.data.readExport(job,record.exportId);
   }
   const merges=(runtime.store.security.gitWork?.list(room.spaceId)||[]).filter(request=>request.roomId===room.id&&request.roundId===job.roomRoundId).map(request=>{runtime.store.security.authorize(job,'repository.read',request.resourceId);runtime.store.data.assertHandoff(job,[request.taskId,...request.reviews.map(review=>review.taskId)]);const {diff,...summary}=request;return summary;});
-  return {merges,requiredOutputs:room.governance?.outputs||[],ownerApproval:!!room.governance?.ownerApproval,artifacts,handoff,evidence:room.evidence||[],checkpoints:room.checkpoints||[],cases:room.cases||[]};
+  return {merges,requiredOutputs:room.governance?.outputs||[],ownerApproval:!!room.governance?.ownerApproval,artifacts,handoff,proposal:runtime.store.data.proposal(job,room.discussion?.outcome),evidence:room.evidence||[],checkpoints:room.checkpoints||[],cases:room.cases||[]};
 }
 
 export function finalizeRoom(runtime,room,job){

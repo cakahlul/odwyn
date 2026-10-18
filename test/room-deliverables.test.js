@@ -8,7 +8,7 @@ import {openStore,createRoom} from '../store.js';
 import {Runtime} from '../runtime.js';
 import {roomCompletion} from '../public/room-policy.js';
 
-class Agent extends EventEmitter{child={};replies=[];async request(method,params){if(method==='account/read')return {account:{type:'chatgpt'}};if(method.startsWith('thread/'))return {thread:{id:params.threadId||randomUUID()}};if(method==='turn/start')return {turn:{id:randomUUID(),status:'inProgress'}};return {};}respond(id,result){this.replies.push(result);}reject(){} }
+class Agent extends EventEmitter{child={};replies=[];calls=[];async request(method,params){this.calls.push({method,params});if(method==='account/read')return {account:{type:'chatgpt'}};if(method.startsWith('thread/'))return {thread:{id:params.threadId||randomUUID()}};if(method==='turn/start')return {turn:{id:randomUUID(),status:'inProgress'}};return {};}respond(id,result){this.replies.push(result);}reject(){} }
 
 test('required deliverables retain versions, enforce authors/reviewers and wait for exact owner approval before publishing',async()=>{
   const directory=mkdtempSync(join(tmpdir(),'odwyn-deliverables-')),store=openStore(directory),lead=new Agent(),engineer=new Agent(),primary=store.state.agents[0].id;
@@ -23,10 +23,17 @@ test('required deliverables retain versions, enforce authors/reviewers and wait 
     expect((await call('odwyn_artifact_write',{outputId:'trd',text:'Wrong author'})).success).toBe(false);
     await finish();
     const draft=await call('odwyn_artifact_write',{outputId:'trd',text:'# Design\nAPI contract v1'});expect(draft.success).toBe(true);
+    // Recover a successful write even when its response was lost to the author.
+    const recovered=await call('odwyn_room_read',{});expect(recovered.success).toBe(true);
+    expect(recovered.value.artifacts[0]).toMatchObject({id:draft.value.artifactId,outputId:'trd',version:{id:draft.value.versionId,text:'# Design\nAPI contract v1'}});
+    expect((await call('odwyn_room_read',{roomId:'another-room'})).success).toBe(false);
     const artifact=room.artifacts[0],original=artifact.versions[0].id;
     expect(store.state.files).toHaveLength(0);
     expect((await call('odwyn_artifact_review',{artifactId:artifact.id,versionId:original,decision:'approve',summary:'Forged review'})).success).toBe(false);
     await call('odwyn_room_next',{agentId:primary,reason:'Review design'});await finish();
+    const reviewTurn=lead.calls.findLast(call=>call.method==='turn/start').params.input[0].text;
+    expect(reviewTurn).toContain(original);expect(reviewTurn).toContain('API contract v1');
+    expect(lead.calls.find(call=>call.method==='thread/start').params.dynamicTools.some(tool=>tool.name==='odwyn_room_read')).toBe(true);
     expect((await call('odwyn_artifact_review',{artifactId:artifact.id,versionId:original,decision:'changes_requested',summary:'Add error responses'})).success).toBe(true);
     await call('odwyn_room_next',{agentId:'engineer',reason:'Add error responses'});await finish();
     expect((await call('odwyn_artifact_write',{artifactId:artifact.id,versionId:'stale',text:'Lost update'})).success).toBe(false);
@@ -34,6 +41,9 @@ test('required deliverables retain versions, enforce authors/reviewers and wait 
     expect(artifact.versions).toHaveLength(2);const version=artifact.versions.at(-1).id;
     expect(artifact.versions[0].reviews[primary].decision).toBe('changes_requested');
     await call('odwyn_room_next',{agentId:primary,reason:'Review updated contract'});await finish();
+    expect(lead.calls.findLast(call=>call.method==='thread/resume')?.params.threadId).toBe(runtime.active.threadId);
+    const updated=await call('odwyn_room_read',{});expect(updated.value.artifacts[0].version).toMatchObject({id:version,text:'# Design\nAPI contract v2 with errors'});
+    expect(lead.calls.findLast(call=>call.method==='turn/start').params.input[0].text).toContain(version);
     expect((await call('odwyn_artifact_review',{artifactId:artifact.id,versionId:original,decision:'approve',summary:'Stale'})).success).toBe(false);
     expect((await call('odwyn_artifact_review',{artifactId:artifact.id,versionId:version,decision:'approve',summary:'Errors checked'})).success).toBe(true);
     await call('odwyn_room_done',{result:'Design ready',nextPlan:'Develop after owner approval',summary:'Design checked'});
@@ -51,6 +61,25 @@ test('required deliverables retain versions, enforce authors/reviewers and wait 
     expect(readFileSync(join(directory,'files',result.files[0].id),'utf8')).toContain('v2 with errors');
     expect(runtime.publishRoom(room.id).files.map(file=>file.id)).toEqual(result.files.map(file=>file.id));
     store.save();const reload=openStore(directory);try{const saved=reload.state.conversations.find(c=>c.id===room.id);expect(saved.artifacts[0].versions).toHaveLength(2);expect(saved.discussion.outcome.ownerDecision.decision).toBe('approve');}finally{reload.close();}
+  }finally{await runtime.close();store.close();rmSync(directory,{recursive:true,force:true});}
+});
+
+test('room read refuses non-room requests and revoked source access without leaking drafts',async()=>{
+  const directory=mkdtempSync(join(tmpdir(),'odwyn-room-read-')),store=openStore(directory),primary=store.state.agents[0].id,provider=new Agent();store.state.agents.push({id:'peer'});
+  const runtime=new Runtime({store,codex:provider,browser:{},workspace:directory});runtime.addProvider('peer',new Agent());
+  const call=async(tool,args={})=>{const job=runtime.active;await runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool,arguments:args}});return provider.replies.at(-1);};
+  try{
+    await runtime.refreshAccount();await runtime.refreshAccount('peer');
+    runtime.submit({prompt:'Read room'});await runtime.drain();
+    expect((await call('odwyn_room_read')).success).toBe(false);runtime.finish(runtime.active,'completed');
+    const p=store.security,resource=p.createResource({spaceId:p.legacySpaceId,type:'memory',name:'Source notes'});
+    for(const agentId of [primary,'peer'])p.putAccess(agentId,{revision:p.revision,spaceIds:[p.legacySpaceId],grants:[{spaceId:p.legacySpaceId,resourceId:resource.id,action:'memory.read',mode:'auto'}]});
+    const room=createRoom(store.state,{title:'Read drafts',spaceId:p.legacySpaceId,memberIds:[primary,'peer'],governance:{facilitatorId:primary}});
+    runtime.submitRoom(room.id,{prompt:'Save draft'});await runtime.drain();store.data.note(runtime.active,resource.id,'memory.read');
+    expect((await call('odwyn_artifact_write',{title:'Draft',text:'private-draft-canary'})).success).toBe(true);
+    expect((await call('odwyn_room_read')).success).toBe(true);
+    p.putAccess('peer',{revision:p.revision,spaceIds:[p.legacySpaceId],grants:[]});
+    const denied=await call('odwyn_room_read');expect(denied.success).toBe(false);expect(JSON.stringify(denied)).not.toContain('private-draft-canary');
   }finally{await runtime.close();store.close();rmSync(directory,{recursive:true,force:true});}
 });
 
