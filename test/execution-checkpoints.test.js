@@ -34,6 +34,34 @@ test('checkpoints survive worker removal and restore exact scoped immutable file
   }finally{clean();}
 });
 
+test('terminated commands identify a stopped workspace and block reuse until explicit restore',async()=>{
+  for(const flag of ['truncated','timedOut','cancelled']){
+    const {sandbox,clean}=fixture();
+    try{
+      sandbox.workers.get(job.id).checkpointId='c'.repeat(64);
+      sandbox.policy.auditExecution=()=>{};
+      sandbox.inside=async()=>({exitCode:null,stdout:Buffer.alloc(0),stderr:Buffer.alloc(0),[flag]:true});
+      const result=await sandbox.run(job,{resourceId:'repo-a',command:'true',reason:'test'});
+      expect(result[flag]).toBe(true);expect(result.stderr).toContain('odwyn_checkpoint');
+      expect(result.stderr).toContain('Unsaved changes');
+      await expect(sandbox.worker(job,'repo-a')).rejects.toThrow('stopped');
+      expect(sandbox.workers.has(job.id)).toBe(true);
+    }finally{clean();}
+  }
+});
+
+test('Docker reports for stopped or missing containers provide checkpoint recovery instead of stale reuse',async()=>{
+  for(const error of ['Error response from daemon: container fixture is not running','Error response from daemon: No such container: fixture']){
+    const {sandbox,clean}=fixture();
+    try{
+      sandbox.inside=Sandbox.prototype.inside;
+      sandbox.docker=async()=>({exitCode:1,stdout:Buffer.alloc(0),stderr:Buffer.from(error)});
+      await expect(sandbox.inside(sandbox.workers.get(job.id),['true'])).rejects.toThrow('start a new task');
+      await expect(sandbox.worker(job,'repo-a')).rejects.toThrow('stopped');
+    }finally{clean();}
+  }
+});
+
 test('checkpoint parent conflicts and authorization failures preserve previous checkpoint',async()=>{
   const {sandbox,clean}=fixture();
   try{

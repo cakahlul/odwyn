@@ -28,6 +28,32 @@ test('successful checkpoint advances head and pin while retaining only metadata'
   expect(f.room.targetCheckpointId).toBe(id(2));expect(f.room.cases[0].status).toBe('pending');
 });
 
+test('explicit restore replaces a stopped worker with its pinned checkpoint, never a newer head',async()=>{
+  const f=fixture();f.checkpoint();await ensureTaskWorkspace(f.runtime,f.job,'resource');
+  const previous=f.runtime.sandbox.workers.get(f.job.id);previous.stopped=true;f.job.workspaceDirty=true;
+  f.state.executionHeads.resource=id(3);
+  await expect(ensureTaskWorkspace(f.runtime,f.job,'resource',id(3))).rejects.toThrow('cannot switch');
+  expect(f.runtime.sandbox.workers.get(f.job.id)).toBe(previous);
+  await ensureTaskWorkspace(f.runtime,f.job,'resource',id(1));
+  expect(f.runtime.sandbox.workers.get(f.job.id)).not.toBe(previous);
+  expect(f.runtime.sandbox.workers.get(f.job.id).checkpointId).toBe(id(1));
+  expect(f.job.workspaceDirty).toBe(false);expect(f.state.executionHeads.resource).toBe(id(3));
+});
+
+test('stopped worker recovery still requires provenance and a successful restore before clearing dirty state',async()=>{
+  const f=fixture();f.checkpoint();await ensureTaskWorkspace(f.runtime,f.job,'resource');
+  const previous=f.runtime.sandbox.workers.get(f.job.id);previous.stopped=true;f.job.workspaceDirty=true;
+  f.runtime.store.data.assertHandoff=()=>{throw Error('Revoked');};
+  await expect(ensureTaskWorkspace(f.runtime,f.job,'resource',id(1))).rejects.toThrow('Revoked');
+  expect(f.runtime.sandbox.workers.get(f.job.id)).toBe(previous);
+  f.runtime.store.data.assertHandoff=()=>{};
+  f.runtime.sandbox.restore=async()=>{throw Error('Restore failed');};
+  await expect(ensureTaskWorkspace(f.runtime,f.job,'resource',id(1))).rejects.toThrow('Restore failed');
+  expect(f.job.workspaceDirty).toBe(true);expect(f.job.workspacePin.headId).toBe(id(1));
+  f.runtime.sandbox.restore=async(task,resourceId,checkpointId)=>{const worker={resourceId,checkpointId};f.runtime.sandbox.workers.set(task.id,worker);return worker;};
+  await ensureTaskWorkspace(f.runtime,f.job,'resource',id(1));expect(f.job.workspaceDirty).toBe(false);
+});
+
 test('concurrent checkpoint conflict preserves losing immutable work without overwriting head',async()=>{
   const f=fixture();f.checkpoint();await ensureTaskWorkspace(f.runtime,f.job,'resource');
   f.runtime.sandbox.checkpoint=async()=>{f.state.executionHeads.resource=id(3);return {id:id(2),resourceId:'resource',spaceId:'space',files:[]};};

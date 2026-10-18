@@ -82,6 +82,13 @@ overwriting the winner. The owner can explicitly select a retained checkpoint
 after stopping workspace tasks. Export selected checkpoints through room handoff
 into an empty destination workspace; this grants no execution permission.
 
+If a command times out or exceeds its output limit, the stopped worker cannot be
+reused. The tool reports lost unsaved changes and the pinned checkpoint. Explicitly
+call `odwyn_checkpoint` with `action: restore`, the same resource and that checkpoint
+to create a fresh isolated worker. This never restarts the old container or selects
+a newer head. Without a saved checkpoint, start a new task. Bound inspection output
+(for example, `sed -n '1,120p' AGENTS.md`) to avoid stopping the worker again.
+
 `odwyn_checkpoint` saves or selects a task's initial checkpoint. A task pins one
 workspace/checkpoint; start another task to move to a newer head.
 `odwyn_test_case` defines cases, dependencies and defects. `odwyn_run_test` records
