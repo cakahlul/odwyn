@@ -1,3 +1,4 @@
+import {gitBranch} from './git-work.js';
 import {syncGitWorkspace} from '../execution/git-sync.js';
 import http from 'node:http';
 import https from 'node:https';
@@ -18,7 +19,7 @@ export class GitGateway {
   async request(target,path,method,body,token,signal,{service='git-receive-pack',limit=1024*1024,username}={}){
     const {url,address,family}=target;
     return new Promise((resolve,reject)=>{
-      const headers={host:url.host,'content-type':`application/x-${service}-request`,accept:`application/x-${service}-result`};
+      const headers={host:url.host,accept:`application/x-${service}-${method==='GET'?'advertisement':'result'}`,...(method==='POST'?{'content-type':`application/x-${service}-request`}:{})};
       if(token)headers.authorization=username?'Basic '+Buffer.from(username+':'+token).toString('base64'):'Bearer '+token;
       const request=(url.protocol==='https:'?https:http).request({hostname:address,family,servername:url.hostname,port:Number(url.port||(url.protocol==='https:'?443:80)),path,method,headers,signal:AbortSignal.any([signal,AbortSignal.timeout(15000)])},response=>{
         if(response.statusCode!==200){response.destroy();reject(new Error('Scoped Git upstream unavailable.'));return;}
@@ -29,12 +30,21 @@ export class GitGateway {
     });
   }
   async sync(job,args,signal,canRun){return syncGitWorkspace(this,job,args,signal,canRun);}
+  async metadata(job,args,signal,canRun=()=>{}){
+    if(!args||Object.keys(args).some(key=>key!=='resourceId')||typeof args.resourceId!=='string')throw Error('Choose an exact Git resource.');
+    const check=()=>{signal.throwIfAborted();if(canRun()===false)throw Error('Task control changed.');this.policy.authorize(job,'repository.read',args.resourceId);};
+    const {refs,capabilities}=await this.refs(job,args.resourceId,'repository.read',signal,check),resource=this.policy.resource(args.resourceId);
+    const heads=Object.entries(refs).filter(([ref,commit])=>ref.startsWith('refs/heads/')&&gitBranch(ref.slice(11))&&commit!=='0'.repeat(40)).map(([ref,commit])=>({name:ref.slice(11),commit}));
+    const defaultRef=capabilities.find(value=>value.startsWith('symref=HEAD:refs/heads/'))?.slice('symref=HEAD:'.length),configuredBaseBranch=resource.metadata.branchPolicy?.baseBranch||null;
+    check();return {resourceId:resource.id,...(resource.grantResourceId?{workspaceId:resource.id.slice(0,-4)}:{}),defaultBranch:defaultRef&&heads.some(branch=>'refs/heads/'+branch.name===defaultRef)?defaultRef.slice(11):null,configuredBaseBranch,configuredBaseCommit:configuredBaseBranch?refs['refs/heads/'+configuredBaseBranch]||null:null,branches:heads.slice(0,200),truncated:heads.length>200};
+  }
   async refs(job,resourceId,action,signal,check){
     check();const resource=this.policy.resource(resourceId),target=await this.resolver(resource.metadata.endpoint);check();
-    const token=await this.credentialResolver(resourceId,this.policy.context(job),action);check();
+    const read=action==='repository.read',service=read?'git-upload-pack':'git-receive-pack';
+    const token=await (read?this.readCredentialResolver(resourceId,this.policy.context(job)):this.credentialResolver(resourceId,this.policy.context(job),action));check();
     if(token!==null&&(typeof token!=='string'||token.length>4096||/[\r\n]/.test(token)))throw Error('Invalid scoped credential.');
-    const path=target.url.pathname.replace(/\/$/,''),options={username:resource.metadata.gitUsername};
-    const entries=lines(await this.request(target,path+'/info/refs?service=git-receive-pack','GET',undefined,token,signal,options));check();
+    const path=target.url.pathname.replace(/\/$/,''),options={service,username:resource.metadata.gitUsername};
+    const entries=lines(await this.request(target,path+'/info/refs?service='+service,'GET',undefined,token,signal,options));check();
     const advertised=entries.filter(line=>/^[a-f0-9]{40} /.test(line)),capabilities=advertised.flatMap(line=>line.split('\0')[1]?.trim().split(/\s+/)||[]);
     const refs=Object.fromEntries(advertised.map(line=>[line.split(' ')[1].split(/[\0\n]/)[0],line.slice(0,40)]));
     return {target,token,path,options,capabilities,refs};
