@@ -20,7 +20,7 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
   const context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1100,height:800}});
   const page=await newPageWithoutTutorials(context);page.setDefaultTimeout(5000);
   const errors=[],requests=[];page.on('pageerror',error=>errors.push(error.message));
-  let state={connected:true,messages:[],job:null},failNext=false;
+  let state={connected:true,messages:[],job:null,conversations:[],conversationId:null},failNext=false;const chats=new Map();
   await page.route('**/api/oddy**',async route=>{
     if(new URL(route.request().url()).pathname==='/api/oddy/files'){
       await route.fulfill({json:{id:'11111111-1111-1111-1111-111111111111',name:'brief.txt',size:10,mimeType:'application/octet-stream'}});return;
@@ -29,7 +29,13 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
     if(request.method()==='POST'){
       requests.push({path:new URL(request.url()).pathname,body});
       if(failNext){failNext=false;await route.fulfill({status:400,json:{error:'Stop the current task first.'}});return;}
-      if(new URL(request.url()).pathname==='/api/oddy')state={...state,messages:[{id:'owner',role:'user',text:body.prompt},{id:'reply',role:'assistant',text:'Ready. **Workspace created.** <script>bad()</script>'}],job:{id:'job',status:'completed'}};
+      const path=new URL(request.url()).pathname;
+      if(path==='/api/oddy'){
+        const id=state.conversationId||'chat-'+(chats.size+1),messages=[{id:'owner',role:'user',text:body.prompt},{id:'reply',role:'assistant',text:'Ready. **Workspace created.** <script>bad()</script>'}];
+        chats.set(id,{id,title:body.prompt||'Attached file',messages});state={...state,conversationId:id,conversations:[...chats.values()].map(({id,title})=>({id,title})),messages,job:{id:'job',status:'completed'}};
+      }else if(path==='/api/oddy/new')state={...state,conversationId:null,messages:[],job:null};
+      else if(path==='/api/oddy/select')state={...state,conversationId:body.conversationId,messages:chats.get(body.conversationId).messages,job:null};
+      else if(path==='/api/oddy/clear'){chats.delete(state.conversationId);state={...state,conversationId:null,conversations:[...chats.values()].map(({id,title})=>({id,title})),messages:[],job:null};}
       else state={...state,job:{id:'job',status:'completed'}};
     }
     await route.fulfill({json:state});
@@ -92,6 +98,15 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
     await page.locator('#oddy-prompt').fill('Research');await page.locator('#oddy-prompt').press('Enter');
     await page.waitForFunction(()=>document.querySelector('#oddy-prompt').value==='');
     expect(requests.at(-1).body).toMatchObject({jobId:'job',requestId:'question',answer:'Research',screen:{dialog:'settings-dialog'}});
+    const previous=state.conversationId;
+    await page.locator('#oddy-menu summary').click();await page.locator('#oddy-new').click();
+    await page.getByRole('heading',{name:'What needs doing?',exact:true}).waitFor();expect(state.conversations.length).toBeGreaterThan(0);
+    await page.locator('#oddy-menu summary').click();await page.locator('#oddy-history').selectOption(previous);
+    await page.locator('#oddy-messages article').first().waitFor();
+    await page.locator('#oddy-menu summary').click();page.once('dialog',dialog=>dialog.accept());await page.locator('#oddy-clear').click();
+    await page.getByRole('heading',{name:'What needs doing?',exact:true}).waitFor();expect(state.messages).toEqual([]);
+    await page.locator('#oddy-menu summary').click();await page.locator('#oddy-new-room').click();
+    await page.locator('#room-dialog').waitFor({state:'visible'});await page.locator('#room-dialog').evaluate(node=>node.close());
     await page.goto(server.url.href+'?settings=provider');
     await page.locator('#settings-provider-controls').waitFor({state:'visible'});
     await page.getByRole('button',{name:'Close settings',exact:true}).click();
@@ -122,6 +137,12 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
     expect(Math.abs((await page.locator('#browser-toggle').boundingBox()).y-launcherBounds.y)).toBeLessThan(2);
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
     await page.screenshot({path:join(import.meta.dir,'../artifacts/oddy-navigation-mobile.png')});
+    await page.locator('#oddy-open').click();
+    await page.evaluate(()=>document.querySelector('#workspace-current-name').textContent='E-studio · Tere Long Page Theme · Execution configuration');
+    await page.waitForFunction(()=>document.querySelector('#oddy-context').textContent.includes('E-studio'));
+    expect(await page.locator('#oddy-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
+    expect(await page.locator('#oddy-context').evaluate(node=>getComputedStyle(node).whiteSpace)).toBe('nowrap');
+    await page.screenshot({path:join(import.meta.dir,'../artifacts/oddy-header-mobile.png')});
     expect(errors).toEqual([]);
   }finally{await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
 },20000);

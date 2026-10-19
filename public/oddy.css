@@ -6,8 +6,17 @@
 .oddy-panel::backdrop { background:color-mix(in srgb,var(--shadow-ink) 16%,transparent); }
 .oddy-header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 20px; border-bottom:1px solid var(--line); }
 .oddy-header h2 { margin:0; font-size:20px; }
+.oddy-heading { flex:1; min-width:0; }
 .oddy-header p { margin:4px 0 0; color:var(--muted); font-size:12px; }
-.oddy-context { margin:0; padding:8px 20px; font-size:12px; color:var(--muted); border-bottom:1px solid var(--line); }
+.oddy-context { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.oddy-menu { position:relative; }
+.oddy-menu>summary { list-style:none; cursor:pointer; }
+.oddy-menu>summary::-webkit-details-marker { display:none; }
+.oddy-menu-items { position:absolute; right:0; top:44px; z-index:1; width:210px; padding:8px; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); box-shadow:var(--shadow); }
+.oddy-menu-items>button { display:block; width:100%; text-align:left; padding:12px; border-radius:var(--radius); }
+.oddy-menu-items>button:hover { background:var(--wash); }
+.oddy-menu-items>label { display:block; margin:12px 8px 4px; color:var(--muted); font-size:12px; }
+.oddy-menu-items>select { width:100%; min-width:0; }
 .oddy-attachments { display:flex; flex-wrap:wrap; gap:6px; }
 .oddy-attachments:not(:empty) { margin-bottom:10px; }
 .oddy-file { display:inline-flex; align-items:center; gap:4px; padding:4px 8px; max-width:100%; border:1px solid var(--line); border-radius:var(--radius); font-size:12px; overflow-wrap:anywhere; }

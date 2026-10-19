@@ -6,7 +6,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {approvalActions} from './security/policy.js';
 import { authorize, allowedOrigin, textInput } from './security.js';
 import { openStore, findAgent, deleteAgent, createRoom, updateRoom, createJob } from './store.js';
-import { oddyAction, oddyScreen } from './oddy.js';
+import { oddyAction, oddyScreen, oddyHistory, historyCollections } from './oddy.js';
 import { AIProvider, validateProvider, publicProvider, providerModels } from './providers.js';
 import { Browser } from './browser.js';
 import { Runtime } from './runtime.js';
@@ -133,6 +133,37 @@ export function createApp(options = {}) {
         if(action.action==='list_workspaces')return {workspaces:store.state.workspaces};
         if(!target)throw Error('Workspace not found.');
         const state=target.runtime.state, broker=target.runtime.store.connectors;
+        if(['search_history','read_history'].includes(action.action)){
+          const targetStore=target.runtime.store;
+          const clean=value=>{
+            if(Array.isArray(value))return value.map(clean);
+            if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,/^(api[_-]?key|credential|credentialRef|password|token|secret|authorization|cookie|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key)$/i.test(key)?'[REDACTED]':clean(item)]));
+            return typeof value==='string'?value.replaceAll(password,'[REDACTED]'):value;
+          };
+          const sanitize=value=>[...homes.values(),oddyApp].reduce((value,home)=>home.runtime.store.connectors.sanitize(value),clean(value));
+          let records;
+          if(action.body.collection==='configuration')records=[
+            {id:'preferences',owner:state.owner,preferences:state.preferences,currency:state.currency},
+            {id:'appearance',...state.appearance},
+            {id:'providers',default:publicProvider(state.globalProvider),agents:state.agents.map(agent=>({id:agent.id,override:agent.providerOverride,provider:publicProvider(agent.provider),connected:!!target.runtime.accounts.get(agent.id)?.account,connectionError:target.runtime.accounts.get(agent.id)?.connectionError}))},
+            {id:'agents',agents:state.agents.map(agent=>{const access=targetStore.security.access(agent.id);return {id:agent.id,profile:agent===state.agents[0]?state.customization:agent.customization,access,pausedSpaces:[...new Set([...access.spaceIds,access.defaultSpaceId])].map(spaceId=>({spaceId,paused:targetStore.security.isPaused(agent.id,spaceId)}))};})},
+            {id:'resources',resources:targetStore.security.listResources()},
+            {id:'spaces',spaces:targetStore.security.listSpaces()},
+            {id:'isolated-workspaces',workspaces:targetStore.security.isolatedWorkspaces.list()},
+            {id:'connections',connections:targetStore.connectors.list()},
+            {id:'sharing',sharing:store.state.workspaceSharing},
+            {id:'execution',terminal:target.runtime.sandbox.configured,browser:target.runtime.scopedBrowsers.configured,sourceRoot:target.runtime.sandbox.snapshotRoot||null,sourceLimits,capabilities:targetStore.security.catalog()},
+            {id:'permission-presets',presets:targetStore.security.presets()},
+          ];
+          else if(action.body.collection==='oddyChats')records=oddyApp.runtime.state.conversations;
+          else if(action.body.collection==='oddyJobs')records=oddyApp.runtime.state.jobs;
+          else if(action.body.collection==='messages')records=state.conversations.flatMap(conversation=>conversation.messages.map(message=>({...message,conversationId:conversation.id,conversationTitle:conversation.title})));
+          else if(['memory','audit','approvals','exports'].includes(action.body.collection))records=targetStore.ownerHistory(action.body.collection);
+          else records=state[action.body.collection];
+          const result=oddyHistory(records,action,sanitize);
+          oddyApp.runtime.event(job,'History inspected',`${action.action}: ${action.body.collection} in ${action.workspaceId}`);
+          return {workspaceId:action.workspaceId,collection:action.body.collection,...result};
+        }
         if(action.action==='update_agent'){
           const agent=findAgent(state,input.targetId);
           action.body={...defaults,...(agent===state.agents[0]?state.customization:agent.customization),...action.body};
@@ -144,6 +175,7 @@ export function createApp(options = {}) {
           action.body={...existing,...action.body};
         }
         if(action.action==='inspect_workspace')return broker.sanitize({
+          historyCollections,
           workspace:store.state.workspaces.find(row=>row.id===action.workspaceId),
           agents:state.agents.map(agent=>({id:agent.id,profile:agent===state.agents[0]?state.customization:agent.customization,defaultSpaceId:target.runtime.store.security.defaultSpace(agent.id),connected:!!target.runtime.accounts.get(agent.id)?.account})),
           spaces:target.runtime.store.security.listSpaces(),
@@ -255,29 +287,45 @@ export function createApp(options = {}) {
             await openOddy();
             return oddyApp.fetch(new Request(origin+pathname.replace('/api/oddy','/api'),req),server);
           }
-          if(!['/api/oddy','/api/oddy/answer','/api/oddy/cancel'].includes(pathname))return response({error:'Endpoint not found.'},404);
+          if(!['/api/oddy','/api/oddy/answer','/api/oddy/cancel','/api/oddy/new','/api/oddy/clear','/api/oddy/select'].includes(pathname))return response({error:'Endpoint not found.'},404);
           if(req.method!=='POST' && !(req.method==='GET'&&pathname==='/api/oddy'))return response({error:'Method not allowed.'},405);
           const assistant=await openOddy();
+          if(assistant.state.oddyConversationId===undefined)assistant.state.oddyConversationId=assistant.state.conversations[0]?.id||null;
           if(req.method==='POST'){
             const input=await json(req);
-            if(pathname==='/api/oddy/answer'){
+            if(['/api/oddy/new','/api/oddy/clear','/api/oddy/select'].includes(pathname)){
+              if(assistant.state.jobs.some(job=>['queued','running','waiting','takeover','stopping'].includes(job.status)))throw Error('Stop Oddy’s current task before changing conversations.');
+              if(pathname==='/api/oddy/select'){
+                if(Object.keys(input).some(key=>key!=='conversationId')||!assistant.state.conversations.some(row=>row.id===input.conversationId))throw Error('Choose an existing Oddy conversation.');
+                assistant.state.oddyConversationId=input.conversationId;
+              }else{
+                if(pathname==='/api/oddy/clear'){
+                  if(input.confirm!==true||Object.keys(input).some(key=>!['confirm','conversationId'].includes(key)))throw Error('Confirm clearing this Oddy conversation.');
+                  if(!input.conversationId||input.conversationId!==assistant.state.oddyConversationId)throw Error('This Oddy conversation changed. Review it before clearing.');
+                  if(assistant.state.oddyConversationId)assistant.store.deleteConversation(assistant.state.oddyConversationId);
+                }else if(Object.keys(input).length)throw Error('New chat takes no parameters.');
+                assistant.state.oddyConversationId=null;
+              }
+              assistant.changed();
+            }else if(pathname==='/api/oddy/answer'){
               if(Object.keys(input).some(key=>!['jobId','requestId','answer','decision','screen'].includes(key)) || input.decision!==undefined&&!['allow','deny'].includes(input.decision))throw Error('Invalid Oddy answer.');
               const screen=input.screen===undefined?undefined:oddyScreen(input.screen);
               assistant.answer(input.jobId,input);
               if(screen){assistant.state.jobs.find(job=>job.id===input.jobId).oddyScreen=screen;assistant.changed();}
             }else if(pathname==='/api/oddy/cancel')await assistant.cancel(input.jobId);
             else{
-              if(Object.keys(input).some(key=>!['prompt','workspaceId','screen','attachments'].includes(key)) || !homes.has(input.workspaceId||'default'))throw Error('Choose an existing workspace.');
+              if(Object.keys(input).some(key=>!['prompt','workspaceId','screen','attachments','conversationId'].includes(key)) || !homes.has(input.workspaceId||'default'))throw Error('Choose an existing workspace.');
+              if(input.conversationId!==undefined&&input.conversationId!==assistant.state.oddyConversationId)throw Error('This Oddy conversation changed. Reopen it before sending.');
               if(assistant.state.jobs.some(job=>['queued','running','waiting','takeover','stopping'].includes(job.status)))throw Error('Wait for Oddy or stop its current task.');
               const screen=oddyScreen(input.screen);
-              const conversation=assistant.state.conversations[0];
+              const conversation=assistant.state.conversations.find(row=>row.id===assistant.state.oddyConversationId);
               const job=createJob(assistant.state,{prompt:input.prompt,attachments:input.attachments,conversationId:conversation?.id});
-              job.oddyWorkspaceId=input.workspaceId||'default';job.oddyScreen=screen;assistant.conversation(job).title='Oddy';
+              job.oddyWorkspaceId=input.workspaceId||'default';job.oddyScreen=screen;assistant.state.oddyConversationId=job.conversationId;
               assistant.changed();void assistant.drain();
             }
           }
-          const job=assistant.state.jobs[0];
-          return response(assistant.store.connectors.sanitize({messages:assistant.state.conversations[0]?.messages||[],files:assistant.state.files.map(({id,name,mimeType,size})=>({id,name,mimeType,size})),job:job?{id:job.id,status:job.status,error:job.error,pending:job.pending}:null,connected:!!assistant.account,connectionError:assistant.connectionError}));
+          const conversation=assistant.state.conversations.find(row=>row.id===assistant.state.oddyConversationId),job=assistant.state.jobs.find(job=>job.conversationId===conversation?.id);
+          return response(assistant.store.connectors.sanitize({conversationId:conversation?.id||null,conversations:assistant.state.conversations.map(({id,title})=>({id,title})),messages:conversation?.messages||[],files:assistant.state.files.map(({id,name,mimeType,size})=>({id,name,mimeType,size})),job:job?{id:job.id,status:job.status,error:job.error,pending:job.pending}:null,connected:!!assistant.account,connectionError:assistant.connectionError}));
         }
         if (!options.workspaceId && workspaceId !== 'default' && !pathname.startsWith('/api/workspaces')) {
           const child=homes.get(workspaceId);

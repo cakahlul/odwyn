@@ -82,6 +82,12 @@ export function openStore(directory) {
   });
   if(plaintextProviderKeys){save();db.exec('PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE)');}
   const store={ directory, state, security, data, connectors, approvals, migration, save, search, deleteConversation, close: () => db.close() };
+  store.ownerHistory=collection=>{
+    const queries={memory:'SELECT id,space_id AS spaceId,resource_id AS resourceId,task_id AS taskId,text FROM space_memory ORDER BY rowid DESC',audit:'SELECT id,at,task_id AS taskId,agent_id AS agentId,space_id AS spaceId,resource_id AS resourceId,action,mode,reason FROM security_events ORDER BY rowid DESC',approvals:'SELECT id,status,digest,expires_at AS expiresAt,envelope,receipt FROM approval_requests ORDER BY rowid DESC',exports:'SELECT id,message_id AS messageId,destination_space AS destinationSpaceId,purpose,payload,revoked FROM data_exports ORDER BY rowid DESC'};
+    if(!Object.hasOwn(queries,collection))throw Error('Unsupported owner history collection.');
+    const jsonFields={approvals:['envelope','receipt'],exports:['payload']}[collection]||[];
+    return db.query(queries[collection]).all().map(row=>Object.fromEntries(Object.entries(row).map(([key,value])=>[key,jsonFields.includes(key)&&value!==null?JSON.parse(value):value])));
+  };
   store.knowledge=openKnowledge(db,store);return store;
 }
 

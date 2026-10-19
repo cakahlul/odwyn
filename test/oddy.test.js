@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { oddyAction, oddyScreen, oddyTool } from '../oddy.js';
+import { oddyAction, oddyScreen, oddyTool, oddyHistory } from '../oddy.js';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,6 +35,18 @@ test('Oddy accepts fixed management operations, never arbitrary owner routes or 
     {action:'run_job',parameters:{prompt:'Hello',interactionMode:'allow'}},
     {action:'create_workspace',parameters:{name:'Research'},confirm:true},
   ]) expect(()=>oddyAction(input)).toThrow();
+});
+
+test('Oddy history is paginated, redacted before chunking and rejects arbitrary collections',()=>{
+  const records=[{id:'old',text:'A'.repeat(13000)+'secret-value'},{id:'new',text:'Recent'}];
+  const sanitize=value=>JSON.parse(JSON.stringify(value).replaceAll('secret-value','[REDACTED]'));
+  const page=oddyHistory(records,oddyAction({action:'search_history',parameters:{collection:'messages',limit:1}}),sanitize);
+  expect(page.total).toBe(2);expect(page.nextOffset).toBe(1);
+  let offset=0,text='',next;
+  do{next=oddyHistory(records,oddyAction({action:'read_history',targetId:'old',parameters:{collection:'messages',offset}}),sanitize);text+=next.text;offset=next.nextOffset;}while(offset!==null);
+  expect(JSON.parse(text).text).toBe('A'.repeat(13000)+'[REDACTED]');
+  expect(()=>oddyAction({action:'read_history',targetId:'old',parameters:{collection:'provider_credentials'}})).toThrow();
+  expect(()=>oddyAction({action:'search_history',parameters:{collection:'messages',limit:51}})).toThrow();
 });
 
 test('Oddy operates across workspaces independently and binds deletion to an explicit owner decision', async()=>{
@@ -81,6 +93,16 @@ test('Oddy operates across workspaces independently and binds deletion to an exp
     expect((await (await request('/api/oddy?workspace='+workspace.id)).json()).messages[0].text).toBe('Help me run this platform');
     app.runtime.conversation(busy).messages.push({id:'private',role:'assistant',text:'PRIVATE_CONVERSATION_CONTENT',at:new Date().toISOString()});
     expect(JSON.stringify(await tool({action:'inspect_workspace',workspaceId:'default'}))).not.toContain('PRIVATE_CONVERSATION_CONTENT');
+    app.runtime.state.globalProvider.apiKey='protected-history-canary';app.runtime.state.preferences='Prefer short replies. protected-history-canary';app.runtime.changed();
+    const found=await tool({action:'search_history',workspaceId:'default',parameters:{collection:'messages',query:'PRIVATE_CONVERSATION_CONTENT'}});
+    expect(found.success).toBe(true);expect(JSON.parse(found.contentItems[0].text).records[0].id).toBe('private');
+    const history=await tool({action:'read_history',workspaceId:'default',targetId:'private',parameters:{collection:'messages'}});
+    expect(JSON.parse(JSON.parse(history.contentItems[0].text).text).text).toBe('PRIVATE_CONVERSATION_CONTENT');
+    expect((await tool({action:'read_history',workspaceId:workspace.id,targetId:'private',parameters:{collection:'messages'}})).success).toBe(false);
+    const preferences=await tool({action:'read_history',workspaceId:'default',targetId:'preferences',parameters:{collection:'configuration'}});
+    expect(JSON.parse(preferences.contentItems[0].text).text).toContain('Prefer short replies');
+    expect(JSON.stringify(preferences)).not.toContain('protected-history-canary');
+    for(const collection of ['audit','memory','approvals','exports'])expect((await tool({action:'search_history',workspaceId:'default',parameters:{collection}})).success).toBe(true);
     expect((await tool({action:'cancel_job',workspaceId:'default',targetId:busy.id})).success).toBe(true);
     expect(busy.status).toBe('cancelled');
     expect(await tool({action:'create_agent',parameters:{name:'Scout'}})).toMatchObject({success:true});
@@ -114,8 +136,22 @@ test('Oddy operates across workspaces independently and binds deletion to an exp
     expect((await request('/api/state?workspace='+workspace.id)).status).toBe(404);
     expect((await request('/api/oddy/answer','POST',{jobId:next.job.id,requestId:next.job.pending.id,decision:'allow'})).status).toBe(400);
     await request('/api/oddy/cancel','POST',{jobId:next.job.id});
-    await app.close();app=createApp(options);
+    const original=(await read()).conversationId;
+    expect((await request('/api/oddy/new','POST',{})).status).toBe(200);expect((await read()).messages).toEqual([]);
+    const second=await (await request('/api/oddy','POST',{prompt:'Second Oddy chat'})).json();
+    expect(second.conversationId).not.toBe(original);expect(second.conversations).toHaveLength(2);
+    expect((await request('/api/oddy/clear','POST',{confirm:true})).status).toBe(400);
+    await request('/api/oddy/cancel','POST',{jobId:second.job.id});
+    await request('/api/oddy/select','POST',{conversationId:original});
     expect((await read()).messages[0].text).toBe('Help me run this platform');
+    expect((await request('/api/oddy/clear','POST',{})).status).toBe(400);
+    expect((await request('/api/oddy/clear','POST',{confirm:true,conversationId:second.conversationId})).status).toBe(400);
+    expect((await request('/api/oddy/clear','POST',{confirm:true,conversationId:original})).status).toBe(200);
+    expect((await read()).messages).toEqual([]);expect((await read()).conversations).toHaveLength(1);
+    expect(app.runtime.state.conversations.some(row=>row.id===busy.conversationId)).toBe(true);
+    await request('/api/oddy/select','POST',{conversationId:second.conversationId});
+    await app.close();app=createApp(options);
+    expect((await read()).messages[0].text).toBe('Second Oddy chat');
     expect((await (await request('/api/workspaces')).json()).workspaces).toHaveLength(1);
   }finally{await app.close();rmSync(directory,{recursive:true,force:true});}
 });
