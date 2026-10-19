@@ -7,6 +7,7 @@ test('tutorial navigation, dismissal, replay, reset, storage failures and worksp
   setAttribute(key,value){this[key]=value;}
   set innerHTML(markup){for(const [,id] of markup.matchAll(/id="([^"]+)"/g))nodes.set('#'+id,new Node(id));if(this.id==='tutorial-overlay')this.shades=Array.from({length:4},()=>new Node());}
   append(node){this.children.push(node);node.parent=this;node.isConnected=true;}
+  insertBefore(node,before){const index=this.children.indexOf(before);if(index<0)this.append(node);else{this.children.splice(index,0,node);node.parent=this;node.isConnected=true;}}
   prepend(node){this.append(node);if(node.id)nodes.set('#'+node.id,node);}
   remove(){this.isConnected=false;if(this.parent)this.parent.children=this.parent.children.filter(child=>child!==this);}
   contains(node){return node===this||this.children.includes(node)||(this.id==='tutorial-overlay'&&[...nodes.values()].some(value=>value===node&&node.id.startsWith('tutorial-')));}
@@ -32,6 +33,7 @@ test('tutorial navigation, dismissal, replay, reset, storage failures and worksp
  try{
   const {setupTutorials}=await import('../public/tutorials.js');
   let visit=setupTutorials();visit('home');flush();
+  expect(nodes.get('#main-tutorial').textContent).toBe('?');
   expect(nodes.get('#tutorial-progress').textContent).toBe('Home · 1 / 2');expect(nodes.get('#tutorial-back').disabled).toBe(true);
   click('tutorial-next');expect(nodes.get('#tutorial-progress').textContent).toBe('Home · 2 / 2');expect(nodes.get('#tutorial-next').textContent).toBe('Finish');
   click('tutorial-back');expect(nodes.get('#tutorial-progress').textContent).toBe('Home · 1 / 2');

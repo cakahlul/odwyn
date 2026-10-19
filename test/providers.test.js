@@ -11,12 +11,33 @@ import { Runtime } from '../runtime.js';
 import { defaults } from '../public/profile.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { oddyAction } from '../oddy.js';
 
 const wait = async condition => {
   for (let i = 0; i < 300 && !condition(); i++) await Bun.sleep(10);
   expect(condition()).toBe(true);
 };
 const fakeCodex = () => Object.assign(new EventEmitter(), { request: async () => ({ account: null }), stop() {} });
+
+test('Claude preserves Oddy object, boolean and array arguments through the SDK',async()=>{
+  const directory=mkdtempSync(join(tmpdir(),'odwyn-oddy-claude-')),store=openStore(directory);let received;
+  const provider=new AIProvider({workspace:directory,config:validateProvider({type:'claude',model:'sonnet'}),codex:fakeCodex(),claudeAuth:async()=>({loggedIn:true}),query:({options})=>(async function*(){
+    const client=new Client({name:'oddy-test',version:'1.0.0'}),[clientTransport,serverTransport]=InMemoryTransport.createLinkedPair();
+    await options.mcpServers.odwyn.instance.connect(serverTransport);await client.connect(clientTransport);
+    try{
+      const result=await client.callTool({name:'odwyn_manage',arguments:{action:'create_agent',parameters:{name:'Senior Engineer',specialization:'Senior Software Engineer',skillIds:[],overrideWorkspace:false}}});
+      expect(result.isError).toBe(false);expect(result.content[0].text).toContain('Senior Software Engineer');
+      yield {type:'result',subtype:'success',result:'Agent created.'};
+    }finally{await client.close();}
+  })()});
+  const runtime=new Runtime({store,codex:provider,browser:{},workspace:directory});
+  runtime.oddy=async(job,args)=>{received=args;return oddyAction(args).body;};
+  try{
+    await runtime.refreshAccount();const job=runtime.submit({prompt:'Add a Senior Software Engineer'});
+    await wait(()=>['completed','failed'].includes(job.status));expect(job.status).toBe('completed');
+    expect(received.parameters).toEqual({name:'Senior Engineer',specialization:'Senior Software Engineer',skillIds:[],overrideWorkspace:false});
+  }finally{await runtime.close();provider.stop();store.close();rmSync(directory,{recursive:true,force:true});}
+});
 
 test('Claude login uses SDK OAuth, checks state, hides exchange errors, and closes login sessions',async()=>{
   let closed=0,callback,fail=false;const events=[];

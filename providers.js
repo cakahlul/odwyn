@@ -223,11 +223,7 @@ export class AIProvider extends EventEmitter {
     const { query, tool, createSdkMcpServer } = await import('@anthropic-ai/claude-agent-sdk');
     const { z } = await import('zod');
     const server = createSdkMcpServer({ name: 'odwyn', tools: run.thread.dynamicTools.map(t => {
-      const schema = Object.fromEntries(Object.entries(t.inputSchema.properties).map(([key, p]) => {
-        let field = p.enum ? z.enum(p.enum) : p.type === 'integer' ? z.number().int() : p.type === 'number' ? z.number() : z.string();
-        if (!t.inputSchema.required.includes(key)) field = field.optional();
-        return [key, field];
-      }));
+      const schema = z.fromJSONSchema(t.inputSchema).shape;
       return tool(t.name, t.description, schema, async args => {
         const result = await this.invoke(run, t.name, args);
         return { isError: !result.success, content: result.contentItems.map(p => p.type === 'inputImage'

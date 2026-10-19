@@ -59,7 +59,7 @@ export function setupTutorials() {
  $('#tutorial-hide').onchange=event=>{preferences.hidden=event.target.checked;if(!persist())return;$('#tutorial-settings-status').textContent=preferences.hidden?'Automatic tutorials hidden. Manual replay is still available.':'Automatic tutorials enabled for unvisited menus.';};
  $('#tutorial-reset').onclick=()=>{preferences.seen=[];if(!persist())return;$('#tutorial-settings-status').textContent='Tutorial progress reset. Guides will appear when you next open each menu.';};
  const overlay=document.createElement('div');overlay.id='tutorial-overlay';overlay.setAttribute('popover','manual');
- overlay.innerHTML='<div class="tutorial-shade"></div><div class="tutorial-shade"></div><div class="tutorial-shade"></div><div class="tutorial-shade"></div><div id="tutorial-light" aria-hidden="true"></div><section id="tutorial-card" role="dialog" aria-labelledby="tutorial-title" aria-describedby="tutorial-copy"><small id="tutorial-progress" aria-live="polite"></small><h2 id="tutorial-title"></h2><p id="tutorial-copy"></p><div class="tutorial-actions"><button type="button" class="text-button" id="tutorial-skip">Skip</button><button type="button" class="secondary-button" id="tutorial-back">Back</button><button type="button" class="primary-button" id="tutorial-next">Next</button></div></section>';
+ overlay.innerHTML='<div class="tutorial-shade"></div><div class="tutorial-shade"></div><div class="tutorial-shade"></div><div class="tutorial-shade"></div><div id="tutorial-light" aria-hidden="true"></div><section id="tutorial-card" role="dialog" aria-labelledby="tutorial-title" aria-describedby="tutorial-copy"><small id="tutorial-progress" aria-live="polite"></small><h2 id="tutorial-title"></h2><p id="tutorial-copy"></p><div class="tutorial-actions"><button type="button" class="secondary-button" id="tutorial-oddy">Ask Oddy</button><button type="button" class="text-button" id="tutorial-skip">Skip</button><button type="button" class="secondary-button" id="tutorial-back">Back</button><button type="button" class="primary-button" id="tutorial-next">Next</button></div></section>';
  const card=overlay.querySelector('#tutorial-card');
  function stop(restore=true){
   if(!active)return;active=null;
@@ -96,6 +96,7 @@ export function setupTutorials() {
   if(!preferences.seen.includes(context.id)){preferences.seen.push(context.id);persist();}
   context.root.append(overlay);overlay.showPopover();show();
  }
+ overlay.querySelector('#tutorial-oddy').onclick=()=>{stop(false);$('#oddy-open')?.click();};
  overlay.querySelector('#tutorial-skip').onclick=()=>stop();
  overlay.querySelector('#tutorial-back').onclick=()=>{if(index>0){index--;show();}};
  overlay.querySelector('#tutorial-next').onclick=()=>{if(index===active.steps.length-1)stop();else{index++;show();}};
@@ -136,8 +137,12 @@ export function setupTutorials() {
   stop(false);document.querySelectorAll('.tutorial-replay').forEach(button=>button.remove());context=null;
   if(!steps||!visible(root))return;
   context={id,title,steps,root};
-  const replay=document.createElement('button');replay.type='button';replay.className='secondary-button tutorial-replay';replay.textContent='Tutorial';replay.setAttribute('aria-label',`Tutorial: ${title}`);replay.onclick=start;
-  if(root.id==='view'){replay.id='main-tutorial';$('#agent-workspace').prepend(replay);}else (root.querySelector('.profile-top,.modal-top')||root).append(replay);
+  const replay=document.createElement('button');replay.type='button';replay.className='icon-button tutorial-replay';replay.textContent='?';replay.title='Replay tutorial';replay.setAttribute('aria-label',`Tutorial: ${title}`);replay.onclick=start;
+  if(root.id==='view'){replay.id='main-tutorial';$('#agent-workspace').prepend(replay);}else {
+   const header=root.querySelector('.profile-top,.modal-top')||root;
+   const close=header.querySelector(':scope > button');
+   header.insertBefore(replay,close);
+  }
   if(!preferences.hidden&&!preferences.seen.includes(id))start();
  }
  const schedule=()=>{if(!frame)frame=requestAnimationFrame(sync);};

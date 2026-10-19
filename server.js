@@ -5,7 +5,8 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import {approvalActions} from './security/policy.js';
 import { authorize, allowedOrigin, textInput } from './security.js';
-import { openStore, findAgent, deleteAgent, createRoom, updateRoom } from './store.js';
+import { openStore, findAgent, deleteAgent, createRoom, updateRoom, createJob } from './store.js';
+import { oddyAction, oddyScreen } from './oddy.js';
 import { AIProvider, validateProvider, publicProvider, providerModels } from './providers.js';
 import { Browser } from './browser.js';
 import { Runtime } from './runtime.js';
@@ -41,9 +42,9 @@ export function createApp(options = {}) {
     if (!agent.providerOverride) agent.provider = { ...store.state.globalProvider };
   }
   store.state.provider = store.state.agents[0].provider;
-  const home = options.workspaceId ? join(directory, 'codex') : resolve((process.env.ODWYN_CODEX_HOME ?? process.env.SIDEKICK_CODEX_HOME) || join(directory, 'codex'));
+  const home = options.oddyHome || (options.workspaceId ? join(directory, 'codex') : resolve((process.env.ODWYN_CODEX_HOME ?? process.env.SIDEKICK_CODEX_HOME) || join(directory, 'codex')));
   const sourceProtectedRoots=[...new Set([...(options.sourceProtectedRoots||[]),sourceProtectedRoot,home])];
-  const codex = new AIProvider({ config: store.state.provider, home, workspace, isolated:!!options.workspaceId, codex: options.codex, ...options.providerOptions });
+  const codex = new AIProvider({ config: store.state.provider, home, workspace, isolated:!!options.workspaceId&&!options.oddyHome, codex: options.codex, ...options.providerOptions });
   let runtime;
   const browser = options.browser || new Browser({ directory, executablePath: (process.env.ODWYN_BROWSER_EXECUTABLE ?? process.env.SIDEKICK_BROWSER_EXECUTABLE) || undefined, headless: (process.env.ODWYN_HEADLESS ?? process.env.SIDEKICK_HEADLESS) !== 'false',
     findFile: id => store.state.files.find(file => file.id === id),
@@ -123,6 +124,59 @@ export function createApp(options = {}) {
   function freshOwner(value){const supplied=Buffer.from(typeof value==='string'?value:''),expected=Buffer.from(password);if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected))throw new Error('Fresh owner password required.');}
   const stepupCookie = options.workspaceId ? `odwyn_stepup_${options.workspaceId}` : 'odwyn_stepup';
   const homes = new Map();
+  let oddyApp=null;
+  async function openOddy() {
+    if(!oddyApp){
+      oddyApp=createApp({...options,codex:undefined,browser:undefined,directory:join(directory,'oddy'),workspaceId:'oddy',oddyHome:home,execution:{},browserExecution:{}});
+      oddyApp.runtime.oddy=async(job,input)=>{
+        const action=oddyAction({workspaceId:job.oddyWorkspaceId||'default',...input}), target=homes.get(action.workspaceId);
+        if(action.action==='list_workspaces')return {workspaces:store.state.workspaces};
+        if(!target)throw Error('Workspace not found.');
+        const state=target.runtime.state, broker=target.runtime.store.connectors;
+        if(action.action==='update_agent'){
+          const agent=findAgent(state,input.targetId);
+          action.body={...defaults,...(agent===state.agents[0]?state.customization:agent.customization),...action.body};
+        }
+        if(['update_workflow','update_skill'].includes(action.action)){
+          const collection=action.action==='update_workflow'?state.workflows:state.skills;
+          const existing=collection.find(row=>row.id===input.targetId);
+          if(!existing)throw Error('Definition not found.');
+          action.body={...existing,...action.body};
+        }
+        if(action.action==='inspect_workspace')return broker.sanitize({
+          workspace:store.state.workspaces.find(row=>row.id===action.workspaceId),
+          agents:state.agents.map(agent=>({id:agent.id,profile:agent===state.agents[0]?state.customization:agent.customization,defaultSpaceId:target.runtime.store.security.defaultSpace(agent.id),connected:!!target.runtime.accounts.get(agent.id)?.account})),
+          spaces:target.runtime.store.security.listSpaces(),
+          resources:target.runtime.store.security.listResources().map(({id,name,type,spaceId})=>({id,name,type,spaceId})),
+          workflows:state.workflows,skills:state.skills,schedules:state.schedules,
+          rooms:state.conversations.filter(row=>row.kind==='room').map(({id,title,spaceId,memberIds,governance,discussion})=>({id,title,spaceId,memberIds,governance,status:discussion?.status})),
+          jobs:state.jobs.slice(0,50).map(({id,agentId,spaceId,conversationId,prompt,status,error,createdAt})=>({id,agentId,spaceId,conversationId,prompt:prompt.slice(0,200),status,error,createdAt})),
+          execution:{terminal:target.runtime.sandbox.configured,browser:target.runtime.scopedBrowsers.configured},
+        });
+        if(action.destructive){
+          const workspaceName=store.state.workspaces.find(row=>row.id===action.workspaceId)?.name;
+          const collection={delete_agent:state.agents,delete_workflow:state.workflows,delete_skill:state.skills,delete_schedule:state.schedules}[action.action];
+          const item=collection?.find(row=>row.id===input.targetId);
+          if(collection&&!item)throw Error('Deletion target not found.');
+          const name=item?.customization?.name||item?.name||item?.prompt||workspaceName;
+          const kind=action.action.replace('delete_','');
+          const effect=kind==='workspace'?' Its agents, chats, files, connections and settings will be permanently removed.':kind==='agent'?' Its routines will also be removed; saved chats and files remain.':'';
+          const answer=await oddyApp.runtime.waitForOwner(job,{type:'oddy-confirmation',title:'Confirm deletion',detail:broker.redact(`Delete ${kind} “${name}” in workspace “${workspaceName}”?${effect}`)});
+          if(answer.decision!=='allow')return {cancelled:true};
+        }
+        if(oddyApp.runtime.active!==job || job.status!=='running')throw Error('Oddy task is no longer active.');
+        const path=action.path+(action.path.includes('?')?'&':'?')+'workspace='+encodeURIComponent(action.workspaceId);
+        const result=await app.fetch(new Request(origin+path,{method:action.method,headers:{authorization:'Basic '+Buffer.from(`${user}:${password}`).toString('base64'),origin,'content-type':'application/json'},body:JSON.stringify(action.body)}));
+        const value=await result.json();
+        if(!result.ok)throw Error(broker.redact(value.error||'Platform action failed.'));
+        oddyApp.runtime.event(job,'Platform action',`${action.action} in ${action.workspaceId}`);
+        return (homes.get(action.workspaceId)?.runtime.store.connectors||store.connectors).sanitize(value);
+      };
+    }
+    // A running turn keeps its provider; changed defaults apply to the next idle turn.
+    if(!oddyApp.providerBusy() && JSON.stringify(oddyApp.settings('provider'))!==JSON.stringify(store.state.globalProvider))await oddyApp.applySettings('provider',store.state.globalProvider);
+    return oddyApp.runtime;
+  }
   let workspaceWrites = Promise.resolve();
   if (!options.workspaceId) {
     store.state.workspaces ||= [{id:'default',name:'Default'}];
@@ -194,6 +248,37 @@ export function createApp(options = {}) {
         if (rateLimited('writes', 120)) return response({ error: 'Too many requests. Try again shortly.' }, 429);
       }
       try {
+        if(!options.workspaceId && pathname.startsWith('/api/oddy')){
+          const fileRoute=pathname.match(/^\/api\/oddy\/files(?:\/([a-f0-9-]{36})(\/preview)?)?$/);
+          if(fileRoute){
+            if(!(req.method==='POST'&&!fileRoute[1]||req.method==='GET'&&fileRoute[1]))return response({error:'Method not allowed.'},405);
+            await openOddy();
+            return oddyApp.fetch(new Request(origin+pathname.replace('/api/oddy','/api'),req),server);
+          }
+          if(!['/api/oddy','/api/oddy/answer','/api/oddy/cancel'].includes(pathname))return response({error:'Endpoint not found.'},404);
+          if(req.method!=='POST' && !(req.method==='GET'&&pathname==='/api/oddy'))return response({error:'Method not allowed.'},405);
+          const assistant=await openOddy();
+          if(req.method==='POST'){
+            const input=await json(req);
+            if(pathname==='/api/oddy/answer'){
+              if(Object.keys(input).some(key=>!['jobId','requestId','answer','decision','screen'].includes(key)) || input.decision!==undefined&&!['allow','deny'].includes(input.decision))throw Error('Invalid Oddy answer.');
+              const screen=input.screen===undefined?undefined:oddyScreen(input.screen);
+              assistant.answer(input.jobId,input);
+              if(screen){assistant.state.jobs.find(job=>job.id===input.jobId).oddyScreen=screen;assistant.changed();}
+            }else if(pathname==='/api/oddy/cancel')await assistant.cancel(input.jobId);
+            else{
+              if(Object.keys(input).some(key=>!['prompt','workspaceId','screen','attachments'].includes(key)) || !homes.has(input.workspaceId||'default'))throw Error('Choose an existing workspace.');
+              if(assistant.state.jobs.some(job=>['queued','running','waiting','takeover','stopping'].includes(job.status)))throw Error('Wait for Oddy or stop its current task.');
+              const screen=oddyScreen(input.screen);
+              const conversation=assistant.state.conversations[0];
+              const job=createJob(assistant.state,{prompt:input.prompt,attachments:input.attachments,conversationId:conversation?.id});
+              job.oddyWorkspaceId=input.workspaceId||'default';job.oddyScreen=screen;assistant.conversation(job).title='Oddy';
+              assistant.changed();void assistant.drain();
+            }
+          }
+          const job=assistant.state.jobs[0];
+          return response(assistant.store.connectors.sanitize({messages:assistant.state.conversations[0]?.messages||[],files:assistant.state.files.map(({id,name,mimeType,size})=>({id,name,mimeType,size})),job:job?{id:job.id,status:job.status,error:job.error,pending:job.pending}:null,connected:!!assistant.account,connectionError:assistant.connectionError}));
+        }
         if (!options.workspaceId && workspaceId !== 'default' && !pathname.startsWith('/api/workspaces')) {
           const child=homes.get(workspaceId);
           return child ? child.fetch(req,server) : response({error:'Workspace not found.'},404);
@@ -570,12 +655,12 @@ export function createApp(options = {}) {
         }
         if (pathname.startsWith('/api/')) return response({ error: 'Endpoint not found.' }, 404);
         if (!['GET','HEAD'].includes(req.method)) return response({ error: 'Method not allowed.' }, 405);
-        const files = { '/': 'index.html', '/app.js': 'app.js', '/tutorials.js':'tutorials.js', '/security-ui.js':'security-ui.js', '/workspace-settings.js':'workspace-settings.js', '/knowledge-ui.js':'knowledge-ui.js', '/workspace-homes.js':'workspace-homes.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/room-policy.js':'room-policy.js', '/room-work-ui.js':'room-work-ui.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
+        const files = { '/': 'index.html', '/app.js': 'app.js', '/oddy-ui.js':'oddy-ui.js', '/oddy.css':'oddy.css', '/tutorials.js':'tutorials.js', '/security-ui.js':'security-ui.js', '/workspace-settings.js':'workspace-settings.js', '/knowledge-ui.js':'knowledge-ui.js', '/workspace-homes.js':'workspace-homes.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/room-policy.js':'room-policy.js', '/room-work-ui.js':'room-work-ui.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
         if (!files[pathname]) return response({ error: 'Not found.' }, 404);
         return new Response(Bun.file(join(root, 'public', files[pathname])), { headers });
       } catch (error) { return response({ error: error.message || 'Something went wrong. Try again.' }, 400); }
     },
-    async close() { await workspaceWrites; for (const child of homes.values()) if (child !== app) await child.close(); clearInterval(accountTimer); await runtime.close(); for (const provider of runtime.providers.values()) provider.stop(); await browser.close(); store.close(); },
+    async close() { if(oddyApp)await oddyApp.close(); await workspaceWrites; for (const child of homes.values()) if (child !== app) await child.close(); clearInterval(accountTimer); await runtime.close(); for (const provider of runtime.providers.values()) provider.stop(); await browser.close(); store.close(); },
   };
   const accountTimer = setInterval(() => { for (const agent of store.state.agents) if (agent.provider.configured || agent === store.state.agents[0]) void runtime.refreshAccount(agent.id); }, 30_000); accountTimer.unref();
   void runtime.refreshAccount();

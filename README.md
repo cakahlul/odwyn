@@ -16,6 +16,8 @@ Name your agents. Give them different jobs, personalities, and ways of replying.
 
 Save work you repeat as a workflow. Schedule a routine for the next check. Your chats, preferences, and results stay available when you return.
 
+**Oddy** in the top navigation opens the platform assistant from any screen, including Settings, to operate Odwyn in plain language. Oddy keeps one conversation across workspaces and uses the Default workspace's AI provider and account. Ask it to create a workspace or agent, set up workflows and rooms, run or stop jobs, schedule routines, or check progress. It works independently of busy workspace agents and always asks before deletion. Credentials, access grants, worker installation, and execution approvals remain in their existing setup flows. Oddy receives workspace configuration and recent job metadata; it does not read private conversation histories. Open it with the **Oddy** button or **⌘/Ctrl Shift O**. Both chat composers send with Enter; Shift+Enter adds a new line. Oddy includes an attachment button (up to 20 files, 20 MB each) and receives the current workspace, page, dialog, settings section, and selected conversation/agent with each request. The context label shows the current page; passwords and unsaved form contents are not captured. Images and UTF-8 text use the existing attachment reader; binary document extraction remains unavailable in Oddy. The ? tutorial also includes **Ask Oddy**.
+
 | Give Odwyn a goal | Get something you can use |
 | --- | --- |
 | “Compare hotels near Shinjuku within my budget.” | A shortlist with sources and tradeoffs. |

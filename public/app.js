@@ -1,3 +1,4 @@
+import {setupOddy} from './oddy-ui.js';
 import {setupTutorials} from './tutorials.js';
 import {setupKnowledgeSettings} from './knowledge-ui.js';
 import {setupRoomWork} from './room-work-ui.js';
@@ -145,8 +146,7 @@ function renderRooms() {
   const roomRun=room?.roomWorkflowRunId && workspace.workflowRuns?.find(run=>run.id===room.roomWorkflowRunId);
   const roomStage=roomRun?.workflow.steps.find(step=>step.id===room.roomWorkflowStepId);
   $('#room-pass-next').hidden=!inRoom||room.discussion?.status!=='completed'||!!roomRun&&(roomRun.conversationId!==room.id||!roomStage?.next||roomRun.status!=='awaiting_handoff');
-  if (inRoom) $('#prompt').setAttribute('aria-describedby','room-composer-hint');
-  else $('#prompt').removeAttribute('aria-describedby');
+  $('#prompt').setAttribute('aria-describedby',inRoom?'room-composer-hint composer-keyboard-hint':'composer-keyboard-hint');
   renderMentions();
   document.body.classList.toggle('room-chat',inRoom);
   $('#room-details-open').hidden = !inRoom; $('#page-title').hidden = inRoom;
@@ -463,9 +463,15 @@ function render() {
     signature = nextSignature;
   } else updateBrowser(state);
   renderActivity(state,conversationId);
-  const disabled = !!state.jobs.find(job => job.conversationId === conversationId && activeStatuses.includes(job.status));
-  $('#send-button').disabled = busy || disabled && conversation?.kind !== 'room'; $('#send-button').title = disabled ? conversation?.kind === 'room' ? 'Stop current discussion and send this direction' : 'Finish or stop the active run before a follow-up.' : 'Send message';
+  updateComposerSend();
   if (providerGlobal ? $('#settings-dialog').open : $('#customize-dialog').open && providerAgentId === state.agentId) updateAccount();
+}
+
+function updateComposerSend(){
+  if(!state)return;
+  const disabled=state.jobs.some(job=>job.conversationId===conversationId&&activeStatuses.includes(job.status)),room=currentRoom();
+  $('#send-button').disabled=busy||disabled&&!room||!$('#prompt').value.trim()&&!attachments.length;
+  $('#send-button').title=disabled?room?'Stop current discussion and send this direction':'Finish or stop the active run before a follow-up.':'Send message (Enter)';
 }
 
 async function refresh() {
@@ -740,6 +746,7 @@ $('#room-discuss').onclick = () => {
   $('#room-header').close();
   roomRecipients.set(room.id,'all'); $('#reply-agent').value = 'all';
   if (!$('#prompt').value.trim()) $('#prompt').value = room.discussion?.direction || room.discussion?.goal || 'Continue toward the shared goal from existing progress. Resolve only remaining issues and finish the requested result.';
+  updateComposerSend();
   $('#composer').requestSubmit();
 };
 $('#add-agent').onclick = () => { setNavigation(false); openCustomization(false,true); };
@@ -804,12 +811,13 @@ $('#composer').onsubmit = async event => {
   busy = false; render();
 };
 $('#prompt').onkeydown = event => {
-  if (event.key === 'Enter' && event.altKey && !event.isComposing) { event.preventDefault(); promptMention()?.click(); }
+  if(event.isComposing||event.keyCode===229)return;
+  if (event.key === 'Enter' && event.altKey) { event.preventDefault(); promptMention()?.click(); }
   else if (event.key === 'ArrowDown' && !$('#room-mentions').hidden) { event.preventDefault(); $('#room-mentions button')?.focus(); }
   else if (event.key === 'Escape') $('#room-mentions').hidden = true;
-  else if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('#composer').requestSubmit(); }
+  else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if(!event.repeat)$('#composer').requestSubmit(); }
 };
-$('#prompt').oninput = () => { $('#prompt').style.height = 'auto'; $('#prompt').style.height = Math.min($('#prompt').scrollHeight,260) + 'px'; renderMentions(); };
+$('#prompt').oninput = () => { $('#prompt').style.height = 'auto'; $('#prompt').style.height = Math.min($('#prompt').scrollHeight,260) + 'px'; renderMentions(); updateComposerSend(); };
 function promptMention(event) {
   const prompt=$('#prompt');if(prompt.selectionStart!==prompt.selectionEnd) return;
   return [...$('#prompt-highlights').querySelectorAll('[data-mention-link]')].find(mention=>event ? [...mention.getClientRects()].some(box=>event.clientX>=box.left && event.clientX<=box.right && event.clientY>=box.top && event.clientY<=box.bottom) : prompt.selectionStart>=Number(mention.dataset.start) && prompt.selectionStart<=Number(mention.dataset.end));
@@ -929,6 +937,7 @@ new ResizeObserver(() => {
 $('#view').innerHTML = '<div class="loading-state" role="status"><img src="/mark.svg" width="48" height="48" alt=""><p>Making room for your day…</p></div>';
 setupRoomWork(()=>workspace,currentRoom,refresh,id=>navigate('chat',id));
 setupWorkspaceHomes();
+setupOddy(()=>({view,conversationId:conversationId||'',agentId:agentId||''}));
 await refresh();
 if (state && agentId) { restoreDraft(); signature = ''; render(); }
 const initial = location.hash.slice(1).split('/');
@@ -936,6 +945,9 @@ if (['home','chat','runs','routines','files','workflows'].includes(initial[0]) &
 if (!initial[0] && state) { view = 'home'; signature = ''; render(); }
 if (state && agentId && !state.customization) openSettings(true);
 else if (state && agentId && !workspace.globalProvider.configured) openSettings();
+if(state && new URLSearchParams(location.search).get('settings')==='provider'){
+  openSettings();document.querySelector('[data-settings-section="provider"]').click();
+}
 setInterval(() => { if (!document.hidden) void refresh(); }, 1000);
 
 setupWorkflows(()=>workspace,()=>agentId,job=>navigate('chat',job.conversationId),refresh);

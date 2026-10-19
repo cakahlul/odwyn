@@ -1,0 +1,127 @@
+import { test, expect } from 'bun:test';
+import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { chromium } from 'playwright';
+import { createApp } from '../server.js';
+import { newPageWithoutTutorials } from '../tests/browser-page.js';
+import { defaults } from '../public/profile.js';
+import { createJob } from '../store.js';
+
+test('Oddy stays reachable in Settings and renders chat, questions and deletion controls on desktop and mobile',async()=>{
+  const directory=mkdtempSync(join(tmpdir(),'odwyn-oddy-ui-'));
+  const codex=Object.assign(new EventEmitter(),{request:async method=>method==='account/read'?{account:{type:'chatgpt'}}:{},stop(){}});
+  let app;
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(request,server)=>app.fetch(request,server)});
+  app=createApp({directory,user:'owner',password:'test-password-long-enough',origin:server.url.origin,codex,browser:{close:async()=>{}}});
+  app.runtime.state.globalProvider.configured=true;app.runtime.state.customization={...defaults};app.runtime.changed();
+  const browser=await chromium.launch();
+  const context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1100,height:800}});
+  const page=await newPageWithoutTutorials(context);page.setDefaultTimeout(5000);
+  const errors=[],requests=[];page.on('pageerror',error=>errors.push(error.message));
+  let state={connected:true,messages:[],job:null},failNext=false;
+  await page.route('**/api/oddy**',async route=>{
+    if(new URL(route.request().url()).pathname==='/api/oddy/files'){
+      await route.fulfill({json:{id:'11111111-1111-1111-1111-111111111111',name:'brief.txt',size:10,mimeType:'application/octet-stream'}});return;
+    }
+    const request=route.request(),body=request.postDataJSON();
+    if(request.method()==='POST'){
+      requests.push({path:new URL(request.url()).pathname,body});
+      if(failNext){failNext=false;await route.fulfill({status:400,json:{error:'Stop the current task first.'}});return;}
+      if(new URL(request.url()).pathname==='/api/oddy')state={...state,messages:[{id:'owner',role:'user',text:body.prompt},{id:'reply',role:'assistant',text:'Ready. **Workspace created.** <script>bad()</script>'}],job:{id:'job',status:'completed'}};
+      else state={...state,job:{id:'job',status:'completed'}};
+    }
+    await route.fulfill({json:state});
+  });
+  try{
+    await page.goto(server.url.href);
+    await page.getByRole('button',{name:'Ask Oddy',exact:true}).click();
+    await page.getByRole('heading',{name:'What needs doing?',exact:true}).waitFor();
+    expect(await page.locator('#oddy-open').evaluate(node=>!!node.closest('.header-actions'))).toBe(true);
+    expect(await page.locator('#oddy-send').isDisabled()).toBe(true);
+    await page.locator('#oddy-prompt').fill('Create');
+    await page.locator('#oddy-prompt').press('Shift+Enter');
+    expect(await page.locator('#oddy-prompt').inputValue()).toBe('Create\n');
+    expect(requests).toHaveLength(0);
+    await page.locator('#oddy-prompt').dispatchEvent('keydown',{key:'Enter',isComposing:true});
+    await page.locator('#oddy-prompt').dispatchEvent('keydown',{key:'Enter',repeat:true});
+    expect(requests).toHaveLength(0);
+    await page.locator('#oddy-prompt').fill('Create a workspace');
+    await page.locator('#oddy-prompt').press('Enter');
+    await page.locator('#oddy-messages strong').filter({hasText:'Oddy'}).waitFor();
+    expect(requests[0]).toMatchObject({path:'/api/oddy',body:{prompt:'Create a workspace',workspaceId:'default',screen:{view:'home'},attachments:[]}});
+    expect(await page.locator('#oddy-messages script').count()).toBe(0);
+    await page.locator('#oddy-prompt').fill('Try again');failNext=true;
+    await page.locator('#oddy-send').click();await page.getByText('Stop the current task first.').waitFor();
+    expect(await page.locator('#oddy-prompt').inputValue()).toBe('Try again');
+    await page.keyboard.press('Escape');
+    expect(await page.locator('#oddy-open').evaluate(node=>node===document.activeElement)).toBe(true);
+    await page.locator('#main-tutorial').click();await page.locator('#tutorial-oddy').click();
+    await page.locator('#oddy-dialog').waitFor({state:'visible'});
+    await page.locator('#oddy-prompt').fill('');
+    await page.locator('#oddy-file-input').setInputFiles({name:'brief.txt',mimeType:'text/plain',buffer:Buffer.from('Reference')});
+    await page.locator('[data-oddy-remove]').waitFor();
+    await page.waitForFunction(()=>!document.querySelector('#oddy-send').disabled);
+    await page.locator('#oddy-send').click();await page.waitForFunction(()=>!document.querySelector('[data-oddy-remove]'));
+    expect(requests.at(-1).body.attachments).toEqual(['11111111-1111-1111-1111-111111111111']);
+    await page.locator('#oddy-close').click();
+    await page.locator('#settings-open').click();
+    await page.getByRole('button',{name:'Ask Oddy',exact:true}).click();
+    expect(await page.locator('#settings-dialog').evaluate(node=>node.open)).toBe(true);
+    expect(await page.locator('#oddy-dialog').evaluate(node=>node.open)).toBe(true);
+    await page.waitForFunction(()=>document.querySelector('#oddy-context').textContent.includes('Appearance'));
+    mkdirSync(join(import.meta.dir,'../artifacts'),{recursive:true});
+    await page.screenshot({path:join(import.meta.dir,'../artifacts/oddy-desktop.png')});
+    await page.locator('#oddy-close').click();
+    state={...state,job:{id:'job',status:'waiting',pending:{id:'request',type:'oddy-confirmation',title:'Confirm deletion',detail:'Delete Research workspace?'}}};
+    await page.setViewportSize({width:320,height:568});
+    await page.getByRole('button',{name:'Ask Oddy',exact:true}).click();
+    await page.getByRole('button',{name:'Confirm deletion',exact:true}).waitFor();
+    expect(await page.locator('#oddy-send').isDisabled()).toBe(true);
+    expect(await page.locator('#oddy-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
+    const bounds=await page.locator('#oddy-dialog').boundingBox();expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.y+bounds.height).toBeLessThanOrEqual(568);
+    await page.screenshot({path:join(import.meta.dir,'../artifacts/oddy-mobile.png')});
+    await page.getByRole('button',{name:'Keep it',exact:true}).click();
+    await page.waitForFunction(()=>!document.querySelector('#oddy-prompt').disabled);
+    expect(requests.at(-1).body).toEqual({jobId:'job',requestId:'request',decision:'deny'});
+    await page.locator('#oddy-close').click();
+    state={...state,job:{id:'job',status:'waiting',pending:{id:'question',type:'question',title:'Your input, please',detail:'Which workspace?'}}};
+    await page.getByRole('button',{name:'Ask Oddy',exact:true}).click();
+    await page.getByText('Which workspace?',{exact:true}).waitFor();
+    await page.locator('#oddy-prompt').fill('Research');await page.locator('#oddy-prompt').press('Enter');
+    await page.waitForFunction(()=>document.querySelector('#oddy-prompt').value==='');
+    expect(requests.at(-1).body).toMatchObject({jobId:'job',requestId:'question',answer:'Research',screen:{dialog:'settings-dialog'}});
+    await page.goto(server.url.href+'?settings=provider');
+    await page.locator('#settings-provider-controls').waitFor({state:'visible'});
+    await page.getByRole('button',{name:'Close settings',exact:true}).click();
+    await page.setViewportSize({width:1100,height:800});
+    await page.locator('#new-chat').click();
+    const sent=[];
+    await page.route('**/api/jobs',async route=>{
+      const body=route.request().postDataJSON();sent.push(body);
+      const job=createJob(app.runtime.state,body);job.status='completed';app.runtime.changed();
+      await route.fulfill({json:job});
+    });
+    expect(await page.locator('#send-button').isDisabled()).toBe(true);
+    await page.locator('#prompt').fill('First line');await page.locator('#prompt').press('Shift+Enter');
+    expect(await page.locator('#prompt').inputValue()).toBe('First line\n');expect(sent).toHaveLength(0);
+    await page.locator('#prompt').dispatchEvent('keydown',{key:'Enter',isComposing:true});
+    await page.locator('#prompt').dispatchEvent('keydown',{key:'Enter',repeat:true});
+    expect(sent).toHaveLength(0);
+    await page.locator('#prompt').press('Enter');
+    await page.waitForFunction(()=>document.querySelector('#prompt').value==='');
+    expect(sent).toHaveLength(1);expect(sent[0].prompt).toBe('First line');
+    await page.locator('#prompt').fill(Array(20).fill('A longer message').join('\n'));
+    expect(await page.locator('#prompt').evaluate(node=>node.clientHeight)).toBeGreaterThan(40);
+    await page.locator('#prompt').fill('');
+    await page.screenshot({path:join(import.meta.dir,'../artifacts/oddy-navigation.png')});
+    await page.setViewportSize({width:320,height:568});
+    const launcherBounds=await page.locator('#oddy-open').boundingBox();
+    expect(launcherBounds.x).toBeGreaterThanOrEqual(0);expect(launcherBounds.x+launcherBounds.width).toBeLessThanOrEqual(320);
+    expect(Math.abs((await page.locator('#browser-toggle').boundingBox()).y-launcherBounds.y)).toBeLessThan(2);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+    await page.screenshot({path:join(import.meta.dir,'../artifacts/oddy-navigation-mobile.png')});
+    expect(errors).toEqual([]);
+  }finally{await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
+},20000);
