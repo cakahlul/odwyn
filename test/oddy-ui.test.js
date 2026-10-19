@@ -20,8 +20,14 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
   const context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1100,height:800}});
   const page=await newPageWithoutTutorials(context);page.setDefaultTimeout(5000);
   const errors=[],requests=[];page.on('pageerror',error=>errors.push(error.message));
+  let oddyProvider={inherit:true,provider:{type:'codex',model:'oddy-model',baseUrl:'https://api.openai.com/v1',configured:true},runtime:{account:{type:'chatgpt'}}};
   let state={connected:true,messages:[],job:null,conversations:[],conversationId:null},failNext=false;const chats=new Map();
   await page.route('**/api/oddy**',async route=>{
+    if(new URL(route.request().url()).pathname==='/api/oddy/provider'){
+      if(route.request().method()==='PUT'){const body=route.request().postDataJSON();oddyProvider={...oddyProvider,inherit:body.inherit,provider:body.provider};}
+      await route.fulfill({json:oddyProvider});return;
+    }
+    if(new URL(route.request().url()).pathname==='/api/oddy/provider/models'){await route.fulfill({json:{models:[]}});return;}
     if(new URL(route.request().url()).pathname==='/api/oddy/files'){
       await route.fulfill({json:{id:'11111111-1111-1111-1111-111111111111',name:'brief.txt',size:10,mimeType:'application/octet-stream'}});return;
     }
@@ -71,6 +77,15 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
     await page.waitForFunction(()=>!document.querySelector('#oddy-send').disabled);
     await page.locator('#oddy-send').click();await page.waitForFunction(()=>!document.querySelector('[data-oddy-remove]'));
     expect(requests.at(-1).body.attachments).toEqual(['11111111-1111-1111-1111-111111111111']);
+    for(const type of ['paste','drop']){
+      await page.locator('#oddy-form').evaluate((node,type)=>{
+        const data=new DataTransfer();data.items.add(new File(['pasted'],'pasted.txt',{type:'text/plain'}));
+        const target=type==='paste'?node.querySelector('textarea'):node;
+        target.dispatchEvent(type==='paste'?new ClipboardEvent(type,{bubbles:true,cancelable:true,clipboardData:data}):new DragEvent(type,{bubbles:true,cancelable:true,dataTransfer:data}));
+      },type);
+      await page.locator('[data-oddy-remove]').waitFor();await page.waitForFunction(()=>!document.querySelector('#oddy-attach').disabled);
+      await page.locator('[data-oddy-remove]').click();
+    }
     await page.locator('#oddy-close').click();
     await page.locator('#settings-open').click();
     await page.getByRole('button',{name:'Ask Oddy',exact:true}).click();
@@ -80,7 +95,7 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
     mkdirSync(join(import.meta.dir,'../artifacts'),{recursive:true});
     await page.screenshot({path:join(import.meta.dir,'../artifacts/oddy-desktop.png')});
     await page.locator('#oddy-close').click();
-    state={...state,job:{id:'job',status:'waiting',pending:{id:'request',type:'oddy-confirmation',title:'Confirm deletion',detail:'Delete Research workspace?'}}};
+    state={...state,job:{id:'job',status:'waiting',pending:{id:'request',type:'oddy-confirmation',destructive:true,title:'Confirm deletion',detail:'Delete Research workspace?'}}};
     await page.setViewportSize({width:320,height:568});
     await page.getByRole('button',{name:'Ask Oddy',exact:true}).click();
     await page.getByRole('button',{name:'Confirm deletion',exact:true}).waitFor();
@@ -88,7 +103,7 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
     expect(await page.locator('#oddy-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
     const bounds=await page.locator('#oddy-dialog').boundingBox();expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.y+bounds.height).toBeLessThanOrEqual(568);
     await page.screenshot({path:join(import.meta.dir,'../artifacts/oddy-mobile.png')});
-    await page.getByRole('button',{name:'Keep it',exact:true}).click();
+    await page.getByRole('button',{name:'Reject',exact:true}).click();
     await page.waitForFunction(()=>!document.querySelector('#oddy-prompt').disabled);
     expect(requests.at(-1).body).toEqual({jobId:'job',requestId:'request',decision:'deny'});
     await page.locator('#oddy-close').click();
@@ -109,7 +124,15 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
     await page.locator('#room-dialog').waitFor({state:'visible'});await page.locator('#room-dialog').evaluate(node=>node.close());
     await page.goto(server.url.href+'?settings=provider');
     await page.locator('#settings-provider-controls').waitFor({state:'visible'});
-    await page.getByRole('button',{name:'Close settings',exact:true}).click();
+    await page.locator('#settings-provider-target').selectOption('oddy');
+    await page.locator('#oddy-provider-inherit-row').waitFor({state:'visible'});
+    await page.locator('#oddy-provider-inherit').uncheck();
+    await page.locator('#provider-model').fill('my-oddy-model');
+    const originalProvider=app.runtime.state.globalProvider.model;
+    await page.locator('#preferences-form > .form-footer .primary-button').click();
+    await page.locator('#settings-dialog').waitFor({state:'hidden'});
+    expect(oddyProvider).toMatchObject({inherit:false,provider:{model:'my-oddy-model'}});
+    expect(app.runtime.state.globalProvider.model).toBe(originalProvider);
     await page.setViewportSize({width:1100,height:800});
     await page.locator('#new-chat').click();
     const sent=[];

@@ -126,7 +126,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     await app.runtime.drain();
     const automatic = app.runtime.state.jobs.slice(0,2);
     expect(automatic.every(j=>j.roomCycle===2)).toBe(true);
-    expect(await page.locator('#send-button').isDisabled()).toBe(false);
+    expect(await page.locator('#send-button').isDisabled()).toBe(true);
     expect(await page.locator('.permission-picker').isVisible()).toBe(true);
     await page.locator('#prompt').fill('@Sc');
     await page.locator('#room-mentions').getByRole('button',{name:'@Scout',exact:true}).waitFor();
@@ -137,7 +137,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     expect(automatic.every(j=>j.status==='cancelled')).toBe(true);
     expect(app.runtime.state.jobs[0].agentId).toBe(scout.id); expect(app.runtime.state.jobs[0].discussionOnly).toBeUndefined();
     await page.getByRole('button',{name:'Stop discussion',exact:true}).click();
-    await page.waitForFunction(()=>!document.querySelector('#send-button').disabled);
+    await page.waitForFunction(()=>!document.querySelector('#edit-room').disabled);
     await page.locator('#prompt').fill('Compare travel costs'); await page.locator('#room-details-open').click(); await page.locator('#room-discuss').click();
     expect(await page.locator('#room-header').isVisible()).toBe(false);
     await page.getByText('Compare travel costs',{exact:true}).waitFor();

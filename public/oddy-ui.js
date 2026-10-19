@@ -1,3 +1,4 @@
+import {setupChatComposer} from './chat-composer.js';
 import { $, esc, icon, richText, activeStatuses, statusLabels, workspaceId } from './ui.js';
 
 export function setupOddy(getScreen=()=>({})) {
@@ -10,8 +11,8 @@ export function setupOddy(getScreen=()=>({})) {
   dialog.innerHTML=`<header class="oddy-header"><div class="oddy-heading"><h2 id="oddy-title">Oddy</h2><p id="oddy-context" class="oddy-context"></p></div><details class="oddy-menu" id="oddy-menu"><summary class="icon-button" aria-label="Oddy conversation options" title="Conversation options">${icon('menu')}</summary><div class="oddy-menu-items"><button type="button" id="oddy-new">New chat</button><button type="button" id="oddy-new-room">New room</button><label for="oddy-history">Chat history</label><select id="oddy-history" aria-label="Oddy chat history"></select><button type="button" id="oddy-clear" class="danger-button">Clear this chat</button></div></details><button type="button" class="icon-button" id="oddy-close" aria-label="Close Oddy">${icon('close')}</button></header>
     <div id="oddy-messages" class="oddy-messages" role="log" aria-label="Conversation with Oddy"></div>
     <div id="oddy-pending" class="oddy-pending" hidden></div>
-    <p id="oddy-status" class="oddy-status" role="status"></p><a id="oddy-provider-settings" class="oddy-provider-settings" href="/?settings=provider" hidden>Open Default workspace AI settings</a>
-    <form id="oddy-form" class="oddy-form"><label class="sr-only" for="oddy-prompt">Ask Oddy or answer its question</label><textarea id="oddy-prompt" rows="1" maxlength="20000" required aria-describedby="oddy-keyboard-hint" placeholder="Ask Oddy to do something…"></textarea><div class="oddy-form-actions"><small id="oddy-keyboard-hint">Enter to send<span class="oddy-newline-hint"> · Shift+Enter for a new line</span></small><button type="button" class="text-button" id="oddy-stop" hidden>Stop</button><button type="submit" class="send-button" id="oddy-send" aria-label="Send to Oddy" title="Send message (Enter)" disabled>${icon('arrow-up')}</button></div></form>`;
+    <p id="oddy-status" class="oddy-status" role="status"></p><a id="oddy-provider-settings" class="oddy-provider-settings" href="/?settings=provider&provider=oddy" hidden>Open Oddy AI settings</a>
+    <form id="oddy-form" class="composer oddy-form"><label class="sr-only" for="oddy-prompt">Ask Oddy or answer its question</label><textarea id="oddy-prompt" rows="1" maxlength="20000" required aria-describedby="oddy-keyboard-hint" placeholder="Ask Oddy to do something…"></textarea><div class="composer-toolbar oddy-form-actions"><small id="oddy-keyboard-hint">Enter to send<span class="oddy-newline-hint"> · Shift+Enter for a new line</span></small><button type="button" class="text-button" id="oddy-stop" hidden>Stop</button><button type="submit" class="send-button" id="oddy-send" aria-label="Send to Oddy" title="Send message (Enter)" disabled>${icon('arrow-up')}</button></div></form>`;
   $('#browser-toggle').before(launcher);document.body.append(dialog);
   let state=null,timer=null,loading=false,sending=false,messageKey='',pendingKey='',errorMessage='',uploading=false,attachments=[],stateVersion=0;
   const context=$('#oddy-context');let historyKey='';
@@ -47,7 +48,7 @@ export function setupOddy(getScreen=()=>({})) {
         const item=document.createElement('article');item.className='oddy-message';item.dataset.role=message.role;
         const label=document.createElement('strong');label.textContent=message.role==='user'?'You':'Oddy';
         item.append(label);
-        if(message.role==='assistant')item.append(richText(message.text,{cards:false}));
+        if(message.role==='assistant')item.append(richText(message.text));
         else{const text=document.createElement('p');text.textContent=message.text;item.append(text);}
         for(const id of message.attachments||[]){const file=state.files?.find(file=>file.id===id);if(!file)continue;const link=document.createElement('a');link.href='/api/oddy/files/'+encodeURIComponent(id);link.textContent=file.name;link.className='oddy-file';item.append(link);}
         feed.append(item);
@@ -57,9 +58,9 @@ export function setupOddy(getScreen=()=>({})) {
     const nextPending=JSON.stringify(pending||null),box=$('#oddy-pending');
     if(nextPending!==pendingKey){
       pendingKey=nextPending;box.hidden=!pending;
-      box.innerHTML=pending?`<strong>${esc(pending.title)}</strong><p>${esc(pending.detail)}</p>${pending.type==='oddy-confirmation'?'<p>This cannot be undone.</p><div class="oddy-decisions"><button type="button" class="secondary-button" data-oddy-decision="deny">Keep it</button><button type="button" class="secondary-button danger-button" data-oddy-decision="allow">Confirm deletion</button></div>':''}`:'';
+      box.innerHTML=pending?`<strong>${esc(pending.title)}</strong><p>${esc(pending.detail)}</p>${pending.type==='oddy-confirmation'?`${pending.destructive?'<p>This cannot be undone.</p>':''}<details><summary>Review change</summary><pre>${esc(JSON.stringify(pending.proposal||{},null,2))}</pre></details><div class="oddy-decisions"><button type="button" class="secondary-button" data-oddy-decision="deny">Reject</button><button type="button" class="secondary-button danger-button" data-oddy-decision="allow">${pending.destructive?'Confirm deletion':'Approve change'}</button></div>`:''}`:'';
     }
-    $('#oddy-status').textContent=uploading?'Uploading files…':errorMessage||job?.error||state.connectionError||(!state.connected?'Connect your default AI provider in Settings to use Oddy.':busy?pending?'Needs your input':statusLabels[job.status]||job.status:'');
+    $('#oddy-status').textContent=uploading?'Uploading files…':errorMessage||job?.error||state.connectionError||(!state.connected?'Connect Oddy’s AI provider in Settings.':busy?pending?'Needs your input':statusLabels[job.status]||job.status:'');
     $('#oddy-send').disabled=(!$('#oddy-prompt').value.trim()&&!attachments.length)||sending||uploading||!state.connected||busy&&pending?.type!=='question';
     $('#oddy-prompt').required=!attachments.length;
     $('#oddy-new-room').disabled=$('#new-room-top').disabled;
@@ -99,17 +100,17 @@ export function setupOddy(getScreen=()=>({})) {
   $('#oddy-history').onchange=event=>void changeChat(event.target.value?'/api/oddy/select':'/api/oddy/new',event.target.value?{conversationId:event.target.value}:{});
   $('#oddy-new-room').onclick=()=>{dialog.close();$('#oddy-menu').open=false;$('#new-room-top').click();};
   attach.onclick=()=>fileInput.click();
-  fileInput.onchange=async()=>{
+  async function attachFiles(selected){
     if(uploading||attach.disabled)return;
-    const selected=[...fileInput.files];fileInput.value='';uploading=true;errorMessage='';draw();
+    uploading=true;errorMessage='';draw();
     try{
       if(attachments.length+selected.length>20)throw Error('Choose up to 20 files.');
       if(selected.some(file=>!file.size||file.size>20*1024*1024))throw Error('Choose nonempty files up to 20 MB each.');
       for(const file of selected){const body=new FormData();body.append('file',file);attachments.push(await request('/api/oddy/files',body));}
     }catch(error){errorMessage=error.message;}finally{uploading=false;draw();$('#oddy-prompt').focus();}
   };
-  $('#oddy-prompt').addEventListener('input',()=>{const input=$('#oddy-prompt');input.style.height='auto';input.style.height=Math.min(input.scrollHeight,180)+'px';if(state)draw();});
-  $('#oddy-prompt').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.altKey&&!event.isComposing&&event.keyCode!==229){event.preventDefault();if(!event.repeat&&!$('#oddy-send').disabled)$('#oddy-form').requestSubmit();}});
+  fileInput.onchange=()=>{const files=[...fileInput.files];fileInput.value='';void attachFiles(files);};
+  setupChatComposer({form:$('#oddy-form'),input:$('#oddy-prompt'),send:$('#oddy-send'),onInput:()=>{if(state)draw();},onFiles:attachFiles});
   $('#oddy-stop').onclick=()=>void act('/api/oddy/cancel',{jobId:state.job.id});
   dialog.addEventListener('click',event=>{
     const remove=event.target.closest('[data-oddy-remove]');if(remove&&!sending&&!uploading){attachments=attachments.filter(file=>file.id!==remove.dataset.oddyRemove);draw();}

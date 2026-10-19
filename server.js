@@ -66,7 +66,7 @@ export function createApp(options = {}) {
   }
   watchLogin(store.state.agents[0], codex);
   function addProvider(agent) {
-    const provider = new AIProvider({ config:agent.provider, home, workspace, isolated:!!options.workspaceId, ...options.providerOptions });
+    const provider = new AIProvider({ config:agent.provider, home, workspace, isolated:!!options.workspaceId&&!options.oddyHome, ...options.providerOptions });
     runtime.addProvider(agent.id, provider); watchLogin(agent, provider); if (agent.provider.configured) void runtime.refreshAccount(agent.id);
   }
   for (const agent of store.state.agents.slice(1)) addProvider(agent);
@@ -185,17 +185,20 @@ export function createApp(options = {}) {
           jobs:state.jobs.slice(0,50).map(({id,agentId,spaceId,conversationId,prompt,status,error,createdAt})=>({id,agentId,spaceId,conversationId,prompt:prompt.slice(0,200),status,error,createdAt})),
           execution:{terminal:target.runtime.sandbox.configured,browser:target.runtime.scopedBrowsers.configured},
         });
-        if(action.destructive){
-          const workspaceName=store.state.workspaces.find(row=>row.id===action.workspaceId)?.name;
-          const collection={delete_agent:state.agents,delete_workflow:state.workflows,delete_skill:state.skills,delete_schedule:state.schedules}[action.action];
-          const item=collection?.find(row=>row.id===input.targetId);
-          if(collection&&!item)throw Error('Deletion target not found.');
-          const name=item?.customization?.name||item?.name||item?.prompt||workspaceName;
-          const kind=action.action.replace('delete_','');
-          const effect=kind==='workspace'?' Its agents, chats, files, connections and settings will be permanently removed.':kind==='agent'?' Its routines will also be removed; saved chats and files remain.':'';
-          const answer=await oddyApp.runtime.waitForOwner(job,{type:'oddy-confirmation',title:'Confirm deletion',detail:broker.redact(`Delete ${kind} “${name}” in workspace “${workspaceName}”?${effect}`)});
-          if(answer.decision!=='allow')return {cancelled:true};
-        }
+        const currentTarget=()=>{
+          if(action.action.startsWith('create_'))return null;
+          const kind=action.action.split('_').at(-1);
+          const rows={agent:state.agents,workflow:state.workflows,skill:state.skills,schedule:state.schedules,room:state.conversations,workspace:store.state.workspaces,space:target.runtime.store.security.listSpaces(),resource:target.runtime.store.security.listResources()};
+          if(kind==='job'){const row=state.jobs.find(row=>row.id===input.targetId);return row?{id:row.id,status:row.status}:null;}
+          return rows[kind]?.find(row=>row.id===(kind==='workspace'?action.workspaceId:input.targetId))||null;
+        };
+        const existing=currentTarget(), before=JSON.stringify(existing);
+        if(input.targetId&&!existing)throw Error('Change target not found.');
+        const workspaceName=store.state.workspaces.find(row=>row.id===action.workspaceId)?.name;
+        const label=existing?.customization?.name||existing?.name||existing?.title||action.body.name||action.body.title||existing?.id;
+        const answer=await oddyApp.runtime.waitForOwner(job,{type:'oddy-confirmation',title:action.destructive?'Confirm deletion':'Approve change',detail:broker.redact(`${action.action.replaceAll('_',' ')}${label?' “'+label+'”':''} in workspace “${workspaceName}”`),destructive:action.destructive,proposal:broker.sanitize({targetId:input.targetId||null,parameters:action.body})});
+        if(answer.decision!=='allow')return {cancelled:true};
+        if(homes.get(action.workspaceId)!==target || before!==JSON.stringify(currentTarget()))throw Error('The target changed while approval was pending. Inspect it and request a new approval.');
         if(oddyApp.runtime.active!==job || job.status!=='running')throw Error('Oddy task is no longer active.');
         const path=action.path+(action.path.includes('?')?'&':'?')+'workspace='+encodeURIComponent(action.workspaceId);
         const result=await app.fetch(new Request(origin+path,{method:action.method,headers:{authorization:'Basic '+Buffer.from(`${user}:${password}`).toString('base64'),origin,'content-type':'application/json'},body:JSON.stringify(action.body)}));
@@ -206,7 +209,7 @@ export function createApp(options = {}) {
       };
     }
     // A running turn keeps its provider; changed defaults apply to the next idle turn.
-    if(!oddyApp.providerBusy() && JSON.stringify(oddyApp.settings('provider'))!==JSON.stringify(store.state.globalProvider))await oddyApp.applySettings('provider',store.state.globalProvider);
+    if(!oddyApp.runtime.state.oddyProviderOverride && !oddyApp.providerBusy() && JSON.stringify(oddyApp.settings('provider'))!==JSON.stringify(store.state.globalProvider))await oddyApp.applySettings('provider',store.state.globalProvider);
     return oddyApp.runtime;
   }
   let workspaceWrites = Promise.resolve();
@@ -240,6 +243,7 @@ export function createApp(options = {}) {
   const app = {
     runtime, browser, codex,
     settings,
+    providerState:()=>({provider:publicProvider(store.state.globalProvider),runtime:{...runtime.accounts.get(globalConnection().id),login:logins.get(globalConnection().id)||null}}),
     providerBusy:() => !!(runtime.activeJobs().length || runtime.starting || [...logins.values()].some(login=>login?.loginId)),
     async applySettings(kind,value) {
       value = structuredClone(value);
@@ -281,6 +285,23 @@ export function createApp(options = {}) {
       }
       try {
         if(!options.workspaceId && pathname.startsWith('/api/oddy')){
+          if(pathname==='/api/oddy/provider'){
+            const assistant=await openOddy();
+            if(req.method==='PUT'){
+              const input=await json(req);
+              if(typeof input.inherit!=='boolean')throw Error('Choose whether Oddy inherits the default provider.');
+              if(oddyApp.providerBusy())throw Error('Stop Oddy tasks and finish sign-in before changing its provider.');
+              const config=input.inherit?store.state.globalProvider:validateProvider(input.provider,oddyApp.settings('provider'));
+              await oddyApp.applySettings('provider',config);
+              assistant.state.oddyProviderOverride=!input.inherit;assistant.changed();
+            }else if(req.method!=='GET')return response({error:'Method not allowed.'},405);
+            return response({inherit:!assistant.state.oddyProviderOverride,...oddyApp.providerState()});
+          }
+          if(['/api/oddy/provider/models','/api/oddy/account/refresh','/api/oddy/account/login','/api/oddy/account/login/complete'].includes(pathname)){
+            if(req.method!=='POST')return response({error:'Method not allowed.'},405);
+            await openOddy();
+            return oddyApp.fetch(new Request(origin+pathname.replace('/api/oddy','/api')+'?scope=global',req),server);
+          }
           const fileRoute=pathname.match(/^\/api\/oddy\/files(?:\/([a-f0-9-]{36})(\/preview)?)?$/);
           if(fileRoute){
             if(!(req.method==='POST'&&!fileRoute[1]||req.method==='GET'&&fileRoute[1]))return response({error:'Method not allowed.'},405);
@@ -703,7 +724,7 @@ export function createApp(options = {}) {
         }
         if (pathname.startsWith('/api/')) return response({ error: 'Endpoint not found.' }, 404);
         if (!['GET','HEAD'].includes(req.method)) return response({ error: 'Method not allowed.' }, 405);
-        const files = { '/': 'index.html', '/app.js': 'app.js', '/oddy-ui.js':'oddy-ui.js', '/oddy.css':'oddy.css', '/tutorials.js':'tutorials.js', '/security-ui.js':'security-ui.js', '/workspace-settings.js':'workspace-settings.js', '/knowledge-ui.js':'knowledge-ui.js', '/workspace-homes.js':'workspace-homes.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/room-policy.js':'room-policy.js', '/room-work-ui.js':'room-work-ui.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
+        const files = { '/': 'index.html', '/app.js': 'app.js', '/oddy-ui.js':'oddy-ui.js', '/chat-composer.js':'chat-composer.js', '/oddy.css':'oddy.css', '/tutorials.js':'tutorials.js', '/security-ui.js':'security-ui.js', '/workspace-settings.js':'workspace-settings.js', '/knowledge-ui.js':'knowledge-ui.js', '/workspace-homes.js':'workspace-homes.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/room-policy.js':'room-policy.js', '/room-work-ui.js':'room-work-ui.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
         if (!files[pathname]) return response({ error: 'Not found.' }, 404);
         return new Response(Bun.file(join(root, 'public', files[pathname])), { headers });
       } catch (error) { return response({ error: error.message || 'Something went wrong. Try again.' }, 400); }
@@ -719,7 +740,7 @@ export function createApp(options = {}) {
     const fetch = app.fetch;
     app.fetch = (req,server) => {
       const path = new URL(req.url).pathname;
-      if (['GET','HEAD'].includes(req.method) || !path.startsWith('/api/workspaces') && !['/api/preferences','/api/appearance','/api/provider'].includes(path)) return fetch(req,server);
+      if (['GET','HEAD'].includes(req.method) || !path.startsWith('/api/workspaces') && !['/api/preferences','/api/appearance','/api/provider','/api/oddy/provider'].includes(path)) return fetch(req,server);
       const result = workspaceWrites.then(()=>fetch(req,server)); workspaceWrites=result.catch(()=>{}); return result;
     };
   }

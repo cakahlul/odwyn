@@ -57,9 +57,15 @@ test('Oddy operates across workspaces independently and binds deletion to an exp
   const request=(path,method='GET',body)=>app.fetch(new Request(options.origin+path,{method,headers,...(body?{body:JSON.stringify(body)}:{})}));
   const read=async()=>await (await request('/api/oddy')).json();
   let thread,turn;
-  const tool=(arguments_,name='odwyn_manage')=>{
+  const tool=(arguments_,name='odwyn_manage',approve=true)=>{
     const id=++callId;codex.emit('request',{id,method:'item/tool/call',params:{threadId:thread,turnId:turn,tool:name,arguments:arguments_}});
-    return until(()=>codex.replies.find(reply=>reply.id===id)?.result);
+    return until(async()=>{
+      if(approve&&!arguments_.action?.startsWith('delete_')){
+        const pending=await read();
+        if(pending.job?.pending?.type==='oddy-confirmation')await request('/api/oddy/answer','POST',{jobId:pending.job.id,requestId:pending.job.pending.id,decision:'allow'});
+      }
+      return codex.replies.find(reply=>reply.id===id)?.result;
+    });
   };
   try{
     expect((await app.fetch(new Request(options.origin+'/api/oddy'))).status).toBe(401);
@@ -105,11 +111,25 @@ test('Oddy operates across workspaces independently and binds deletion to an exp
     for(const collection of ['audit','memory','approvals','exports'])expect((await tool({action:'search_history',workspaceId:'default',parameters:{collection}})).success).toBe(true);
     expect((await tool({action:'cancel_job',workspaceId:'default',targetId:busy.id})).success).toBe(true);
     expect(busy.status).toBe('cancelled');
+    const deniedWrite=tool({action:'create_agent',parameters:{name:'Denied'}},'odwyn_manage',false);
+    const approval=await until(async()=>{const value=await read();return value.job?.pending?value:null;});
+    expect(approval.job.pending.proposal.parameters.name).toBe('Denied');
+    expect((await (await request('/api/state?workspace='+workspace.id)).json()).agents).toHaveLength(1);
+    await request('/api/oddy/answer','POST',{jobId:approval.job.id,requestId:approval.job.pending.id,decision:'deny'});
+    expect(JSON.parse((await deniedWrite).contentItems[0].text)).toEqual({cancelled:true});
+    expect((await request('/api/oddy/provider','PUT',{inherit:false,provider:{type:'codex',model:'other'}})).status).toBe(400);
     expect(await tool({action:'create_agent',parameters:{name:'Scout'}})).toMatchObject({success:true});
     const createdAgents=(await (await request('/api/state?workspace='+workspace.id)).json()).agents;
     expect(createdAgents).toHaveLength(2);
     expect((await tool({action:'update_agent',targetId:createdAgents[1].id,parameters:{specialization:'Research'}})).success).toBe(true);
     expect((await (await request('/api/state?workspace='+workspace.id)).json()).agents[1].customization.name).toBe('Scout');
+    const staleWrite=tool({action:'update_agent',targetId:createdAgents[1].id,parameters:{specialization:'Stale proposal'}},'odwyn_manage',false);
+    const stale=await until(async()=>{const value=await read();return value.job?.pending?value:null;});
+    const currentAgent=(await (await request('/api/state?workspace='+workspace.id)).json()).agents[1];
+    expect((await request('/api/customization?workspace='+workspace.id+'&agentId='+currentAgent.id,'PUT',{...currentAgent.customization,name:'Changed elsewhere'})).status).toBe(200);
+    await request('/api/oddy/answer','POST',{jobId:stale.job.id,requestId:stale.job.pending.id,decision:'allow'});
+    expect((await staleWrite).success).toBe(false);
+    expect((await (await request('/api/state?workspace='+workspace.id)).json()).agents[1].customization.specialization).toBe('Research');
     const workflowResult=await tool({action:'create_workflow',parameters:{name:'Progress check',command:'progress_check',autoAdvance:true,steps:[{id:'check',type:'agent',prompt:'Report progress',tools:['ask']}]}});
     expect(workflowResult.success).toBe(true);
     const workflow=JSON.parse(workflowResult.contentItems[0].text);
@@ -136,6 +156,12 @@ test('Oddy operates across workspaces independently and binds deletion to an exp
     expect((await request('/api/state?workspace='+workspace.id)).status).toBe(404);
     expect((await request('/api/oddy/answer','POST',{jobId:next.job.id,requestId:next.job.pending.id,decision:'allow'})).status).toBe(400);
     await request('/api/oddy/cancel','POST',{jobId:next.job.id});
+    expect((await (await request('/api/oddy/provider')).json()).inherit).toBe(true);
+    const configured=await request('/api/oddy/provider','PUT',{inherit:false,provider:{type:'openai',model:'local-test',baseUrl:'http://127.0.0.1:1/v1',apiKey:'oddy-test-key'}});
+    expect(configured.status).toBe(200);expect(JSON.stringify(await configured.json())).not.toContain('oddy-test-key');
+    const custom=await (await request('/api/oddy/provider')).json();expect(custom.inherit).toBe(false);expect(custom.provider.model).toBe('local-test');
+    expect(app.runtime.state.globalProvider.model).not.toBe('local-test');
+    expect((await request('/api/oddy/provider','PUT',{inherit:true})).status).toBe(200);
     const original=(await read()).conversationId;
     expect((await request('/api/oddy/new','POST',{})).status).toBe(200);expect((await read()).messages).toEqual([]);
     const second=await (await request('/api/oddy','POST',{prompt:'Second Oddy chat'})).json();
@@ -150,7 +176,10 @@ test('Oddy operates across workspaces independently and binds deletion to an exp
     expect((await read()).messages).toEqual([]);expect((await read()).conversations).toHaveLength(1);
     expect(app.runtime.state.conversations.some(row=>row.id===busy.conversationId)).toBe(true);
     await request('/api/oddy/select','POST',{conversationId:second.conversationId});
+    await request('/api/oddy/provider','PUT',{inherit:false,provider:{type:'codex',model:'custom-oddy'}});
     await app.close();app=createApp(options);
+    expect((await (await request('/api/oddy/provider')).json())).toMatchObject({inherit:false,provider:{model:'custom-oddy'}});
+    await request('/api/oddy/provider','PUT',{inherit:true});
     expect((await read()).messages[0].text).toBe('Second Oddy chat');
     expect((await (await request('/api/workspaces')).json()).workspaces).toHaveLength(1);
   }finally{await app.close();rmSync(directory,{recursive:true,force:true});}

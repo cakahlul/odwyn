@@ -1,3 +1,4 @@
+import {setupChatComposer} from './chat-composer.js';
 import {setupOddy} from './oddy-ui.js';
 import {setupTutorials} from './tutorials.js';
 import {setupKnowledgeSettings} from './knowledge-ui.js';
@@ -532,10 +533,34 @@ function updateScheduleRepeat() {
 }
 $('#schedule-interval').onchange=updateScheduleRepeat;
 $('#schedule-repeat-unit').onchange=updateScheduleRepeat;
+let providerOddy=false, oddyProviderState=null, providerSelection=0;
+const selectedProvider=()=>providerOddy?oddyProviderState.provider:providerGlobal?workspace.globalProvider:state.provider;
+const selectedConnection=()=>providerOddy?oddyProviderState.runtime:providerGlobal?workspace.globalRuntime:state.runtime;
+async function providerApi(path,body,method){
+  const result=await api(providerOddy?path.replace('/api/','/api/oddy/'):path,body,method);
+  if(providerOddy && !path.startsWith('/api/provider/models')){oddyProviderState=await api('/api/oddy/provider');updateAccount();}
+  return result;
+}
+$('#settings-provider-target').onchange=async()=>{
+  const selection=++providerSelection, oddy=$('#settings-provider-target').value==='oddy';
+  const save=$('#preferences-form > .form-footer button.primary-button');save.disabled=true;
+  $('#provider-editor').hidden=true;
+  try{
+    if(oddy)oddyProviderState=await api('/api/oddy/provider');
+    if(selection!==providerSelection)return;
+    providerOddy=oddy;
+    $('#oddy-provider-inherit-row').hidden=!oddy;
+    $('#oddy-provider-inherit').checked=!!oddyProviderState?.inherit;
+    $('#provider-editor').hidden=false;fillProvider(selectedProvider());oddyProviderSource();
+  }catch(error){if(selection===providerSelection){$('#settings-provider-target').value=providerOddy?'oddy':'workspace';$('#provider-editor').hidden=false;oddyProviderSource();handleError(error);}}
+  finally{if(selection===providerSelection)save.disabled=false;}
+};
+function oddyProviderSource(){if(providerOddy)$('#provider-editor').hidden=$('#oddy-provider-inherit').checked;}
+$('#oddy-provider-inherit').onchange=oddyProviderSource;
 function updateAccount() {
-  const connection = providerGlobal ? workspace.globalRuntime : state.runtime;
+  const connection = selectedConnection();
   const account = connection.account;
-  const type = (providerGlobal ? workspace.globalProvider : state.provider).type;
+  const type = selectedProvider().type;
   $('#account-title').textContent = providers[type][0];
   $('#account-description').textContent = connection.connectionError || (type === 'claude' ? (account ? `Signed in${account.email ? ` as ${account.email}` : ''}.` : 'Connect your Claude account to start working.') : type === 'openai' ? 'Requests use your configured API URL and model. Provider API billing applies.' : account?.email || 'Connect your ChatGPT account to start working.');
   $('#connect-account').textContent = account || type === 'openai' ? 'Refresh' : 'Connect';
@@ -566,7 +591,7 @@ function updateAccount() {
       const status = document.createElement('p'); status.setAttribute('role','status');
       button.onclick = async () => {
         button.disabled = true; status.textContent = 'Connecting…';
-        try { await api(`/api/account/login/complete?${providerGlobal ? 'scope=global' : `agentId=${providerAgentId}`}`,{code:input.value}); input.value = ''; await refresh(); }
+        try { await providerApi(`/api/account/login/complete?${providerGlobal ? 'scope=global' : `agentId=${providerAgentId}`}`,{code:input.value}); input.value = ''; await refresh(); }
         catch (error) { status.textContent = error.message; }
         finally { button.disabled = false; }
       };
@@ -576,7 +601,7 @@ function updateAccount() {
 }
 function providerFields() {
   const type = $('#provider-type').value, isAPI = type === 'openai';
-  const needsSave = providerAdding || type !== (providerGlobal ? workspace.globalProvider : state.provider).type;
+  const needsSave = providerAdding || type !== selectedProvider().type;
   $('#provider-account-box').hidden = needsSave; $('#provider-save-hint').hidden = !needsSave;
   if (needsSave) $('#login-instructions').hidden = true;
   const selected=$('#provider-effort').value || 'default';
@@ -592,7 +617,7 @@ function openSettings(onboarding = false) {
   workspaceSetup = onboarding === true;
   $('#settings-title').textContent = workspaceSetup ? 'Set up your workspace' : 'Odwyn settings';
   $('#preferences-form > .form-footer button.primary-button').innerHTML = workspaceSetup ? `Continue to first agent${icon('arrow-up-right')}` : `Save${icon('check')}`;
-  providerGlobal = true; providerAdding = false;
+  providerGlobal = true; providerAdding = false; providerOddy=false; providerSelection++; $('#preferences-form > .form-footer button.primary-button').disabled=false; $('#settings-provider-target').value='workspace'; $('#oddy-provider-inherit-row').hidden=true;
   $('#settings-provider-editor').append($('#provider-editor'));
   $('#provider-editor').hidden = false;
   $('#provider-form').querySelectorAll('input,select').forEach(field => field.disabled = false);
@@ -621,7 +646,7 @@ async function loadProviderModels() {
   $('#provider-model-label').htmlFor = 'provider-model';
   $('#provider-model-hint').textContent = 'Loading available models…';
   try {
-    const {models} = await api(`/api/provider/models?${providerGlobal ? 'scope=global' : `agentId=${providerAgentId || state.agentId}`}`,input);
+    const {models} = await providerApi(`/api/provider/models?${providerGlobal ? 'scope=global' : `agentId=${providerAgentId || state.agentId}`}`,input);
     if (request !== modelRequest) return;
     if (!models.length) throw new Error('No models returned.');
     list.innerHTML = models.map(model => `<option value="${esc(model.id)}">${esc(model.name)}</option>`).join('') + '<option value="">Enter model manually…</option>';
@@ -650,7 +675,7 @@ function providerSource() {
 }
 $('#provider-source').onchange = providerSource;
 $('#customize-dialog').addEventListener('customization-open', event => {
-  providerGlobal = false; providerAdding = event.detail.adding; providerAgentId = state.agentId;
+  providerOddy=false; providerSelection++; providerGlobal = false; providerAdding = event.detail.adding; providerAgentId = state.agentId;
   $('#agent-provider-editor').append($('#provider-editor'));
   $('#provider-editor').hidden = false;
   $('#provider-form').querySelectorAll('input,select').forEach(field => field.disabled = false);
@@ -660,7 +685,7 @@ $('#customize-dialog').addEventListener('customization-open', event => {
 });
 $('#customize-dialog').addEventListener('close', () => { if (!$('#customize-dialog').open) { providerAgentId = null; } });
 $('#provider-type').onchange = () => {
-  const config = providerGlobal ? workspace.globalProvider : state.provider, type = $('#provider-type').value;
+  const config = selectedProvider(), type = $('#provider-type').value;
   $('#provider-model').value = type === config.type ? config.model : providers[type][1];
   providerFields(); $('#provider-effort').value = type === config.type ? config.effort || 'default' : 'default';
   void loadProviderModels();
@@ -791,13 +816,6 @@ $('#file-input').onchange = async () => {
   await attachFiles(Array.from($('#file-input').files));
   $('#file-input').value = '';
 };
-$('#prompt').addEventListener('paste',event => {
-  const images = Array.from(event.clipboardData?.items || []).filter(item=>item.kind === 'file' && item.type.startsWith('image/')).map(item=>item.getAsFile()).filter(Boolean);
-  if (!images.length) return;
-  event.preventDefault();
-  if (busy) { toast('Wait for the current action before attaching images.','warning'); return; }
-  void attachFiles(images);
-});
 $('#composer').onsubmit = async event => {
   event.preventDefault(); const prompt = $('#prompt').value.trim();
   if ((!prompt && !attachments.length) || busy || $('#send-button').disabled) return;
@@ -815,9 +833,8 @@ $('#prompt').onkeydown = event => {
   if (event.key === 'Enter' && event.altKey) { event.preventDefault(); promptMention()?.click(); }
   else if (event.key === 'ArrowDown' && !$('#room-mentions').hidden) { event.preventDefault(); $('#room-mentions button')?.focus(); }
   else if (event.key === 'Escape') $('#room-mentions').hidden = true;
-  else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if(!event.repeat)$('#composer').requestSubmit(); }
 };
-$('#prompt').oninput = () => { $('#prompt').style.height = 'auto'; $('#prompt').style.height = Math.min($('#prompt').scrollHeight,260) + 'px'; renderMentions(); updateComposerSend(); };
+setupChatComposer({form:$('#composer'),input:$('#prompt'),send:$('#send-button'),onInput:()=>{renderMentions();updateComposerSend();},onFiles:attachFiles});
 function promptMention(event) {
   const prompt=$('#prompt');if(prompt.selectionStart!==prompt.selectionEnd) return;
   return [...$('#prompt-highlights').querySelectorAll('[data-mention-link]')].find(mention=>event ? [...mention.getClientRects()].some(box=>event.clientX>=box.left && event.clientX<=box.right && event.clientY>=box.top && event.clientY<=box.bottom) : prompt.selectionStart>=Number(mention.dataset.start) && prompt.selectionStart<=Number(mention.dataset.end));
@@ -839,7 +856,8 @@ $('#preferences-form').onsubmit = async event => {
   const continueSetup = workspaceSetup, button = $('#preferences-form > .form-footer button.primary-button');
   button.disabled = true; $('#settings-status').textContent = 'Saving…';
   try {
-    await api('/api/preferences',{ ...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$(`#global-${key}`).value])), provider:providerInput(), text:$('#preferences').value, currency:$('#preferred-currency').value, appearance:readWorkspaceAppearance() },'PUT');
+    if(providerOddy) await api('/api/oddy/provider',{inherit:$('#oddy-provider-inherit').checked,provider:providerInput()},'PUT');
+    await api('/api/preferences',{ ...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$(`#global-${key}`).value])), ...(providerOddy?{}:{provider:providerInput()}), text:$('#preferences').value, currency:$('#preferred-currency').value, appearance:readWorkspaceAppearance() },'PUT');
     await refresh(); $('#provider-api-key').value = ''; $('#settings-dialog').close();
     if (continueSetup) openCustomization(true);
     toast('Settings saved. Applies to your next task.');
@@ -847,9 +865,9 @@ $('#preferences-form').onsubmit = async event => {
   finally { button.disabled = false; }
 };
 $('#connect-account').onclick = () => perform(async () => {
-  const connection = providerGlobal ? workspace.globalRuntime : state.runtime, config = providerGlobal ? workspace.globalProvider : state.provider;
+  const connection = selectedConnection(), config = selectedProvider();
   $('#connect-account').disabled = true;
-  try { await api(`${connection.account || config.type === 'openai' ? '/api/account/refresh' : '/api/account/login'}?${providerGlobal ? 'scope=global' : `agentId=${providerAgentId}`}`,{}); }
+  try { await providerApi(`${connection.account || config.type === 'openai' ? '/api/account/refresh' : '/api/account/login'}?${providerGlobal ? 'scope=global' : `agentId=${providerAgentId}`}`,{}); }
   finally { $('#connect-account').disabled = false; }
 });
 $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(async () => {
@@ -915,7 +933,7 @@ document.addEventListener('click', event => {
   if (target.dataset.scheduleToggle) { const s = state.schedules.find(s => s.id === target.dataset.scheduleToggle); void perform(() => api(`/api/schedules/${s.id}`,{ enabled:!s.enabled },'PATCH')); }
   if (target.dataset.scheduleDelete && confirm('Delete this routine? Its previous results stay saved.')) void perform(() => api(`/api/schedules/${target.dataset.scheduleDelete}`,{},'DELETE'));
   if (target.dataset.copy) { const message = state.conversations.flatMap(c => c.messages).find(m => m.id === target.dataset.copy); void navigator.clipboard.writeText(message.text).then(() => toast('Copied.')).catch(handleError); }
-  if (target.dataset.removeAttachment) { attachments = attachments.filter(f => f.id !== target.dataset.removeAttachment); target.closest('.attachment-chip').remove(); }
+  if (target.dataset.removeAttachment) { attachments = attachments.filter(f => f.id !== target.dataset.removeAttachment); target.closest('.attachment-chip').remove(); updateComposerSend(); }
 });
 document.addEventListener('submit', event => {
   const form = event.target.closest('[data-answer-job]'); if (!form) return;
@@ -947,7 +965,11 @@ if (state && agentId && !state.customization) openSettings(true);
 else if (state && agentId && !workspace.globalProvider.configured) openSettings();
 if(state && new URLSearchParams(location.search).get('settings')==='provider'){
   openSettings();document.querySelector('[data-settings-section="provider"]').click();
+  if(new URLSearchParams(location.search).get('provider')==='oddy'){$('#settings-provider-target').value='oddy';void $('#settings-provider-target').onchange();}
 }
-setInterval(() => { if (!document.hidden) void refresh(); }, 1000);
+setInterval(() => { if (!document.hidden) {
+  void refresh();
+  if(providerOddy&&$('#settings-dialog').open)void api('/api/oddy/provider').then(value=>{if(providerOddy){oddyProviderState=value;updateAccount();}}).catch(()=>{});
+} }, 1000);
 
 setupWorkflows(()=>workspace,()=>agentId,job=>navigate('chat',job.conversationId),refresh);
