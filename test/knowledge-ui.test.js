@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import {test,expect} from 'bun:test';
 import {EventEmitter} from 'node:events';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -14,7 +15,7 @@ test('Knowledge settings create, edit, assign and delete documents through the b
  app=createApp({directory,user:'owner',password,origin:server.url.origin,providerOptions:{codex},browser:{close:async()=>{}}});
  const spaces=[app.runtime.store.security.createSpace({name:'Grooming'}),app.runtime.store.security.createSpace({name:'Execution'})],agent=app.runtime.state.agents[0];
  app.runtime.state.globalProvider.configured=true;agent.provider.configured=true;app.runtime.state.customization=agent.customization={...defaults,name:'Knowledge tester'};app.runtime.changed();
- const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password},viewport:{width:1000,height:700}}),page=await context.newPage(),errors=[];
+ const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password},viewport:{width:1000,height:700}}),page=await newPageWithoutTutorials(context),errors=[];
  page.setDefaultTimeout(7000);page.on('pageerror',error=>errors.push(error.message));
  const settings=async()=>{await page.locator('#settings-open').click();await page.locator('[data-settings-section=knowledge]').click();await page.locator('#knowledge-new:not([disabled])').waitFor();};
  const finished=()=>page.waitForFunction(()=>document.querySelector('#knowledge-status').textContent!=='Working…');

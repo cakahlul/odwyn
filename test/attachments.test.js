@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -83,7 +84,7 @@ test('image picker and paste show removable previews; image-only sends persist i
   app = createApp({directory,origin:server.url.origin,user:'owner',password:'test-password-long-enough',codex:fakeCodex(inputs),browser:{close:async()=>{}}});
   app.runtime.state.customization={...defaults};app.runtime.state.agents[0].customization={...defaults};
   app.runtime.state.globalProvider.configured=true;app.runtime.state.agents[0].provider.configured=true;await app.runtime.refreshAccount();app.runtime.changed();
-  const browser = await chromium.launch(), page = await browser.newPage({httpCredentials:{username:'owner',password:'test-password-long-enough'}});
+  const browser = await chromium.launch(), page = await newPageWithoutTutorials(browser,{httpCredentials:{username:'owner',password:'test-password-long-enough'}});
   page.setDefaultTimeout(5000); const errors=[];page.on('pageerror',error=>errors.push(error.message));
   try {
     await page.goto(server.url.href+'#chat');await page.locator('#prompt').waitFor();

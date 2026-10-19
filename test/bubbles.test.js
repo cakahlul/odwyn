@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
@@ -18,7 +19,7 @@ test('minimized agents float as staggered circles, preserve dragging, and respec
   for (const [index,name] of ['Rei','Kai','Eve','Momo'].entries()) app.runtime.state.agents.push({id:'agent-'+index,customization:{...defaults,name,bodyColor:['#658bbd','#b8d7ec','#d98bab','#d6a77e'][index],shape:['orb','robot','cat','bean'][index]},provider:{...app.runtime.state.provider}});
   app.runtime.changed();
   const browser=await chromium.launch(), context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}});
-  const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
+  const page=await newPageWithoutTutorials(context),errors=[];page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
   try {
     await page.goto(server.url.href+'#chat');
     expect(await page.locator('.sidebar-agent .agent-avatar').first().evaluate(node=>getComputedStyle(node).animationName)).toBe('agent-breathe');

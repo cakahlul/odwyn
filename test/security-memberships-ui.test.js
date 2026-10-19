@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import {test,expect} from 'bun:test';
 import {chromium} from 'playwright';
 import {EventEmitter} from 'node:events';
@@ -13,7 +14,7 @@ test('unchecking the selected Space removes its membership and grants in a separ
   let app;const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
   app=createApp({directory,user:'owner',password:'test-password-long-enough',origin:server.url.origin,providerOptions:{codex},browser:{close:async()=>{}}});
   const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},extraHTTPHeaders:{origin:server.url.origin}});
-  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(6000);
+  const page=await newPageWithoutTutorials(context),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(6000);
   let query='';
   const request=async(path,method='GET',data)=>{
     const response=await context.request.fetch(new URL(path+(path.includes('?')?query.replace('?','&'):query),server.url).href,{method,data});

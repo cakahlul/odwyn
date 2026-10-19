@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,7 +23,7 @@ test('Claude Connect opens browser login, preserves typed codes across refresh, 
   const agent=app.runtime.state.agents[0],config={...agent.provider,type:'claude',model:'sonnet',configured:true};
   agent.provider=config;app.runtime.state.provider=config;app.runtime.state.globalProvider=config;app.runtime.providers.get(agent.id).configure(config);
   app.runtime.state.customization={...defaults,name:'Oddy'};app.runtime.changed();await app.runtime.refreshAccount();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'}}),page=await context.newPage();page.setDefaultTimeout(5000);
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'}}),page=await newPageWithoutTutorials(context);page.setDefaultTimeout(5000);
   try {
     expect((await request('/api/account/login/complete?scope=global',{code:'expired'})).status).toBe(400);
     app.runtime.active={agentId:agent.id};expect((await request('/api/account/login?scope=global',{})).status).toBe(400);app.runtime.active=null;
@@ -45,7 +46,7 @@ test('first run saves full workspace settings before creating an agent with inhe
   const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
   app=createApp({...options(directory),origin:server.url.origin});
   app.runtime.providers.get(app.runtime.state.agents[0].id).listModels=async config=>config.type==='claude' ? [{id:'sonnet',name:'Sonnet'},{id:'opus',name:'Opus'}] : [];
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:320,height:700}}),page=await context.newPage(),errors=[];
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:320,height:700}}),page=await newPageWithoutTutorials(context),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
   try {
     await page.goto(server.url.href);await page.getByRole('heading',{name:'Set up your workspace',exact:true}).waitFor();
@@ -96,7 +97,7 @@ test('model picker switches catalogs, preserves custom names, and falls back on 
     if(config.type==='openai') throw new Error('Unavailable');
     return config.type==='codex' ? [{id:'gpt-6.1-sol',name:'GPT Sol'},{id:'another-codex',name:'Another Codex'}] : [{id:'sonnet',name:'Sonnet'},{id:'opus',name:'Opus'}];
   };
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'}}),page=await context.newPage();page.setDefaultTimeout(5000);
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'}}),page=await newPageWithoutTutorials(context);page.setDefaultTimeout(5000);
   try {
     await page.goto(server.url.href);await page.locator('#settings-open').click();await page.locator('[data-settings-section=provider]').click();
     await page.locator('#provider-model-list').waitFor({state:'visible'});expect(await page.locator('#provider-model').isVisible()).toBe(false);

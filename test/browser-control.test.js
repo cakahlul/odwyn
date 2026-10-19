@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -26,7 +27,7 @@ test('browser takeover explains queued work, Open browser preserves control, Han
     await app.runtime.refreshAccount();
     await app.runtime.setTakeover(true);
     const job = app.runtime.submit({ prompt: 'Open Bitbucket', interactionMode: 'allow' });
-    const page = await browser.newPage({ httpCredentials: { username: 'owner', password: 'test-password-long-enough' } });
+    const page = await newPageWithoutTutorials(browser,{ httpCredentials: { username: 'owner', password: 'test-password-long-enough' } });
     await page.goto(server.url.href);
     await page.locator(`[data-conversation="${job.conversationId}"]`).first().click();
     await page.locator('.working-row small').filter({ hasText: 'Paused while you control the browser' }).waitFor();

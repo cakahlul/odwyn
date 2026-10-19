@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -18,7 +19,7 @@ test('agent, workflow and skill mentions navigate from messages and composer wit
   app.runtime.state.skills=[{id:'skill',name:'Review code',command:'review-code',description:'Review code.',instructions:'Review code.'}];
   app.runtime.state.workflows=[{id:'workflow',name:'PR Review FE',command:'pr-review-fe',inputs:[],steps:[{id:'review',type:'output',name:'Review',prompt:'Review'}],start:'review'}];
   app.runtime.state.conversations=[{id:'mentions',agentId:first.id,title:'Mention navigation',createdAt:at,messages:[{id:'message',agentId:first.id,role:'user',text:'@Rei /pr-review-fe /review-code',at}]}];app.runtime.changed();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}}),page=await context.newPage(),errors=[];
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}}),page=await newPageWithoutTutorials(context),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
   const returnToChat=async()=>{await page.locator('#menu-button').click();await page.locator('#history [data-conversation="mentions"]').click();await page.waitForFunction(()=>document.querySelector('#agent-name').textContent==='Oddy' && !document.querySelector('#agent-workspace').inert && location.hash==='#chat/mentions');await page.locator('#messages').waitFor();};
   try {

@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { chromium } from 'playwright';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
@@ -15,7 +16,7 @@ test('assistant cards cover shopping outcomes, preserve fallback content, and fi
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: app.fetch });
   const browser = await chromium.launch();
   const context = await browser.newContext({ httpCredentials: { username: 'owner', password: 'test-password-long-enough' } });
-  const page = await context.newPage();
+  const page = await newPageWithoutTutorials(context);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const block = data => '```odwyn\n' + JSON.stringify(data) + '\n```';
   const render = text => page.evaluate(async text => {
@@ -88,7 +89,7 @@ test('assistant cards cover shopping outcomes, preserve fallback content, and fi
     expect(saved).toContain('data:image/png;base64,'); expect(saved).toContain('Rp 1.300.000');
     expect(saved).toContain(receipt.receiptUrl); expect(saved).not.toContain('data-save-receipt');
     const savedPath = join(directory,'receipt.html'); await download.saveAs(savedPath);
-    const offline = await context.newPage();
+    const offline = await newPageWithoutTutorials(context);
     await offline.goto(new URL('file://' + savedPath).href);
     await offline.waitForFunction(() => document.querySelector('.card-media img')?.naturalWidth > 0);
     expect(await offline.getByRole('link',{name:/Original receipt/}).getAttribute('href')).toBe(receipt.receiptUrl);

@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -23,7 +24,7 @@ test('provider usage refreshes, stays per-agent, handles failures, and appears i
   app=createApp({directory,user:'owner',password:'test-password-long-enough',origin:server.url.origin,codex,browser:{close:async()=>{}},providerOptions:{claudeAuth:async()=>({loggedIn:true}),query:()=>({supportedModels:async()=>[],close(){}})}});
   const state=app.runtime.state,agent=state.agents[0],provider=app.runtime.providers.get(agent.id);
   state.customization={...defaults,name:'Oddy'};state.globalProvider.configured=true;agent.provider.configured=true;
-  const browser=await chromium.launch(),page=await browser.newPage({httpCredentials:{username:'owner',password:'test-password-long-enough'}}),errors=[];
+  const browser=await chromium.launch(),page=await newPageWithoutTutorials(browser,{httpCredentials:{username:'owner',password:'test-password-long-enough'}}),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(10000);
   try {
     await app.runtime.refreshAccount();

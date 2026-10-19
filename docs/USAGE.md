@@ -13,6 +13,12 @@ close button has keyboard focus. Failed saves keep the editor available to retry
 Owner verification uses your Odwyn owner password and clears it after confirming
 or cancelling the request.
 
+## Guided tutorials
+
+Menus show a spotlight walkthrough on your first visit. Use **Next**, **Back**, **Skip**, or **Escape**; you can also click elsewhere to leave the guide. Highlighted controls stay usable. Tutorials never submit forms or save permissions for you.
+
+Use a menu’s **Tutorial** button to replay it. Under **Settings → Tutorials**, hide automatic tutorials across all menus or reset visited menus. Manual replay remains available when automatic tutorials are hidden. Progress and preferences are saved separately for each workspace in this browser.
+
 ## Agents and conversations
 
 Create up to five agents. Give each a name, avatar, specialization, reply style, and optional provider override. Use the agent's **⋯** menu to customize it, change its provider, or delete it.

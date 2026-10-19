@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import {test,expect} from 'bun:test';
 import {EventEmitter} from 'node:events';
 import {randomUUID} from 'node:crypto';
@@ -31,7 +32,7 @@ test('owner configures room roles and sees version-specific review progress on d
   const add=async name=>{const response=await app.fetch(new Request(new URL('/api/agents',server.url),{method:'POST',headers,body:JSON.stringify({...defaults,name})}));expect(response.status).toBe(201);const agent=await response.json();runtime.providers.get(agent.id).stop();runtime.addProvider(agent.id,new Agent());return agent.id;};
   const engineer=await add('Engineer'),observer=await add('Observer');
   for(const id of [primary,engineer,observer])await runtime.refreshAccount(id);runtime.changed();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password},viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[];
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password},viewport:{width:1440,height:960}}),page=await newPageWithoutTutorials(context),errors=[];
   page.setDefaultTimeout(5000);page.on('pageerror',error=>errors.push(error.message));
   const call=async(tool,args)=>{const job=runtime.active,provider=job.agentId===primary ? lead : runtime.providers.get(job.agentId);await runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool,arguments:args}});expect(provider.replies.at(-1).success).toBe(true);};
   const finish=async()=>{const job=runtime.active;runtime.providers.get(job.agentId).emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:job.turnId,status:'completed'}}});await runtime.drain();};

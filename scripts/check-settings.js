@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
 import {mkdtempSync,rmSync,mkdirSync} from 'node:fs';
@@ -13,7 +14,7 @@ try{
  app=createApp({directory,user:'owner',password,origin:server.url.origin,codex:new FixtureProvider(),browser:{close:async()=>{}}});
  const store=app.runtime.store,p=store.security,a=store.state.agents[0].id;
  store.state.customization=store.state.agents[0].customization={...defaults,name:'Settings tester'};store.state.globalProvider.configured=true;store.state.agents[0].provider.configured=true;
- browser=await chromium.launch({headless:true});const context=await browser.newContext({httpCredentials:{username:'owner',password},viewport:{width:1024,height:900}}),page=await context.newPage(),errors=[];
+ browser=await chromium.launch({headless:true});const context=await browser.newContext({httpCredentials:{username:'owner',password},viewport:{width:1024,height:900}}),page=await newPageWithoutTutorials(context),errors=[];
  page.setDefaultTimeout(10000);page.on('pageerror',error=>{errors.push(error.message);console.error('Browser error: '+error.message);});page.on('dialog',dialog=>dialog.accept());
  await page.goto(server.url.href);await page.locator('h1').first().waitFor();assert.deepEqual(errors,[]);await page.locator('#settings-open').click();await page.locator('#settings-dialog[open]').waitFor();
  assert.equal(await page.locator('#settings-appearance-controls').isVisible(),true);await page.locator('[data-settings-section=preferences]').focus();await page.keyboard.press('Enter');assert.equal(await page.locator('#settings-preferences-controls').isVisible(),true);

@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -18,7 +19,7 @@ test('routines select agents and execute skill or workflow calls with inputs',as
   state.agents.push({id:'rei',customization:{...defaults,name:'Rei'},provider:{...first.provider,configured:false}});
   state.skills=[{id:'skill',name:'Review code',command:'review-code',description:'Review code.',instructions:'Check code carefully.'}];
   state.workflows=[{id:'workflow',name:'PR Review',command:'pr-review',inputs:[{name:'url',label:'PR URL',required:true},{name:'focus',label:'Focus',default:'Frontend'}],steps:[{id:'review',type:'agent',name:'Review',prompt:'Review {{inputs.url}} for {{inputs.focus}}',tools:[],skills:[]}],start:'review',maxSteps:10}];app.runtime.changed();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'}}),page=await context.newPage(),errors=[];
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'}}),page=await newPageWithoutTutorials(context),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(10000);
   try {
     await page.goto(server.url.href+'#routines');await page.getByRole('button',{name:'New routine',exact:true}).click();

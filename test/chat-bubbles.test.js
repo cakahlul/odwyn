@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
@@ -23,7 +24,7 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
     {id:'private',agentId:first.id,title:'Weekend plans',createdAt:at,messages:[message('p1','user','Any ideas for Saturday? /pr-review-fe $pr-review-fe'),message('p2','assistant','Coffee, then the botanical garden. Want a quieter route?'),message('p3','user','Yes, somewhere away from the crowds.'),message('p4','assistant','Try the north entrance. It’s usually quieter before 10.')]},
     {id:'room',kind:'room',memberIds:[first.id,'rei','kai'],agentId:first.id,title:'Weekend group',createdAt:at,messages:[message('r1','user','@Oddy @Rei, thoughts on Saturday?'),message('r2','assistant','The garden sounds good. @Rei can check the route.'),message('r3','assistant','Found a quieter entrance. @"Kai Chen", coffee nearby?','rei'),message('r4','assistant','Yes — a café across the road opens at 8.','kai')]}
   ];app.runtime.changed();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}}),page=await context.newPage(),errors=[];
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}}),page=await newPageWithoutTutorials(context),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
   const artifacts=resolve(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});
   try {

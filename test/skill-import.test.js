@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -21,7 +22,7 @@ test('Import skill previews SKILL.md, handles command collisions, saves a new sk
   app.runtime.state.skills.push(existing); await app.runtime.refreshAccount(); app.runtime.changed();
   const browser = await chromium.launch();
   try {
-    const page = await browser.newPage({httpCredentials:{username:'owner',password:'test-password-long-enough'}});
+    const page = await newPageWithoutTutorials(browser,{httpCredentials:{username:'owner',password:'test-password-long-enough'}});
     await page.goto(server.url.href+'#chat'); await page.locator('.welcome').waitFor();
     await page.locator('#tools-open').click();await page.locator('[data-view=workflows]').click();
     await page.locator('[data-skill-edit]').click(); await page.locator('[data-skill-close]').click();

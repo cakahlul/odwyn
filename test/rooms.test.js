@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
@@ -41,7 +42,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
   app.runtime.state.agents.find(agent=>agent.id===scout.id).provider.configured = true;
   await app.runtime.refreshAccount(); await app.runtime.refreshAccount(scout.id); app.runtime.changed();
   const browser = await chromium.launch(), context = await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:960}});
-  const page = await context.newPage(), errors = []; page.setDefaultTimeout(5000); page.on('pageerror',error=>errors.push(error.message));
+  const page = await newPageWithoutTutorials(context), errors = []; page.setDefaultTimeout(5000); page.on('pageerror',error=>errors.push(error.message));
   const artifacts = resolve(import.meta.dir,'../artifacts'); mkdirSync(artifacts,{recursive:true});
   const complete = (provider,job,text) => {
     provider.emit('notification',{method:'item/completed',params:{threadId:job.threadId,turnId:job.turnId,item:{id:randomUUID(),type:'agentMessage',text}}});
@@ -239,7 +240,7 @@ test('room editor selects a permanent Space, filters agents, and rejects stale m
   const A=p.createSpace({name:'Room Space A'}),B=p.createSpace({name:'Room Space B'}),empty=p.createSpace({name:'Empty Space'});
   const membership=(id,spaces,defaultSpaceId)=>p.putAccess(id,{revision:p.revision,spaceIds:spaces,grants:[],...(defaultSpaceId?{defaultSpaceId}:{})});
   membership(primary,[A.id],A.id);membership(scout.id,[A.id,B.id]);membership(foreign.id,[B.id]);app.runtime.changed();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'}}),page=await context.newPage();
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'}}),page=await newPageWithoutTutorials(context);
   page.setDefaultTimeout(5000);
   try{
     await page.goto(server.url.href+'#chat');await page.locator('#menu-button').click();await page.locator('#new-room').click();

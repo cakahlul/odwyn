@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { chromium } from 'playwright';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,7 +18,7 @@ const server = Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch
 app = createApp({directory,user:'check',password,origin:server.url.origin,codex:new Codex({home:join(directory,'codex'),workspace:join(directory,'workspace')}),providerOptions:{claudeAuth:async()=>({loggedIn:false})}});
 const browser = await chromium.launch();
 const context = await browser.newContext({httpCredentials:{username:'check',password},viewport:{width:1440,height:960}});
-const page = await context.newPage(); const errors=[];
+const page = await newPageWithoutTutorials(context); const errors=[];
 page.on('pageerror',error=>errors.push(error.message));
 const audit = async label => {
   if (!(process.env.ODWYN_AXE_PATH ?? process.env.SIDEKICK_AXE_PATH)) return;

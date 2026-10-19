@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import {test,expect} from 'bun:test';
 import {chromium} from 'playwright';
 import {EventEmitter} from 'node:events';
@@ -15,7 +16,7 @@ test('workspace resource source folder can be checked, created, edited and rejec
  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
  app=createApp({directory,user:'owner',password,origin:server.url.origin,providerOptions:{codex},browser:{close:async()=>{}},execution:{snapshotRoot:sourceRoot}});
  const space=app.runtime.store.security.createSpace({name:'Execution'});app.runtime.state.globalProvider.configured=true;app.runtime.state.agents[0].provider.configured=true;app.runtime.state.customization=app.runtime.state.agents[0].customization={...defaults,name:'Source tester'};app.runtime.changed();
- const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password}}),page=await context.newPage(),errors=[];
+ const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password}}),page=await newPageWithoutTutorials(context),errors=[];
  page.setDefaultTimeout(7000);page.on('pageerror',e=>errors.push(e.message));
  try{
   const repositoryResponse=await fetch(new URL('/api/resources',server.url),{method:'POST',headers:{authorization:'Basic '+Buffer.from('owner:'+password).toString('base64'),'content-type':'application/json',origin:server.url.origin},body:JSON.stringify({spaceId:space.id,type:'repository',name:'Project Git',metadata:{endpoint:'https://github.com/example/project.git',gitUsername:'fixture-user'}})});expect(repositoryResponse.status).toBe(201);const repository=await repositoryResponse.json();

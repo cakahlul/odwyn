@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import {test,expect} from 'bun:test';
 import {EventEmitter} from 'node:events';
 import {mkdtempSync,rmSync,mkdirSync} from 'node:fs';
@@ -22,7 +23,7 @@ test('Home prioritizes work across agents, updates live, preserves drafts and re
   const policy=app.runtime.store.security;for(const c of app.runtime.state.conversations)c.spaceId=policy.legacySpaceId;
   for(const j of app.runtime.state.jobs){j.spaceId=policy.legacySpaceId;policy.bind(j.id,j.agentId,j.spaceId);}
   app.runtime.changed();
-  const browser=await chromium.launch(),page=await browser.newPage({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:1000}});
+  const browser=await chromium.launch(),page=await newPageWithoutTutorials(browser,{httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:1000}});
   page.setDefaultTimeout(5000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const artifacts=join(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});
   try {

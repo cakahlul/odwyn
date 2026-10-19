@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import {test,expect} from 'bun:test';
 import {chromium} from 'playwright';
 import {EventEmitter} from 'node:events';
@@ -11,7 +12,7 @@ test('save feedback uses accessible bottom-center success/error/attention toasts
  const directory=mkdtempSync(join(tmpdir(),'odwyn-notifications-')),password='test-password-long-enough',codex=Object.assign(new EventEmitter(),{request:async()=>({account:null}),stop(){}});let app;
  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});app=createApp({directory,user:'owner',password,origin:server.url.origin,providerOptions:{codex},browser:{close:async()=>{}},execution:{snapshotRoot:join(directory,'sources')}});
  const state=app.runtime.state;state.globalProvider.configured=true;state.agents[0].provider.configured=true;state.customization=state.agents[0].customization={...defaults,name:'Tester'};app.runtime.changed();
- const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password}}),page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(8000);
+ const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password}}),page=await newPageWithoutTutorials(context),errors=[];page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(8000);
  const notice=async(tone,text)=>{await page.locator('#toast[data-tone="'+tone+'"]').filter({hasText:text}).waitFor();expect(await page.locator('#toast').evaluate(node=>node.matches(':popover-open'))).toBe(true);};
  try{
   await page.goto(server.url.href);await page.locator('#settings-open').click();await page.locator('[data-settings-section=connections]').click();await page.locator('[data-manage-new=connections]:not([disabled])').click();await page.locator('#workspace-connection-name').fill('Project Git');await page.locator('#workspace-connection-type').selectOption('git-https-v1');await page.locator('#workspace-connection-endpoint').fill('https://github.com/example/project.git');await page.locator('#workspace-connection-secret').fill('synthetic-notification-secret');await page.locator('[data-manage-save=connections]').click();

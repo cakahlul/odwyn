@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import {test,expect} from 'bun:test';
 import {randomUUID} from 'node:crypto';
 import {EventEmitter} from 'node:events';
@@ -30,7 +31,7 @@ test('fresh checkpoint restores identify the exact owner-only blocker without we
   const event=p.audit().find(row=>row.action==='checkpoint.restore');expect(event.agentId).toBe(receiver.id);for(const detail of [checkpointId,original.id,source.id,repo.id,'repository.read','No grant.'])expect(event.reason).toContain(detail);
   const auth='Basic '+Buffer.from('owner:'+password).toString('base64'),owner=await fetch(new URL('/api/audit',server.url),{headers:{authorization:auth}});expect(owner.status).toBe(200);expect(JSON.stringify(await owner.json())).toContain(checkpointId);
   expect((await fetch(new URL('/api/audit',server.url))).status).toBe(401);const token=store.data.issueToken(fresh),agentResponse=await fetch(new URL('/api/audit',server.url),{headers:{authorization:'Bearer '+token}});expect(agentResponse.status).toBe(403);expect(await agentResponse.text()).not.toContain('Private project label');
-  runtime.changed();browser=await chromium.launch();const context=await browser.newContext({httpCredentials:{username:'owner',password}}),page=await context.newPage();await page.goto(server.url.href);
+  runtime.changed();browser=await chromium.launch();const context=await browser.newContext({httpCredentials:{username:'owner',password}}),page=await newPageWithoutTutorials(context);await page.goto(server.url.href);
   await page.evaluate(async()=>{(await import('/customize.js')).openCustomization();});await page.locator('#agent-access-tab').click();await page.locator('#security-dialog summary').filter({hasText:'Recent activity'}).click();await page.locator('#access-refresh').click();
   await page.waitForFunction(()=>document.querySelector('#toast').textContent==='Approvals and audit refreshed.');expect(await page.locator('#access-refresh').isEnabled()).toBe(true);
   await page.waitForFunction(id=>document.querySelector('#access-audit').textContent.includes(id),checkpointId);expect(await page.locator('#access-audit').textContent()).toContain(source.customization.name);expect(await page.locator('#access-audit img').count()).toBe(0);expect(await page.evaluate(()=>window.labelExecuted)).toBeUndefined();

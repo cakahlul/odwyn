@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
@@ -27,7 +28,7 @@ test('default skill selection persists, reaches provider instructions, and block
   const at=new Date().toISOString();
   app.runtime.state.conversations=[{id:'copy-chat',agentId:agent.id,title:'Copy blocks',createdAt:at,messages:[{id:'reply',role:'assistant',at,text:'Before\n\n```text\nFirst line\nSecond <line>\n```\n\n> A quoted instruction.\n\nAfter'}]}];
   await app.runtime.refreshAccount();app.runtime.changed();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},permissions:['clipboard-read','clipboard-write'],viewport:{width:1000,height:700}}),page=await context.newPage();
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},permissions:['clipboard-read','clipboard-write'],viewport:{width:1000,height:700}}),page=await newPageWithoutTutorials(context);
   page.setDefaultTimeout(5000);
   try {
     expect(()=>validateProfile({...defaults,skillIds:'review'})).toThrow('Choose valid skills.');

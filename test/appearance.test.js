@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
@@ -14,7 +15,7 @@ test('workspace themes preview, customize, validate, persist and reset without c
   app=makeApp();app.runtime.state.customization={...defaults,name:'Oddy'};app.runtime.state.provider.configured=true;app.runtime.state.globalProvider.configured=true;app.runtime.state.preferences='Keep my preferences';
   const agent=app.runtime.state.agents[0],at=new Date().toISOString();
   app.runtime.state.conversations=[{id:'theme-chat',agentId:agent.id,title:'Weekend plans',createdAt:at,messages:[{id:'one',role:'user',text:'Can you check the itinerary?',at},{id:'two',role:'assistant',text:'Three options ready to compare.',at}]}];app.runtime.changed();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[];
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:1000}}),page=await newPageWithoutTutorials(context),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
   const artifacts=resolve(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});
   const request=async(path,appearance)=>{const response=await app.fetch(new Request(new URL(path,server.url),{method:'PUT',headers:{authorization:'Basic '+Buffer.from('owner:test-password-long-enough').toString('base64'),origin:server.url.origin,'content-type':'application/json'},body:JSON.stringify(path==='/api/preferences' ? {text:'Keep my preferences',appearance} : appearance)}));return response;};
@@ -140,7 +141,7 @@ test('workspace themes preview, customize, validate, persist and reset without c
     await page.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().bottom<=innerHeight);
     const touch = await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:320,height:700},hasTouch:true,isMobile:true});
     try {
-      const mobile = await touch.newPage();mobile.setDefaultTimeout(5000);await mobile.goto(server.url.href+'#chat/theme-chat');await mobile.locator('#messages').waitFor();
+      const mobile = await newPageWithoutTutorials(touch);mobile.setDefaultTimeout(5000);await mobile.goto(server.url.href+'#chat/theme-chat');await mobile.locator('#messages').waitFor();
       await mobile.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().top>=innerHeight);
       const mobileContent = await contentBounds(mobile);
       expect(await sidesReachContent(mobile)).toBe(true);

@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../../browser-page.js';
 import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,readdirSync,existsSync,copyFileSync,rmSync} from 'node:fs';

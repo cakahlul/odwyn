@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
@@ -14,7 +15,7 @@ test('workflow result cards configure, select, send a follow-up, and persist aft
   app=createApp({directory,user:'owner',password:'test-password-long-enough',origin:server.url.origin,codex:provider,browser:{close:async()=>{},reset:async()=>{}}});
   app.runtime.state.customization={...defaults,name:'Momo'};app.runtime.state.globalProvider.configured=true;app.runtime.state.agents[0].provider.configured=true;
   await app.runtime.refreshAccount();app.runtime.changed();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[];
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:960}}),page=await newPageWithoutTutorials(context),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(10_000);
   const artifacts=resolve(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});
   const data={type:'pr_review',prUrl:'https://example.com/pull/1676',commit:'f3a60313bba05fe23fceb78787d3a9616c622cb9',summary:'Probe guard looks correct. Included auth changes need QA evidence.',feedback:[{id:'F1',severity:'major',location:'PR description',comment:'Link confirmation and production-like QR login QA results.',sourceUrl:'https://example.com/issue/14217'},{id:'F2',severity:'minor',location:'Login tests',comment:'Add coverage for the fallback login route.'}]};

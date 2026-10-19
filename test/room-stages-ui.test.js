@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test } from 'bun:test';
 import { chromium } from 'playwright';
 import { randomUUID } from 'node:crypto';
@@ -25,7 +26,7 @@ app.runtime.state.agents[0].provider.configured=true;
 app.runtime.changed();await app.runtime.refreshAccount();
 const browser=await chromium.launch();
 const context=await browser.newContext({httpCredentials:{username:'check',password:'workflow-test-password'},viewport:{width:1440,height:960}});
-const page=await context.newPage(),errors=[];
+const page=await newPageWithoutTutorials(context),errors=[];
 page.setDefaultTimeout(5000);page.on('pageerror',error=>errors.push(error.message));
 try {
   await page.goto(server.url.href);
@@ -89,7 +90,7 @@ test('owner approves and publishes a reviewed stage, passes its package, then ex
   app=createApp({directory,user:'check',password,origin:server.url.origin,codex:new Provider(),browser:{close:async()=>{}}});
   const runtime=app.runtime,primary=runtime.state.agents[0].id;
   runtime.state.customization={...defaults,name:'Lead'};runtime.state.globalProvider.configured=true;
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'check',password},viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[];
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'check',password},viewport:{width:1440,height:960}}),page=await newPageWithoutTutorials(context),errors=[];
   page.setDefaultTimeout(5000);page.on('pageerror',error=>errors.push(error.message));
   const call=async(tool,args)=>{const job=runtime.active,provider=runtime.providers.get(job.agentId);await runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool,arguments:args}});const reply=provider.replies.at(-1);assert.equal(reply.success,true,reply.contentItems[0].text);return JSON.parse(reply.contentItems[0].text);};
   const finish=async()=>{runtime.finish(runtime.active,'completed');await runtime.drain();};

@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import {test,expect} from 'bun:test';
 import {chromium} from 'playwright';
 import {EventEmitter} from 'node:events';
@@ -12,7 +13,7 @@ test('header exposes workspace actions and room creation in dock and sidebar lay
   const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
   app=createApp({directory,user:'owner',password,origin:server.url.origin,providerOptions:{codex},browser:{close:async()=>{}}});
   app.runtime.state.globalProvider.configured=true;app.runtime.state.customization={...defaults,name:'Lead'};app.runtime.changed();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password},viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[];
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password},viewport:{width:1440,height:960}}),page=await newPageWithoutTutorials(context),errors=[];
   page.setDefaultTimeout(6000);page.on('pageerror',error=>errors.push(error.message));
   const screenshots=resolve('artifacts/ui/workspace-navigation');mkdirSync(screenshots,{recursive:true});
   try{

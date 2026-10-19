@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
@@ -16,7 +17,7 @@ test('workspace dock separates conversations, agents, and tools while keeping ch
   const first=app.runtime.state.agents[0].id;
   app.runtime.state.conversations=[{id:'weekend',kind:'room',memberIds:[first,'agent-0'],agentId:first,title:'Weekend plans',createdAt:new Date().toISOString(),messages:[]}];for(let index=0;index<30;index++) app.runtime.state.conversations.push({id:'chat-'+index,agentId:first,title:'Conversation '+(index+1),createdAt:new Date().toISOString(),messages:[]});
   app.runtime.changed();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}}),page=await context.newPage(),errors=[];
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}}),page=await newPageWithoutTutorials(context),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
   try{
     await page.emulateMedia({reducedMotion:'reduce'});

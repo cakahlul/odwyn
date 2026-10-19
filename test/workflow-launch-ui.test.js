@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import {test,expect} from 'bun:test';
 import {EventEmitter} from 'node:events';
 import {randomUUID} from 'node:crypto';
@@ -24,7 +25,7 @@ test('workflow launch accepts multiline requirements and scoped chat-style attac
   const foreign={id:randomUUID(),kind:'upload',spaceId:p.legacySpaceId,name:'foreign.txt'};state.files.push(foreign);runtime.store.data.sync();const rooms=state.conversations.length;
   expect(()=>runtime.launchWorkflow(workflow,{agentId:first.id,inputs:{feature:'Wrong',requirement:'Test'},attachments:[foreign.id]})).toThrow();expect(state.conversations).toHaveLength(rooms);expect(state.workflowRuns).toHaveLength(0);
   expect(()=>runtime.launchWorkflow(workflow,{agentId:first.id,inputs:{feature:'Wrong',requirement:'Test'},attachments:['missing']})).toThrow();
-  browser=await chromium.launch();const context=await browser.newContext({httpCredentials:{username:'owner',password}}),page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(7000);
+  browser=await chromium.launch();const context=await browser.newContext({httpCredentials:{username:'owner',password}}),page=await newPageWithoutTutorials(context),errors=[];page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(7000);
   await page.goto(server.url.href);await page.locator('#tools-open').click();await page.locator('[data-view=workflows]').click();await page.locator('[data-workflow-run]').click();
   const input=page.locator('#workflow-run-inputs textarea[name=requirement]');expect(await input.getAttribute('rows')).toBe('8');expect((await input.boundingBox()).height).toBeGreaterThanOrEqual(150);
   const requirement='Build a feature.\n\nAcceptance criteria:\n'+('Preserve existing API contracts.\n'.repeat(50));await input.fill(requirement);await page.locator('#workflow-run-inputs input[name=feature]').fill('Feature007');

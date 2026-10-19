@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { chromium } from 'playwright';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
@@ -22,7 +23,7 @@ app.runtime.state.agents[0].provider.configured=true;
 app.runtime.changed();await app.runtime.refreshAccount();
 const browser=await chromium.launch();
 const context=await browser.newContext({httpCredentials:{username:'check',password:'workflow-test-password'},viewport:{width:1440,height:960}});
-const page=await context.newPage(),errors=[];
+const page=await newPageWithoutTutorials(context),errors=[];
 page.on('pageerror',error=>errors.push(error.message));
 try {
   await page.goto(server.url.href);

@@ -1,3 +1,4 @@
+import {setupTutorials} from './tutorials.js';
 import {setupKnowledgeSettings} from './knowledge-ui.js';
 import {setupRoomWork} from './room-work-ui.js';
 import {setupWorkspaceHomes} from './workspace-homes.js';
@@ -75,6 +76,7 @@ const currencyNames = new Intl.DisplayNames(['en'],{type:'currency'});
 $('#preferred-currency').innerHTML = currencies.map(code=>`<option value="${code}">${code === 'source' ? 'Original currency' : `${code} · ${esc(currencyNames.of(code))}`}</option>`).join('');
 hydrateIcons(); setupBrowser(() => state);
 const renderSecuritySpace=setupSecurity(() => state);
+const visitTutorial=setupTutorials();
 setupWorkspaceSettings(refresh);
 setupKnowledgeSettings(refresh);
 setupCustomization(() => state, async (result, adding, onboarding) => { $('#provider-api-key').value = ''; signature = ''; await refresh(); if (adding) await switchAgent(result.id); if (onboarding && !workspace.globalProvider.configured) openSettings(); }, () => $('#provider-source').value === 'global' ? {inherit:true} : {...providerInput(),inherit:false});
@@ -405,6 +407,7 @@ function navigate(next = 'chat', id = null) {
 
 function render() {
   if (!state) return;
+  visitTutorial(view);
   renderDock();
   applyProfile(agentId ? state.customization : null,state.appearance,state.owner);
   $('#composer-area').setAttribute('aria-label','Message your assistant');

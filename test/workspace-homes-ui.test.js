@@ -1,3 +1,4 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import {test,expect} from 'bun:test';
 import {chromium} from 'playwright';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -15,7 +16,7 @@ test('create and switch homes, preserve drafts, link settings, and scope downloa
   app=createApp({...options,origin:server.url.origin});
   app.runtime.state.globalProvider.configured=true;
   app.runtime.state.customization={...defaults,name:'Home agent'};app.runtime.state.agents[0].customization=app.runtime.state.customization;app.runtime.changed();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:options.user,password:options.password}}),page=await context.newPage(),errors=[];
+  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:options.user,password:options.password}}),page=await newPageWithoutTutorials(context),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());page.setDefaultTimeout(7000);
   try {
     await page.goto(server.url.href);await page.locator('#workspace-home:not([disabled])').waitFor();
