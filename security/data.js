@@ -74,6 +74,7 @@ export function openData(db,state,policy){
       if(!conversation || conversationId!==job.conversationId && (conversation.kind==='room'?!conversation.memberIds.includes(c.agentId):row.agent_id!==c.agentId))throw new Error('History access denied.');
       const result=conversation.messages.filter(m=>data.readable(job,m.id));if(result.length<conversation.messages.length)policy.auditData(job,'history.read',conversationId);return result;
     },
+    assertCurrentSources(job){policy.context(job);for(const ref of sources(job.id))policy.authorize(job,ref.action,ref.resourceId);for(const row of db.query('SELECT export_id FROM task_exports WHERE task_id=?').all(job.id))validExport(job.spaceId,row.export_id);},
     assertHandoff(job,taskIds){for(const id of taskIds){if(!allowed(job,id))throw new Error('Classified workflow disclosure denied.');for(const r of sources(id))db.query('INSERT OR IGNORE INTO data_sources VALUES(?,?,?)').run(job.id,r.resourceId,readAction(r.action));for(const r of db.query('SELECT export_id FROM task_exports WHERE task_id=?').all(id))db.query('INSERT OR IGNORE INTO task_exports VALUES(?,?)').run(job.id,r.export_id);}},
     checkpointDenied(job,resourceId,checkpointId,record,failure){
       // Diagnostic labels stay in owner audit; agent-facing disclosure errors remain generic.

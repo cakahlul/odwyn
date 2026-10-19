@@ -11,7 +11,7 @@ docker image inspect odwyn-security-worker:phase2 --format '{{.Id}}'
 
 Server configuration: `ODWYN_SANDBOX_IMAGE=sha256:<image-id>` and optional `ODWYN_SANDBOX_SNAPSHOTS=<owner-controlled-root>` (defaults to the Workspace data directory’s `sources/`). Configure each source in **Workspace Settings → Resources → Isolated workspace**: leave Source folder blank for `<root>/<spaceId>/<workspaceResourceId>`, or give a relative folder under the displayed root. Save creates missing private folders. Edit the saved resource to **Import project folder** from your computer or enter an absolute **Existing project folder on this server** and **Copy server project** into an empty source. The destination stays relative to the displayed root; server-copy origins are explicit owner-selected absolute paths outside Odwyn private data, provider home and managed sources. Symlink components and hard-linked files are rejected. Server copies use the existing descriptor-relative snapshot copier and preserve executable bits. The original project remains unchanged; no live mount or synchronization is created. Existing resource paths remain compatible. Only explicit `sandbox.exec` grants authorize execution; these variables never confer grants. Tests use a disposable server-owned snapshot resolver instead. Never place the application database or credentials in snapshots. No symlinks, Git config/hooks, credential files, special files or unrestricted host binds are copied. Limits: 16 MiB/4096 entries/depth 32; writable workspace 32 MiB and temporary directory 16 MiB.
 
-Each task gets a distinct worker: UID/GID 1000, read-only root, all capabilities dropped, no-new-privileges, no network, 128 MiB RAM without extra swap, 64 PIDs, one CPU. Commands have a maximum 120-second timeout and bounded output; runtime limits remain 120 tool calls and one hour per task. Timeout, cancellation and output overflow kill the whole worker. Task finish/service close removes it. Failed provisioning removes the worker and returns a denial. Missing Docker/image/kernel controls never select a host-shell fallback.
+Each task gets a distinct worker: UID/GID 1000, read-only root, all capabilities dropped, no-new-privileges, no network, 128 MiB RAM without extra swap, 64 PIDs, one CPU. Commands have a maximum 120-second timeout and bounded output; room workflows continue at 120-tool turn boundaries within the room one-hour limit; other tasks pause for review at 120 calls. Timeout and cancellation kill the whole worker. Output overflow truncates returned diagnostics while the command continues within its timeout. Task finish/service close removes it. Failed provisioning removes the worker and returns a denial. Missing Docker/image/kernel controls never select a host-shell fallback.
 
 `odwyn_repository_patch` exports a bounded patch from the exact task workspace. `odwyn_repository_push` accepts only a repository resource and branch ref. Owner grants must include exact `branchPrefixes` such as `['agent/']`; overlapping constraints intersect. Main/master/release, tags, unrelated history, force pushes, and CI/policy file changes remain denied. The server broker pins the resolved upstream IP, refuses redirects, bounds transport, and verifies receive-pack receipts. Credentials, if configured through the server-only resolver, remain in the broker; workers receive no token. No live credential source is enabled by default. Optional draft PRs remain unavailable.
 
@@ -75,19 +75,16 @@ The normal `bun run start` command loads `.env` through Bun. Services started ou
 Checkpoint manifests live privately under `<data directory>/checkpoints`. Only
 bounded regular workspace files are captured; credentials, Git configuration,
 hooks, symlinks and special files are rejected. Checkpoints are immutable and
-Space/resource scoped. Successful task completion saves modified work before the
-worker is removed. Cancellation or a failed save never promotes a new head.
+Space/resource scoped. Completed terminal commands save work before returning; successful task completion also saves modified work before the worker is removed. Unchanged content retains the existing checkpoint identity. Cancellation or a failed save never promotes a new head.
 Parallel writers use compare-and-set: a losing branch remains recorded without
 overwriting the winner. The owner can explicitly select a retained checkpoint
 after stopping workspace tasks. Export selected checkpoints through room handoff
 into an empty destination workspace; this grants no execution permission.
 
-If a command times out or exceeds its output limit, the stopped worker cannot be
-reused. The tool reports lost unsaved changes and the pinned checkpoint. Explicitly
+If a command times out or is cancelled, the stopped worker cannot be reused. Exceeding the output limit truncates diagnostics without stopping the worker. The tool reports lost unsaved changes and the pinned checkpoint. Explicitly
 call `odwyn_checkpoint` with `action: restore`, the same resource and that checkpoint
 to create a fresh isolated worker. This never restarts the old container or selects
-a newer head. Without a saved checkpoint, start a new task. Bound inspection output
-(for example, `sed -n '1,120p' AGENTS.md`) to avoid stopping the worker again.
+a newer head. Without a saved checkpoint, start a new task. Bound inspection output to keep returned diagnostics useful.
 
 `odwyn_checkpoint` saves or selects a task's initial checkpoint. A task pins one
 workspace/checkpoint; start another task to move to a newer head.
@@ -153,3 +150,5 @@ Namespace reservations apply across endpoints to prevent alias write bypasses;
 this intentionally restricts unrelated legacy resources using the same names.
 Native Git tests cover actual receive-pack transactions but do not establish
 container or hosted-provider compatibility.
+
+For prepared npm dependencies, execution preflight, automatic stage transitions, and recovery semantics, see [Workflow recovery](../docs/WORKFLOW_RECOVERY.md).

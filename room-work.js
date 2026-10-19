@@ -218,6 +218,7 @@ export function selectRoomCheckpoint(runtime,id,input){
   const record=[...(room.checkpoints||[]),...(runtime.state.checkpoints||[])].find(item=>item.id===input.checkpointId&&item.resourceId===resource.id&&item.spaceId===room.spaceId);
   if(!record)throw new Error('Choose a recorded checkpoint for this workspace.');
   runtime.state.executionHeads ||= {};runtime.state.executionHeads[resource.id]=record.id;record.adoptedByOwnerAt=new Date().toISOString();
+  for(const job of runtime.state.jobs)if(job.checkpointConflict?.resourceId===resource.id)delete job.checkpointConflict;
   room.targetCheckpointId=record.id;for(const item of room.cases||[]){item.status='pending';delete item.evidenceId;delete item.checkpointId;}
   invalidateRoomResult(room,'Owner selected a checkpoint. Retest and review before completion.');if(room.discussion?.status==='completed')room.discussion.status='stopped';
   runtime.changed();return {checkpointId:record.id};

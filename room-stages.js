@@ -2,6 +2,44 @@ import {randomUUID} from 'node:crypto';
 import {createRoom,findRoom} from './store.js';
 import {interpolate,validateWorkflow} from './workflows.js';
 
+export function syncRoomWorkflowStatus(runtime){
+  for(const run of runtime.state.workflowRuns){
+    const room=runtime.state.conversations.find(item=>item.id===run.conversationId&&item.roomWorkflowRunId===run.id);
+    if(!room?.discussion)continue;
+    const status=room.discussion.status;
+    if(['paused','stopped','changes_requested'].includes(status)){
+      run.status='interrupted';run.error=runtime.state.jobs.find(job=>job.conversationId===room.id&&job.error)?.error||'Discussion paused. Review progress before continuing.';
+    }else if(status==='awaiting_owner')run.status='waiting';
+    else if(status==='active'){
+      const active=runtime.state.jobs.filter(job=>job.conversationId===room.id&&['queued','running','waiting','takeover','stopping'].includes(job.status));
+      run.status=active.some(job=>job.status==='waiting')&&!active.some(job=>job.status==='running')?'waiting':'running';delete run.error;
+    }
+  }
+}
+
+export async function advanceRoomWorkflows(runtime){
+  for(const run of runtime.state.workflowRuns){
+    if(runtime.closed||!run.workflow.autoAdvance||run.autoAdvanceBlocked)continue;
+    try{
+      let room=runtime.state.conversations.find(item=>item.id===run.conversationId);
+      if(run.status==='awaiting_handoff'){
+        const next=nextRoomStage(runtime,room);if(!next)continue;
+        const input={room:next.room,artifactIds:(room.artifacts||[]).map(item=>item.id),openQuestions:''};
+        if(room.targetCheckpointId&&room.spaceId!==next.room.spaceId){
+          const checkpoint=room.checkpoints?.find(item=>item.id===room.targetCheckpointId);
+          if(!checkpoint||checkpoint.conflict&&!checkpoint.adoptedByOwnerAt)throw Error('Resolve the current checkpoint before passing this stage.');
+          const policy=runtime.store.security,source=policy.resource(checkpoint.resourceId);
+          const targets=next.workspaceResourceId?[policy.resource(next.workspaceResourceId)]:policy.listResources().filter(item=>item.type==='workspace'&&item.spaceId===next.room.spaceId).flatMap(item=>policy.isolatedWorkspaces.targets(item)).filter(item=>item.type==='workspace'&&(source.isolatedWorkspaceId?item.isolatedWorkspaceId===source.isolatedWorkspaceId:source.metadata.repositoryId&&item.metadata.repositoryId===source.metadata.repositoryId));
+          if(targets.length!==1)throw Error('Choose the destination workspace using Pass to next room.');
+          Object.assign(input,{checkpointId:checkpoint.id,workspaceResourceId:targets[0].id});
+        }
+        room=await runtime.handoffRoom(room.id,input);
+      }
+      if(run.status==='ready'&&!runtime.closed)runtime.startRoomStage(room.id,{});
+    }catch(error){run.error=runtime.store.connectors.redact(error.message);run.autoAdvanceBlocked=true;runtime.changed();}
+  }
+}
+
 export function nextRoomStage(runtime,room){
   const run=runtime.state.workflowRuns.find(item=>item.id===room.roomWorkflowRunId);
   if(!run)return null;
@@ -47,4 +85,5 @@ export function attachRoomStage(runtime,source,destination){
   const next=nextRoomStage(runtime,source);if(!next)throw new Error('Room workflow has finished.');
   Object.assign(destination,{roomWorkflowRunId:run.id,roomWorkflowStepId:next.id,stagePrompt:stagePrompt(run,next)});
   run.roomIds.push(destination.id);run.currentStep=next.id;run.conversationId=destination.id;run.spaceId=destination.spaceId;run.status='ready';
+  delete run.error;delete run.autoAdvanceBlocked;
 }

@@ -97,7 +97,9 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     complete(first,jobs[0],'Continue without owner input'); await app.runtime.drain();
     expect(jobs[0].status).toBe('waiting'); expect(jobs[0].pending.id).toBe(requestId); expect(jobs[1].status).toBe('queued');
     await page.locator('.answer-form button').click(); await question;
-    expect(JSON.parse(first.replies.at(-1).result.contentItems[0].text).answer).toBe('Kyoto, three days');
+    await app.runtime.starting;
+    expect(first.calls.filter(call=>call.method==='turn/start').at(-1).params.input[0].text).toContain('Kyoto, three days');
+    expect(app.runtime.conversation(jobs[0]).messages.some(message=>message.role==='user'&&message.text==='Kyoto, three days')).toBe(true);
     expect(jobs[0].status).toBe('running');
 
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=','base64');

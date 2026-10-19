@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, mkdirSync, realpathSync, lstatSync, openSync, clos
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 import { validateCommand } from '../terminal.js';
 
 export const shellQuote=value=>"'"+String(value).replaceAll("'","'\\''")+"'";
@@ -22,7 +23,7 @@ export class Sandbox {
 
     this.env={PATH:process.env.PATH,DOCKER_HOST:process.env.DOCKER_HOST||(process.platform==='darwin'?`unix://${join(homedir(),'.docker/run/docker.sock')}`:'unix:///var/run/docker.sock')};
   }
-  async process(argv,{input,signal,timeoutMs=15000,limit=32768,onStop}={}){
+  async process(argv,{input,signal,timeoutMs=15000,limit=32768,onStop,truncateOutput=false}={}){
     signal?.throwIfAborted();
     return new Promise((resolve,reject)=>{
       const child=spawn(argv[0],argv.slice(1),{env:this.env,stdio:['pipe','pipe','pipe'],detached:true});
@@ -34,7 +35,8 @@ export class Sandbox {
       if(signal?.aborted)abort();
       child.stdin.on('error',()=>{});child.stdin.end(input);
       for(const [stream,chunks] of [[child.stdout,stdout],[child.stderr,stderr]])stream.on('data',chunk=>{
-        size+=chunk.length;if(size>limit){truncated=true;kill();}else chunks.push(chunk);
+        const remaining=Math.max(0,limit-size);size+=chunk.length;
+        if(chunk.length>remaining){truncated=true;if(remaining)chunks.push(chunk.subarray(0,remaining));if(!truncateOutput)kill();}else chunks.push(chunk);
       });
       const clean=()=>{clearTimeout(timer);signal?.removeEventListener('abort',abort);};
       child.once('error',()=>{clean();reject(new Error('Isolated executor unavailable.'));});
@@ -85,13 +87,14 @@ export class Sandbox {
         const base=await this.inside(worker,['git','-C','/workspace','rev-parse','HEAD'],{signal});
         if(base.exitCode===0&&/^[a-f0-9]{40}\n?$/.test(base.stdout.toString()))worker.base=base.stdout.toString().trim();
       }finally{rmSync(directory,{recursive:true,force:true});}
+      await this.prepareProjects(worker,signal);
       this.policy.authorize(job,'sandbox.exec',resourceId);signal?.throwIfAborted();
     })();
     try{await worker.ready;return worker;}catch(error){await this.docker(['rm','-f',worker.id]).catch(()=>{});if(this.workers.get(job.id)===worker)this.workers.delete(job.id);throw error;}
   }
   async inside(worker,argv,options){
     if(worker.stopped)throw new Error(stoppedWorkspace(worker));
-    const result=await this.docker(['exec','-i',worker.id,'env','-i','PATH=/usr/local/bin:/usr/bin:/bin','HOME=/tmp','GIT_CONFIG_NOSYSTEM=1','GIT_CONFIG_GLOBAL=/dev/null',...argv],options);
+    const result=await this.docker(['exec','-i',worker.id,'env','-i','PATH=/usr/local/bin:/usr/bin:/bin','HOME=/tmp','GIT_CONFIG_NOSYSTEM=1','GIT_CONFIG_GLOBAL=/dev/null','GIT_OPTIONAL_LOCKS=0',...argv],options);
     if(result.exitCode!==0&&/^Error response from daemon:.*(?:is not running|No such container)/m.test(result.stderr?.toString()||'')){worker.stopped=true;throw new Error(stoppedWorkspace(worker));}
     return result;
   }
@@ -104,13 +107,19 @@ export class Sandbox {
     const watch=setInterval(()=>{try{this.policy.authorize(job,'sandbox.exec',args.resourceId);}catch{controller.abort();}},100);
     try{
       const started=Date.now();
-      const result=await this.inside(worker,['sh','-c',`cd /workspace && ${command}`],{signal:controller.signal,timeoutMs,onStop:()=>void this.killExec(worker)});
-      if(result.timedOut||result.cancelled||result.truncated)await this.killExec(worker);
+      const result=await this.inside(worker,['sh','-c',`cd /workspace && ${command}`],{signal:controller.signal,timeoutMs,truncateOutput:true,onStop:()=>void this.killExec(worker)});
+      if(result.timedOut||result.cancelled)await this.killExec(worker);
       // Digests and usage retain an audit without persisting command literals or output secrets.
       this.policy.auditExecution(worker.context,args.resourceId,{commandSha256:createHash('sha256').update(command).digest('hex'),wallMs:Date.now()-started,stdoutBytes:result.stdout.length,stderrBytes:result.stderr.length,exitCode:result.exitCode,timedOut:result.timedOut,cancelled:result.cancelled,truncated:result.truncated});
       this.policy.authorize(job,'sandbox.exec',args.resourceId);
       return {...result,stdout:result.stdout.toString(),stderr:result.stderr.toString()+(worker.stopped?'\n'+stoppedWorkspace(worker):'')};
     }finally{clearInterval(watch);signal?.removeEventListener('abort',abort);}
+  }
+  async prepareProjects(worker,signal,required=false){
+    const code=readFileSync(join(import.meta.dir,'project-environment.js'),'utf8');
+    const result=await this.inside(worker,['bun','-e',code,required?'required':'optional'],{signal});
+    if(result.exitCode!==0)throw Error('Executor setup required: prepared npm dependencies are missing or do not match the project manifests. Rebuild the project executor; do not install packages inside a worker.');
+    if(required){const tools=await this.inside(worker,['sh','-c','node --version && npm --version'],{signal});if(tools.exitCode!==0)throw Error('Executor setup required: rebuild the executor with Node.js and npm before starting this stage.');}
   }
   async killExec(worker){
     // Kill the complete cgroup on cancellation; timeout also cannot leave descendants.
@@ -123,7 +132,7 @@ export class Sandbox {
   async gitClean(job,signal){
     const tree=await this.git(job,['ls-tree','-rz','--full-tree','HEAD'],{signal,limit:2*1024*1024});if(tree.exitCode!==0||tree.truncated)return false;
     const files=tree.stdout.toString().split('\0').filter(Boolean).map(line=>{const match=line.match(/^(100644|100755) blob ([a-f0-9]{40})\t([\s\S]+)$/);return match?{mode:match[1],oid:match[2],path:match[3]}:null;});if(files.some(file=>!file)||files.length>4096)return false;
-    const code=`const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path');const files=JSON.parse(fs.readFileSync(0,'utf8')),expected=new Set(files.map(f=>f.path));let entries=0;function walk(relative=''){for(const name of fs.readdirSync('/workspace/'+relative)){if(!relative&&name==='.git')continue;const item=relative?relative+'/'+name:name,stat=fs.lstatSync('/workspace/'+item);if(++entries>8192||stat.isSymbolicLink())process.exit(1);if(stat.isDirectory())walk(item);else if(!stat.isFile()||!expected.has(item))process.exit(1)}}walk();for(const f of files){if(f.path.split('/').some(p=>!p||p==='.'||p==='..'||p==='.git'))process.exit(1);let current='/workspace';for(const p of f.path.split('/')){current=path.join(current,p);if(fs.lstatSync(current).isSymbolicLink())process.exit(1)}const stat=fs.lstatSync(current);if(!stat.isFile()||stat.size>16777216||((stat.mode&73)!==0)!==(f.mode==='100755'))process.exit(1);const bytes=fs.readFileSync(current),oid=crypto.createHash('sha1').update('blob '+bytes.length+'\\0').update(bytes).digest('hex');if(oid!==f.oid)process.exit(1)}`;
+    const code=readFileSync(join(import.meta.dir,'project-environment.js'),'utf8')+`\nconst preparedLinks=prepareProjectEnvironment();const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path');const files=JSON.parse(fs.readFileSync(0,'utf8')),expected=new Set(files.map(f=>f.path));let entries=0;const ignored=new Set(require('node:child_process').execFileSync('git',['-C','/workspace','ls-files','--others','--ignored','--exclude-standard','--directory','-z']).toString().split('\\0').map(item=>item.replace(/\\/$/,'')));function walk(relative=''){for(const name of fs.readdirSync('/workspace/'+relative)){if(!relative&&name==='.git')continue;const item=relative?relative+'/'+name:name,stat=fs.lstatSync('/workspace/'+item);if(preparedLinks.has(item)&&stat.isSymbolicLink()&&fs.readlinkSync('/workspace/'+item)===preparedLinks.get(item))continue;if(['.next','dist','build','coverage'].includes(name)&&ignored.has(item)&&!files.some(file=>file.path.startsWith(item+'/')))continue;if(++entries>8192||stat.isSymbolicLink())process.exit(1);if(stat.isDirectory())walk(item);else if(!stat.isFile()||!expected.has(item))process.exit(1)}}walk();for(const f of files){if(f.path.split('/').some(p=>!p||p==='.'||p==='..'||p==='.git'))process.exit(1);let current='/workspace';for(const p of f.path.split('/')){current=path.join(current,p);if(fs.lstatSync(current).isSymbolicLink())process.exit(1)}const stat=fs.lstatSync(current);if(!stat.isFile()||stat.size>16777216||((stat.mode&73)!==0)!==(f.mode==='100755'))process.exit(1);const bytes=fs.readFileSync(current),oid=crypto.createHash('sha1').update('blob '+bytes.length+'\\0').update(bytes).digest('hex');if(oid!==f.oid)process.exit(1)}`;
     const result=await this.inside(this.existing(job),['bun','-e',code],{signal,input:Buffer.from(JSON.stringify(files)),limit:4096});return result.exitCode===0&&!result.truncated;
   }
   async patch(job,resourceId){
@@ -145,7 +154,7 @@ export class Sandbox {
   }
   validateCheckpointFiles(files){
     if(!Array.isArray(files)||files.length>4096)throw new Error('Checkpoint files exceed bounds.');
-    const excluded=new Set(['.env','.ssh','.codex','.aws','.docker','.npmrc','.gitconfig','.git-credentials','.netrc','auth.json','Cookies','state.sqlite','odwyn.db','odwyn.db-wal','odwyn.db-shm','sidekick.db','sidekick.db-wal','sidekick.db-shm','id_ed25519','id_rsa']);
+    const excluded=new Set(['.env','.ssh','.codex','.aws','.docker','.npmrc','.gitconfig','.git-credentials','.netrc','node_modules','auth.json','Cookies','state.sqlite','odwyn.db','odwyn.db-wal','odwyn.db-shm','sidekick.db','sidekick.db-wal','sidekick.db-shm','id_ed25519','id_rsa']);
     const paths=new Set();let bytes=0;
     for(const file of files){
       if(!file||Object.keys(file).sort().join(',')!=='data,executable,path'||typeof file.path!=='string'||file.path.length>4096||typeof file.data!=='string'||typeof file.executable!=='boolean')throw new Error('Invalid checkpoint file.');
@@ -197,11 +206,12 @@ export class Sandbox {
     await worker.ready;signal?.throwIfAborted();
     if((worker.checkpointId||null)!==expectedParent)throw new Error('Checkpoint parent conflict.');
     // Only the pinned worker executes this collector. Host parses bounded data, never an archive or script.
-    const code=`const fs=require('node:fs'),path=require('node:path');const files=[];let entries=0,bytes=0;const excluded=new Set(['.env','.ssh','.codex','.aws','.docker','.npmrc','.gitconfig','.git-credentials','.netrc','auth.json','Cookies','state.sqlite','odwyn.db','odwyn.db-wal','odwyn.db-shm','sidekick.db','sidekick.db-wal','sidekick.db-shm','id_ed25519','id_rsa']);function walk(relative=''){if(relative.split('/').length>33)throw Error('depth');for(const name of fs.readdirSync('/workspace/'+relative).sort()){const item=relative?relative+'/'+name:name;if(excluded.has(name)||name.startsWith('.env.')||name.endsWith('.pem')||name.endsWith('.key')||/^\\.git\\/(config|hooks|logs)(\\/|$)/.test(item))continue;if(++entries>4096)throw Error('entries');const target='/workspace/'+item,s=fs.lstatSync(target);if(s.isSymbolicLink())throw Error('symlink');if(s.isDirectory()){walk(item);continue}if(!s.isFile())throw Error('special file');const fd=fs.openSync(target,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);try{const stat=fs.fstatSync(fd);if(!stat.isFile()||stat.nlink!==1||stat.size>16777216-bytes)throw Error('bounded file');const data=fs.readFileSync(fd);bytes+=data.length;if(bytes>16777216)throw Error('bytes');files.push({path:item,data:data.toString('base64'),executable:!!(stat.mode&73)})}finally{fs.closeSync(fd)}}}walk();process.stdout.write(JSON.stringify(files));`;
+    const code=`const fs=require('node:fs'),path=require('node:path');const files=[];let entries=0,bytes=0;let tracked=[];try{tracked=require('node:child_process').execFileSync('git',['-C','/workspace','ls-files','-z']).toString().split('\\0')}catch{}const generated=new Set(['.next','dist','build','coverage']);const excluded=new Set(['.env','.ssh','.codex','.aws','.docker','.npmrc','.gitconfig','.git-credentials','.netrc','node_modules','auth.json','Cookies','state.sqlite','odwyn.db','odwyn.db-wal','odwyn.db-shm','sidekick.db','sidekick.db-wal','sidekick.db-shm','id_ed25519','id_rsa']);function walk(relative=''){if(relative.split('/').length>33)throw Error('depth');for(const name of fs.readdirSync('/workspace/'+relative).sort()){const item=relative?relative+'/'+name:name;if(generated.has(name)&&!tracked.some(file=>file===item||file.startsWith(item+'/')))continue;if(excluded.has(name)||name.startsWith('.env.')||name.endsWith('.pem')||name.endsWith('.key')||/^\\.git\\/(config|hooks|logs)(\\/|$)/.test(item))continue;if(++entries>4096)throw Error('entries');const target='/workspace/'+item,s=fs.lstatSync(target);if(s.isSymbolicLink())throw Error('symlink');if(s.isDirectory()){walk(item);continue}if(!s.isFile())throw Error('special file');const fd=fs.openSync(target,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);try{const stat=fs.fstatSync(fd);if(!stat.isFile()||stat.nlink!==1||stat.size>16777216-bytes)throw Error('bounded file');const data=fs.readFileSync(fd);bytes+=data.length;if(bytes>16777216)throw Error('bytes');files.push({path:item,data:data.toString('base64'),executable:!!(stat.mode&73)})}finally{fs.closeSync(fd)}}}walk();process.stdout.write(JSON.stringify(files));`;
     const result=await this.inside(worker,['bun','-e',code],{signal,limit:24*1024*1024});
     if(result.exitCode!==0||result.truncated||result.timedOut||result.cancelled)throw new Error('Bounded checkpoint export unavailable.');
     const files=this.validateCheckpointFiles(JSON.parse(result.stdout.toString()));
     this.policy.authorize(job,'sandbox.exec',resourceId);signal?.throwIfAborted();
+    if(expectedParent){const parent=await this.loadCheckpoint(job,resourceId,expectedParent);if(parent.base===(worker.base||null)&&isDeepStrictEqual(parent.files,files))return parent;}
     return this.checkpointWrite({version:1,spaceId:context.spaceId,resourceId,parentId:expectedParent,base:worker.base||null,createdAt:new Date().toISOString(),files});
   }
   async restore(job,resourceId,id,signal){
@@ -214,6 +224,7 @@ export class Sandbox {
       const code=`const fs=require('node:fs'),path=require('node:path');const files=JSON.parse(fs.readFileSync(0,'utf8'));for(const file of files){const target=path.join('/workspace',file.path);fs.mkdirSync(path.dirname(target),{recursive:true,mode:448});fs.writeFileSync(target,Buffer.from(file.data,'base64'),{flag:'wx',mode:file.executable?448:384})}`;
       const result=await this.inside(worker,['bun','-e',code],{input:JSON.stringify(checkpoint.files),signal});
       if(result.exitCode!==0||result.truncated||result.timedOut||result.cancelled)throw new Error('Checkpoint restore failed.');
+      await this.prepareProjects(worker,signal);
       this.policy.authorize(job,'sandbox.exec',resourceId);signal?.throwIfAborted();
     })();
     try{await worker.ready;return worker;}catch(error){await this.stop(job.id);throw error;}

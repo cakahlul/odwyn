@@ -147,7 +147,11 @@ export class AIProvider extends EventEmitter {
       this.thread = { ...params, id: params.threadId || randomUUID(), resume: method === 'thread/resume' };
       return { thread: { id: this.thread.id } };
     }
-    if (method === 'turn/interrupt') { this.stop(); return {}; }
+    if (method === 'turn/interrupt') {
+      const run=this.run;this.stop();
+      if(run)this.emit('notification',{method:'turn/completed',params:{threadId:run.thread.id,turnId:run.id,turn:{id:run.id,status:'interrupted'}}});
+      return {};
+    }
     if (method !== 'turn/start') throw new Error('Unsupported provider operation.');
     if (this.run || !this.thread || params.threadId !== this.thread.id) throw new Error('Provider conversation is unavailable.');
     const run = { id: randomUUID(), thread: this.thread, controller: new AbortController(), config: { ...this.config } };

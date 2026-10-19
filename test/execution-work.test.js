@@ -4,7 +4,7 @@ const id=n=>String(n).padStart(64,'0');
 function fixture(){
   const job={id:'task',agentId:'engineer',spaceId:'space',conversationId:'room',roomRoundId:'round',status:'running'},room={id:'room',kind:'room',spaceId:'space',memberIds:['engineer','qa','observer'],governance:{observerIds:['observer']},discussion:{id:'round',status:'active'}},calls=[];
   const state={conversations:[room],jobs:[job],executionHeads:{},checkpoints:[]},workers=new Map();
-  const runtime={state,active:job,executions:new Set(),store:{security:{context:task=>({spaceId:task.spaceId,agentId:task.agentId}),authorize(){calls.push('authorize');}},data:{roomCheck(){},assertHandoff(task,ids){calls.push(['handoff',...ids]);},readExport(task,exportId){calls.push(['export',exportId]);return {};},note(){}},connectors:{redact:value=>String(value).replaceAll('SECRET','[redacted]'),assertNoSecret(){}}},changed(){calls.push('changed');},event(){},conversation(){return room;},sandbox:{workers,async stop(taskId){workers.delete(taskId);calls.push(['stop',taskId]);},async worker(task,resourceId){if(workers.has(task.id))return workers.get(task.id);const worker={resourceId,checkpointId:null};workers.set(task.id,worker);return worker;},async restore(task,resourceId,checkpointId){const worker={resourceId,checkpointId};workers.set(task.id,worker);calls.push(['restore',checkpointId]);return worker;},async checkpoint(task,resourceId,{expectedParent}){return {id:id(2),spaceId:task.spaceId,resourceId,parentId:expectedParent,files:[{path:'private',data:'SECRET'}],createdAt:'now'};},async run(){return {stdout:'ok SECRET',stderr:'',exitCode:0};}}};
+  const runtime={state,active:job,executions:new Set(),store:{security:{context:task=>({spaceId:task.spaceId,agentId:task.agentId}),authorize(){calls.push('authorize');}},data:{roomCheck(){},assertCurrentSources(){},assertHandoff(task,ids){calls.push(['handoff',...ids]);},readExport(task,exportId){calls.push(['export',exportId]);return {};},note(){}},connectors:{redact:value=>String(value).replaceAll('SECRET','[redacted]'),assertNoSecret(){}}},changed(){calls.push('changed');},event(){},conversation(){return room;},sandbox:{workers,async stop(taskId){workers.delete(taskId);calls.push(['stop',taskId]);},async worker(task,resourceId){if(workers.has(task.id))return workers.get(task.id);const worker={resourceId,checkpointId:null};workers.set(task.id,worker);return worker;},async restore(task,resourceId,checkpointId){const worker={resourceId,checkpointId};workers.set(task.id,worker);calls.push(['restore',checkpointId]);return worker;},async checkpoint(task,resourceId,{expectedParent}){return {id:id(2),spaceId:task.spaceId,resourceId,parentId:expectedParent,files:[{path:'private',data:'SECRET'}],createdAt:'now'};},async run(){return {stdout:'ok SECRET',stderr:'',exitCode:0};}}};
   function checkpoint(checkpointId=id(1)){const record={id:checkpointId,resourceId:'resource',spaceId:'space',taskId:'prior'};state.checkpoints.push(record);state.executionHeads.resource=checkpointId;return record;}
   return {runtime,state,job,room,calls,checkpoint};
 }
@@ -58,7 +58,8 @@ test('concurrent checkpoint conflict preserves losing immutable work without ove
   const f=fixture();f.checkpoint();await ensureTaskWorkspace(f.runtime,f.job,'resource');
   f.runtime.sandbox.checkpoint=async()=>{f.state.executionHeads.resource=id(3);return {id:id(2),resourceId:'resource',spaceId:'space',files:[]};};
   await expect(saveTaskCheckpoint(f.runtime,f.job,{resourceId:'resource'})).rejects.toThrow(id(2));
-  expect(f.state.executionHeads.resource).toBe(id(3));expect(f.room.checkpoints[0].conflict).toBe(true);expect(f.job.workspacePin.headId).toBe(id(1));
+  expect(f.state.executionHeads.resource).toBe(id(3));expect(f.room.checkpoints[0].conflict).toBe(true);expect(f.job.workspacePin.headId).toBe(id(2));
+  expect(f.job.checkpointConflict).toEqual({resourceId:'resource',checkpointId:id(2),currentHeadId:id(3)});
 });
 
 test('transferred checkpoint provenance uses revocable export and rejects missing records',async()=>{
@@ -100,10 +101,20 @@ test('case definitions reject observers, unknown fields, missing dependencies an
   expect(()=>defineRoomCase(f.runtime,f.job,{title:'c',passed:true})).toThrow();expect(()=>defineRoomCase(f.runtime,{...f.job,agentId:'observer'},{title:'c'})).toThrow();
 });
 
-test('head conflicts already present before export retain immutable work and dirty pin',async()=>{
+test('head conflicts retain immutable work and pin it without overwriting the winner',async()=>{
   const f=fixture();f.checkpoint();await ensureTaskWorkspace(f.runtime,f.job,'resource');f.job.workspaceDirty=true;f.state.executionHeads.resource=id(3);
   await expect(saveTaskCheckpoint(f.runtime,f.job,{resourceId:'resource'})).rejects.toThrow(id(2));
-  expect(f.state.executionHeads.resource).toBe(id(3));expect(f.job.workspaceDirty).toBe(true);expect(f.room.checkpoints[0].conflict).toBe(true);
+  expect(f.state.executionHeads.resource).toBe(id(3));expect(f.job.workspaceDirty).toBe(false);expect(f.room.checkpoints[0].conflict).toBe(true);
+});
+
+test('read-only inspection preserves checkpoint identity, evidence and a newer head',async()=>{
+  const f=fixture(),record=f.checkpoint();await ensureTaskWorkspace(f.runtime,f.job,'resource');
+  f.room.cases=[{id:'case',status:'passed',checkpointId:id(1)}];f.job.workspaceDirty=true;
+  f.runtime.sandbox.checkpoint=async()=>({id:id(1)});
+  f.state.executionHeads.resource=id(3);
+  expect(await saveTaskCheckpoint(f.runtime,f.job,{resourceId:'resource'})).toBe(record);
+  expect(f.state.executionHeads.resource).toBe(id(3));expect(f.room.targetCheckpointId).toBe(id(1));
+  expect(f.room.cases[0].status).toBe('passed');expect(f.job.workspaceDirty).toBe(false);expect(f.state.checkpoints).toHaveLength(1);
 });
 
 test('stale test evidence does not pass a revised case or a newer checkpoint',async()=>{

@@ -54,7 +54,14 @@ export function validateWorkflow(input,state) {
       result.responseItems=key(step.responseItems || 'items');
       if(step.type==='agent') result.format='json';
     }
-    if(step.type==='room'){result.room=validateRoomConfig(state,step.room||{});if(!result.room.governance)throw new Error('Room stages require explicit roles and review gates.');}
+    if(step.type==='room'){
+      result.room=validateRoomConfig(state,step.room||{});if(!result.room.governance)throw new Error('Room stages require explicit roles and review gates.');
+      if(step.workspaceResourceId!==undefined){
+        const resource=state[statePolicy].resource(step.workspaceResourceId);
+        if(resource.type!=='workspace'||resource.metadata.isolatedWorkspaceIds||resource.spaceId!==result.room.spaceId)throw Error('Choose an execution workspace in the stage Space.');
+        result.workspaceResourceId=resource.id;
+      }
+    }
     if(step.type==='approval') result.options=structuredClone(step.options || []);
     if (step.type==='browser' || step.type==='terminal') {
       if (!step.action || Array.isArray(step.action) || typeof step.action!=='object') throw new Error('Add action parameters.');
@@ -73,7 +80,8 @@ export function validateWorkflow(input,state) {
   if (!ids.has(start) || steps.some(s=>s.next!==null && !ids.has(s.next) || s.type==='condition' && s.otherwise!==null && !ids.has(s.otherwise))) throw new Error('Connections must point to an existing step or Finish.');
   const maxSteps = input.maxSteps ?? 100;
   if (!Number.isInteger(maxSteps) || maxSteps<1 || maxSteps>1000) throw new Error('Execution limit must be between 1 and 1,000 steps.');
-  return {id,name:textInput(input.name,80),command,description:optionalText(input.description,500),inputs,steps,start,maxSteps,updatedAt:new Date().toISOString()};
+  if(input.autoAdvance!==undefined&&typeof input.autoAdvance!=='boolean')throw Error('Choose an automatic stage transition mode.');
+  return {id,name:textInput(input.name,80),command,description:optionalText(input.description,500),inputs,steps,start,maxSteps,autoAdvance:input.autoAdvance===true,updatedAt:new Date().toISOString()};
 }
 export function pathValue(path,context) {
   let value=context;

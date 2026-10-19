@@ -10,19 +10,20 @@ import {validateWorkflow} from '../workflows.js';
 import {roomCompletion,checkSnapshot} from '../public/room-policy.js';
 class Agent extends EventEmitter{child={};replies=[];calls=[];async request(method,params){this.calls.push({method,params});if(method==='account/read')return {account:{type:'chatgpt'}};if(method.startsWith('thread/'))return {thread:{id:params.threadId||randomUUID()}};return {turn:{id:randomUUID()}};}respond(id,reply){this.replies.push(reply);}reject(){}}
 
-for(const names of [['Grooming','Planning','Execution','Testing','Release'],['Research','Editorial review']])test(`room workflow runs ${names.join(' → ')} with explicit owner handoffs`,async()=>{
+for(const autoAdvance of [false,true])for(const names of [['Grooming','Planning','Execution','Testing','Release'],['Research','Editorial review']])test(`room workflow runs ${names.join(' → ')} with ${autoAdvance?'automatic':'explicit owner'} handoffs`,async()=>{
   const directory=mkdtempSync(join(tmpdir(),'odwyn-stages-')),store=openStore(directory),primary=store.state.agents[0].id;
   store.state.agents.push({id:'peer'});const runtime=new Runtime({store,codex:new Agent(),browser:{},workspace:directory});runtime.addProvider('peer',new Agent());
   const call=async(tool,args)=>{const job=runtime.active,p=runtime.providers.get(job.agentId);await runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool,arguments:args}});const reply=p.replies.at(-1);if(!reply.success)throw Error(reply.contentItems[0].text);return JSON.parse(reply.contentItems[0].text);};
   try{
     await runtime.refreshAccount();await runtime.refreshAccount('peer');
     const definition={name:'Stage flow',command:'stages',inputs:[{name:'goal',required:true}],steps:names.map((name,i)=>({id:`stage-${i}`,name,type:'room',prompt:`${name}: {{inputs.goal}}`,room:{title:name,spaceId:store.security.legacySpaceId,memberIds:[primary,'peer'],governance:{facilitatorId:primary,reviewerIds:[primary],ownerApproval:name==='Planning',outputs:[{id:'package',title:`${name} package`,agentId:'peer'}]}}}))};
+    definition.autoAdvance=autoAdvance;
     const workflow=validateWorkflow(definition,store.state);store.state.workflows.push(workflow);
     expect(()=>runtime.launchWorkflow(workflow,{inputs:{}})).toThrow('required');
     const count=store.state.conversations.length;expect(()=>runtime.launchWorkflow({...workflow,steps:workflow.steps.map(step=>({...step,prompt:'{{steps.unselected}}'}))},{inputs:{goal:'test'}})).toThrow('Unavailable');expect(store.state.conversations).toHaveLength(count);
     const first=runtime.launchWorkflow(workflow,{inputs:{goal:'Build a reviewed result'}});await runtime.drain();
     const run=store.state.workflowRuns[0];let room=runtime.conversation(first),previousArtifact;
-    await runtime.cancelRoom(room.id);recoverJobs(store.state);expect(run.status).toBe('interrupted');const stopped=store.state.jobs.find(job=>job.conversationId===room.id&&['interrupted','cancelled'].includes(job.status));runtime.retry(stopped.id);await runtime.drain();expect(run.status).toBe('running');
+    await runtime.cancelRoom(room.id);recoverJobs(store.state);expect(run.status).toBe('interrupted');const stopped=store.state.jobs.find(job=>job.conversationId===room.id&&job.agentId===primary&&['interrupted','cancelled'].includes(job.status));runtime.retry(stopped.id);await runtime.drain();expect(run.status).toBe('running');
     for(let i=0;i<names.length;i++){
       expect(room.title).toBe('Build a reviewed result · '+names[i]);expect(room.discussion.goal).toContain('Build a reviewed result');
       const provider=runtime.providers.get(runtime.active.agentId),instructions=provider.calls.findLast(call=>call.method.startsWith('thread/')).params.developerInstructions;
@@ -45,11 +46,16 @@ for(const names of [['Grooming','Planning','Execution','Testing','Release'],['Re
       const proposalId=room.discussion.outcome.id;await call('odwyn_room_review',{proposalId,decision:'approve',summary:'Reviewed current result'});
       await call('odwyn_room_next',{agentId:'peer',reason:'Confirm final package'});runtime.finish(runtime.active,'completed');await runtime.drain();
       await call('odwyn_room_done',{proposalId,summary:'Confirmed exact reviewed package'});runtime.finish(runtime.active,'completed');await runtime.drain();
-      if(names[i]==='Planning'){expect(room.discussion.status).toBe('awaiting_owner');expect(run.status).toBe('running');runtime.decideRoom(room.id,{proposalId,decision:'approve'});}
+      if(names[i]==='Planning'){expect(room.discussion.status).toBe('awaiting_owner');expect(run.status).toBe('waiting');runtime.decideRoom(room.id,{proposalId,decision:'approve'});}
       expect(room.discussion.status).toBe('completed');
       if(i+1<names.length){
         expect(run.status).toBe('awaiting_handoff');
         const input={room:run.workflow.steps[i+1].room,artifactIds:[artifact.id],openQuestions:''};
+        if(autoAdvance){
+          await runtime.advanceRoomWorkflows();await runtime.drain();previousArtifact=artifact;
+          room=store.state.conversations.find(item=>item.id===run.conversationId);
+          expect(room.discussion.status).toBe('active');continue;
+        }
         const next=await runtime.handoffRoom(room.id,input);expect(next.discussion).toBeUndefined();expect(run.status).toBe('ready');
         previousArtifact=artifact;
         expect((await runtime.handoffRoom(room.id,input)).id).toBe(next.id);

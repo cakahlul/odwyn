@@ -19,7 +19,11 @@ function provenance(runtime,job,resourceId,id){
   try{
     if(!record)throw new Error('Checkpoint provenance unavailable.');
     if(record.exportId)runtime.store.data.readExport(job,record.exportId);
-    else if(record.taskId)runtime.store.data.assertHandoff(job,[record.taskId]);
+    else if(record.taskId){
+      const worker=runtime.sandbox.workers.get(job.id);
+      if(record.taskId===job.id&&worker&&!worker.stopped)runtime.store.data.assertCurrentSources(job);
+      else runtime.store.data.assertHandoff(job,[record.taskId]);
+    }
     else throw new Error('Checkpoint provenance unavailable.');
   }catch(error){
     try{runtime.store.data.checkpointDenied(job,resourceId,id,record,error);}catch{}
@@ -71,10 +75,19 @@ export async function saveTaskCheckpoint(runtime,job,input){
   if(controller.signal.aborted)throw new Error('Checkpoint save cancelled.');
   activeTask(job);if(room)workingRoom(runtime,job);
   runtime.store.security.authorize(job,'sandbox.exec',resourceId);runtime.store.data.roomCheck(job);
+  if(saved.id===pin.headId){
+    job.workspaceDirty=false;runtime.changed();
+    if(job.checkpointConflict&&head(runtime,resourceId)!==pin.headId)throw Error(`Checkpoint conflict. Work retained as ${saved.id}. Stop the room and use its checkpoint selector before resuming.`);
+    return provenance(runtime,job,resourceId,saved.id);
+  }
   const conflict=before!==pin.headId||head(runtime,resourceId)!==pin.headId;
   const record={id:saved.id,spaceId:job.spaceId,resourceId,parentId:pin.headId,taskId:job.id,agentId:job.agentId,label,createdAt:saved.createdAt,...(conflict?{conflict:true}:{})};
   (runtime.state.checkpoints ||= []).push(record);if(room)(room.checkpoints ||= []).push(record);
-  if(conflict){runtime.changed();throw new Error(`Checkpoint conflict. Saved work as ${record.id}; choose and resolve the current head explicitly.`);}
+  if(conflict){
+    pin.headId=record.id;runtime.sandbox.workers.get(job.id).checkpointId=record.id;job.workspaceDirty=false;
+    job.checkpointConflict={resourceId,checkpointId:record.id,currentHeadId:head(runtime,resourceId)};
+    runtime.changed();throw new Error(`Checkpoint conflict. Work retained as ${record.id}. Stop the room and use its checkpoint selector before resuming.`);
+  }
   runtime.state.executionHeads ||= {};runtime.state.executionHeads[resourceId]=record.id;
   pin.headId=record.id;runtime.sandbox.workers.get(job.id).checkpointId=record.id;job.workspaceDirty=false;
   adopt(room,record.id);runtime.changed();return record;

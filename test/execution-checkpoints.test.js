@@ -35,7 +35,7 @@ test('checkpoints survive worker removal and restore exact scoped immutable file
 });
 
 test('terminated commands identify a stopped workspace and block reuse until explicit restore',async()=>{
-  for(const flag of ['truncated','timedOut','cancelled']){
+  for(const flag of ['timedOut','cancelled']){
     const {sandbox,clean}=fixture();
     try{
       sandbox.workers.get(job.id).checkpointId='c'.repeat(64);
@@ -48,6 +48,19 @@ test('terminated commands identify a stopped workspace and block reuse until exp
       expect(sandbox.workers.has(job.id)).toBe(true);
     }finally{clean();}
   }
+});
+
+test('output truncation bounds diagnostics without destroying saved or unsaved work',async()=>{
+  const {sandbox,clean}=fixture();
+  try{
+    const result=await sandbox.process(['sh','-c','printf 123456789; exit 0'],{limit:4,truncateOutput:true});
+    expect(result.exitCode).toBe(0);expect(result.truncated).toBe(true);expect(result.stdout.toString()).toBe('1234');
+    sandbox.policy.auditExecution=()=>{};
+    sandbox.inside=async()=>({...result,stderr:Buffer.alloc(0)});
+    await sandbox.run(job,{resourceId:'repo-a',command:'true',reason:'test'});
+    expect(sandbox.workers.get(job.id).stopped).toBeUndefined();
+    expect(await sandbox.worker(job,'repo-a')).toBeTruthy();
+  }finally{clean();}
 });
 
 test('Docker reports for stopped or missing containers provide checkpoint recovery instead of stale reuse',async()=>{
@@ -68,6 +81,9 @@ test('checkpoint parent conflicts and authorization failures preserve previous c
     const first=await sandbox.checkpoint(job,'repo-a');
     await sandbox.stop(job.id);await sandbox.restore({...job,id:'task-b'},'repo-a',first.id);
     await expect(sandbox.checkpoint({...job,id:'task-b'},'repo-a')).rejects.toThrow('parent');
+    const unchanged=await sandbox.checkpoint({...job,id:'task-b'},'repo-a',{expectedParent:first.id});
+    expect(unchanged.id).toBe(first.id);
+    sandbox.payload[0].executable=true;
     const next=await sandbox.checkpoint({...job,id:'task-b'},'repo-a',{expectedParent:first.id});
     expect(next.parentId).toBe(first.id);
     await expect(sandbox.loadCheckpoint({...job,denied:true},'repo-a',first.id)).rejects.toThrow('Denied');

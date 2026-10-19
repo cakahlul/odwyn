@@ -22,6 +22,68 @@ class FakeCodex extends EventEmitter {
   reject() {}
 }
 
+for(const completedFirst of [true,false])test(`owner answer starts a continuation when completion arrives ${completedFirst?'before':'after'} the answer`, async () => {
+  const dir=mkdtempSync(join(tmpdir(),'odwyn-ended-question-')),store=openStore(dir),codex=new FakeCodex();
+  const runtime=new Runtime({store,codex,browser:{},workspace:dir});
+  try {
+    await runtime.refreshAccount();const job=runtime.submit({prompt:'Prepare the change'});await runtime.drain();
+    const question=runtime.handleRequest({id:1,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_ask',arguments:{question:'Which project?'}}});
+    await Bun.sleep(1);
+    const complete=()=>codex.emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:job.turnId,status:'completed'}}});
+    if(completedFirst)complete();
+    const requestId=job.pending.id;
+    runtime.answer(job.id,{requestId,answer:'Use the existing project.'});
+    if(!completedFirst)complete();
+    await question;await runtime.starting;
+    expect(codex.calls.filter(c=>c.method==='turn/start')).toHaveLength(2);
+    expect(codex.calls.filter(c=>c.method==='turn/start').at(-1).params.input[0].text).toContain('Use the existing project.');
+    expect(runtime.conversation(job).messages.at(-1)).toMatchObject({role:'user',text:'Use the existing project.'});
+    expect(()=>runtime.answer(job.id,{requestId,answer:'Duplicate'})).toThrow();
+    expect(job.status).toBe('running');
+  } finally {await runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('multiple native owner questions resume once and ignore stale completion events',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'odwyn-native-questions-')),store=openStore(dir),codex=new FakeCodex();
+  const runtime=new Runtime({store,codex,browser:{},workspace:dir});
+  try{
+    await runtime.refreshAccount();const job=runtime.submit({prompt:'Clarify two details'});await runtime.drain();
+    const request=runtime.handleRequest({id:1,method:'tool/requestUserInput',params:{threadId:job.threadId,turnId:job.turnId,questions:[{id:'one',header:'One',question:'First?'},{id:'two',header:'Two',question:'Second?'}]}});
+    await Bun.sleep(1);
+    codex.emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:'stale-turn',status:'completed'}}});
+    expect(job.providerTurnEnded).toBeUndefined();
+    codex.emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:job.turnId,status:'completed'}}});
+    runtime.answer(job.id,{requestId:job.pending.id,answer:'First answer'});await Bun.sleep(1);
+    runtime.answer(job.id,{requestId:job.pending.id,answer:'Second answer'});await request;await runtime.starting;
+    expect(codex.calls.filter(c=>c.method==='turn/start')).toHaveLength(2);
+    const input=codex.calls.filter(c=>c.method==='turn/start').at(-1).params.input[0].text;
+    expect(input).toContain('First answer');expect(input).toContain('Second answer');
+  }finally{await runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('workflow tool budgets continue once and conflicted peers cannot be resumed indirectly',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'odwyn-budget-')),store=openStore(dir),codex=new FakeCodex();
+  const runtime=new Runtime({store,codex,browser:{},workspace:dir});store.state.agents.push({id:'peer'});runtime.addProvider('peer',new FakeCodex());
+  try{
+    await runtime.refreshAccount();await runtime.refreshAccount('peer');const primary=store.state.agents[0].id;
+    const job=runtime.launchWorkflow({name:'Budget',command:'budget',inputs:[],steps:[{id:'execute',type:'room',prompt:'Implement',room:{title:'Execution',spaceId:store.security.legacySpaceId,memberIds:[primary,'peer'],governance:{facilitatorId:primary}}}]},{inputs:{}});await runtime.drain();
+    const room=runtime.conversation(job),discussion=room.discussion;
+    const request=codex.request.bind(codex);codex.request=async(method,params)=>{
+      if(method==='turn/interrupt')codex.emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:job.turnId,status:'interrupted'}}});
+      return request(method,params);
+    };
+    job.toolCount=120;
+    await Promise.all([1,2,3].map(id=>runtime.handleRequest({id,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_room_read',arguments:{}}})));
+    await Bun.sleep(1);await runtime.starting;
+    expect(codex.calls.filter(c=>c.method==='turn/interrupt')).toHaveLength(1);
+    expect(codex.calls.filter(c=>c.method==='turn/start')).toHaveLength(2);
+    expect(room.discussion).toBe(discussion);expect(job.status).toBe('running');expect(job.toolCountOffset).toBe(123);
+    await runtime.cancelRoom(room.id);job.checkpointConflict={resourceId:'code',checkpointId:'saved'};
+    const peer=store.state.jobs.find(item=>item.agentId==='peer'),count=store.state.jobs.length;
+    expect(()=>runtime.retry(peer.id)).toThrow('checkpoint');expect(store.state.jobs).toHaveLength(count);
+  }finally{await runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('skill commands stay visible while the provider receives snapshotted instructions', async () => {
   const dir=mkdtempSync(join(tmpdir(),'odwyn-skill-chat-')),store=openStore(dir),codex=new FakeCodex();
   const runtime=new Runtime({store,codex,browser:{},workspace:dir});
@@ -333,9 +395,19 @@ test('room goals continue automatically, require everyone to verify completion, 
     expect(store.state.jobs.filter(j=>j.roomRoundId===room.discussion.id)).toHaveLength(30);
     expect(store.state.jobs.some(j=>['running','queued'].includes(j.status))).toBe(false);
     const paused = store.state.jobs[0]; expect(paused.status).toBe('interrupted');
+    const messagesBeforeRetry = structuredClone(room.messages);
+    const discussionBeforeRetry=room.discussion;
     const resumed = runtime.retry(paused.id); await runtime.drain();
     expect(resumed.recovering).toBe(true); expect(resumed.prompt).toBe('Keep researching');
-    expect(room.discussion.status).toBe('active'); expect(room.discussion.round).toBe(1);
+    expect(room.messages).toEqual(messagesBeforeRetry);
+    const resumedInput = runtime.providers.get(resumed.agentId).calls.filter(c=>c.method==='turn/start').at(-1).params.input[0].text;
+    expect(resumedInput).toStartWith('Continue the shared goal from current progress and owner updates.');
+    expect(resumedInput).toContain('This run resumes interrupted work.');
+    expect(room.discussion.status).toBe('active'); expect(room.discussion).toBe(discussionBeforeRetry);
+    expect(resumed.agentId).toBe(paused.agentId);expect(resumed.roomRoundId).toBe(paused.roomRoundId);
+    await complete();await complete();
+    expect(room.discussion.round).toBeGreaterThan(discussionBeforeRetry.round-1);
+    expect(store.state.jobs.some(j=>j.roomRoundId===room.discussion.id&&['queued','running'].includes(j.status))).toBe(true);
     await runtime.cancelRoom(room.id);
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true});}
 });
@@ -548,8 +620,10 @@ test('parallel tools keep distinct owner prompts and active cancellation wins th
     };
     await runtime.cancel(job.id);
     expect(job.status).toBe('cancelled'); expect(runtime.active).toBe(null);
+    const messagesBeforeRetry = structuredClone(runtime.conversation(job).messages);
     const retry = runtime.retry(job.id); await runtime.drain();
     expect(retry.recovering).toBe(true); expect(job.status).toBe('resumed');
+    expect(runtime.conversation(retry).messages).toEqual(messagesBeforeRetry);
     expect(() => runtime.retry(job.id)).toThrow();
   } finally { runtime.close(); store.close(); rmSync(dir, { recursive: true }); }
 });
