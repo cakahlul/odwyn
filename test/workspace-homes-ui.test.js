@@ -70,7 +70,7 @@ test('create and switch homes, preserve drafts, link settings, and scope downloa
     await page.locator('#security-password').fill(options.password);
     const shared=page.waitForResponse(response=>response.url().includes('/api/workspaces/share') && response.request().postData()?.includes('"kind":"provider"'));
     await page.getByRole('button',{name:'Confirm exact request',exact:true}).click();expect((await shared).status()).toBe(200);
-    await page.locator('#settings-dialog .modal-top button').click();
+    await page.getByRole('button',{name:'Close settings',exact:true}).click();
     await page.locator('#workspace-home').click();await page.locator('[data-workspace-id=default]').click();await page.waitForURL(url=>!url.search);
     await page.waitForFunction(()=>document.querySelector('#prompt').value==='Home draft');
     await page.locator('#workspace-home').click();await page.locator(`[data-workspace-id="${id}"]`).click();await page.waitForURL('**/?workspace=*');
@@ -79,14 +79,17 @@ test('create and switch homes, preserve drafts, link settings, and scope downloa
     await page.waitForFunction(()=>document.documentElement.dataset.navigation==='sidebar');
     for(const width of [320,768,1440]) {
       await page.setViewportSize({width,height:900});
-      if(width===320 && !await page.locator('html').evaluate(node=>node.classList.contains('sidebar-collapsed')))await page.locator('#sidebar-collapse').click();
+      if(width===320)await page.waitForFunction(()=>document.documentElement.classList.contains('sidebar-collapsed'));
       expect(await page.locator('.topbar').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
+      if(!await page.locator('#workspace-home').isVisible()) await page.locator('#conversation-menu-open').click();
       expect(await page.locator('#workspace-home').isVisible()).toBe(true);
       await page.locator('#workspace-home').focus();await page.keyboard.press('Enter');await page.locator('#workspace-menu').waitFor({state:'visible'});
       expect(await page.locator('#workspace-home').getAttribute('aria-expanded')).toBe('true');
       const bounds=await page.locator('#workspace-menu').boundingBox();expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.x+bounds.width).toBeLessThanOrEqual(width);
       await page.keyboard.press('Escape');expect(await page.locator('#workspace-menu').isVisible()).toBe(false);
+      await page.locator('#conversation-menu-open').click();
       expect(await page.locator('#new-room-top').isVisible()).toBe(true);
+      await page.keyboard.press('Escape');
       if(width===320)await page.screenshot({path:'/tmp/odwyn-workspace-mobile.png'});
     }
     await page.locator('#settings-open').click();await page.locator('[data-settings-section=workspaces]').click();

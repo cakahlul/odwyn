@@ -1,5 +1,5 @@
 import { $, api, toast, esc, handleError } from './ui.js';
-import { defaults, resolveProfile, ownerPreferenceKeys, palettes, choices, paletteDetails, materialDefaults, customColorKeys, appearanceVars, validateAppearance, specializations, avatarSvg, sampleReply, validateProfile } from './profile.js';
+import { defaults, resolveProfile, ownerPreferenceKeys, palettes, choices, avatarPresets, paletteDetails, materialDefaults, customColorKeys, appearanceVars, validateAppearance, specializations, avatarSvg, sampleReply, validateProfile } from './profile.js';
 
 let getState, saved, providerDraft = () => undefined, step = 0, firstRun = false, adding = false, editingId = null, lastApplied = '', appearanceOnly = false;
 const toneDetails = {warm:'Friendly, thoughtful, plainspoken.',crisp:'The answer first. Keep it short.',playful:'A little wit, plenty of useful work.',formal:'Courteous, precise, professional.',patient:'Calm explanations, one step at a time.',coach:'Practical next steps and encouragement.'};
@@ -18,7 +18,7 @@ export function applyProfile(profile, appearance = {}, owner = {}) {
   const p = resolveProfile(profile,appearance,owner), signature = JSON.stringify([p,appearance,owner]);
   if (signature === lastApplied) return;
   lastApplied = signature;
-  document.documentElement.dataset.navigation = appearance.navigation || 'dock';
+  document.documentElement.dataset.navigation = appearance.navigation || 'sidebar';
   document.documentElement.dataset.dockAutoHide = String(appearance.dockAutoHide || false);
   document.documentElement.style.setProperty('--dock-scale',(appearance.dockSize ?? 100) / 100);
   setAppearance(document.documentElement,{...appearance,palette:p.palette,customColors:profile?.overrideWorkspace ? {} : appearance.customColors});
@@ -51,7 +51,8 @@ function preview() {
   $('#preview-specialty').textContent = p.specialization || 'General assistant';
   $('#preview-reply').textContent = sampleReply(p);
   $('#preview-mascot').innerHTML = avatarSvg(p);
-  document.querySelectorAll('#avatar-choices label').forEach(label=>label.querySelector('span').innerHTML=avatarSvg({...p,shape:label.querySelector('input').value}));
+  document.querySelectorAll('#agent-appearance-controls .avatar-option').forEach(label=>{ const input=label.querySelector('input'); label.querySelector('span').innerHTML=avatarSvg({...p,[input.name]:input.value}); });
+  document.querySelectorAll('[data-avatar-preset]').forEach(button=>button.setAttribute('aria-pressed',String(Object.entries(avatarPresets[button.dataset.avatarPreset]).every(([key,value])=>key==='label' || draft[key]===value))));
   document.querySelectorAll('[data-specialty]').forEach(button=>button.setAttribute('aria-pressed',String(p.specialization === specializations[button.dataset.specialty])));
 }
 
@@ -127,7 +128,7 @@ function previewWorkspaceAppearance() {
 export function fillWorkspaceAppearance(appearance = {}) {
   $('#preferences-form').elements.namedItem('workspacePalette').value = appearance.palette || defaults.palette;
   $('#settings-motion').value = appearance.motion || defaults.motion;
-  $('#preferences-form').elements.namedItem('workspaceNavigation').value = appearance.navigation || 'dock';
+  $('#preferences-form').elements.namedItem('workspaceNavigation').value = appearance.navigation || 'sidebar';
   $('#dock-size').value = appearance.dockSize ?? 100;
   $('#dock-auto-hide').checked = appearance.dockAutoHide || false;
   $('#appearance-custom-colors').checked = !!Object.keys(appearance.customColors || {}).length;
@@ -148,7 +149,14 @@ export function setupCustomization(state, onSaved, readProvider = () => undefine
   }
   for (const [id,name] of [['palette-choices','palette'],['settings-palette-choices','workspacePalette']]) $(`#${id}`).innerHTML = Object.entries(palettes).map(([value,p])=>`<label class="palette-option"><input type="radio" name="${name}" value="${value}"><svg viewBox="0 0 96 32" aria-hidden="true">${p.colors.map((color,i)=>`<rect x="${i*32}" width="32" height="32" fill="${color}"/>`).join('')}</svg><span><strong>${p.name}</strong><small>${paletteDetails[value]}</small></span></label>`).join('');
   $('#avatar-choices').innerHTML = Object.entries(choices.shape).map(([value,name])=>`<label class="avatar-option"><input type="radio" name="shape" value="${value}"><span></span><strong>${name}</strong></label>`).join('');
-  for (const key of ['eyes','mouth','accessory','motion','language','detail']) $(`#customize-form select[name="${key}"]`).innerHTML = Object.entries(choices[key]).map(([value,name])=>`<option value="${value}">${name}</option>`).join('');
+  for (const key of ['eyes','mouth','accessory']) $(`#avatar-${key}-choices`).innerHTML = Object.entries(choices[key]).map(([value,name])=>`<label class="avatar-option"><input type="radio" name="${key}" value="${value}"><span></span><strong>${name}</strong></label>`).join('');
+  $('#avatar-presets').innerHTML = Object.entries(avatarPresets).map(([key,{label,...profile}])=>`<button type="button" data-avatar-preset="${key}" aria-pressed="false">${avatarSvg(profile)}<span>${label}</span></button>`).join('');
+  $('#avatar-presets').onclick = event => {
+    const button=event.target.closest('[data-avatar-preset]'); if (!button) return;
+    for (const [key,value] of Object.entries(avatarPresets[button.dataset.avatarPreset])) if(key!=='label') $('#customize-form').elements.namedItem(key).value=value;
+    syncHexColors($('#customize-form')); preview();
+  };
+  for (const key of ['motion','language','detail']) $(`#customize-form select[name="${key}"]`).innerHTML = Object.entries(choices[key]).map(([value,name])=>`<option value="${value}">${name}</option>`).join('');
   $('#specialty-presets').innerHTML = Object.keys(specializations).map(key=>`<button type="button" data-specialty="${key}" aria-pressed="false">${key === 'general' ? 'All-rounder' : key[0].toUpperCase()+key.slice(1)}</button>`).join('');
   document.querySelectorAll('[data-specialty]').forEach(button=>button.onclick=()=>{ $('#agent-specialization').value = specializations[button.dataset.specialty]; preview(); });
   $('#tone-choices').innerHTML = Object.entries(choices.tone).map(([value,name])=>`<label class="tone-option"><input type="radio" name="tone" value="${value}"><span><strong>${name}</strong><small>${toneDetails[value]}</small></span></label>`).join('');

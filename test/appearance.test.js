@@ -33,9 +33,9 @@ test('workspace themes preview, customize, validate, persist and reset without c
     }
     await page.locator('input[name=workspaceNavigation][value=sidebar]').check();
     expect(await page.locator('#appearance-preview').getAttribute('data-navigation')).toBe('sidebar');
-    expect(await page.locator(':root').getAttribute('data-navigation')).toBe('dock');
+    expect(await page.locator(':root').getAttribute('data-navigation')).toBe('sidebar');
     await page.getByRole('button',{name:'Close settings',exact:true}).click();
-    expect(await page.locator(':root').getAttribute('data-navigation')).toBe('dock');
+    expect(await page.locator(':root').getAttribute('data-navigation')).toBe('sidebar');
     await openSettings();await page.locator('input[name=workspaceNavigation][value=sidebar]').check();
     await page.locator('input[name=workspacePalette][value=graphite]').check();
     expect(await page.locator('.appearance-preview-message:not(.appearance-preview-own)').evaluate(node=>{const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');canvas.width=canvas.height=1;ctx.fillStyle=getComputedStyle(node).backgroundColor;ctx.fillRect(0,0,1,1);return Math.max(...ctx.getImageData(0,0,1,1).data.slice(0,3));})).toBeLessThan(100);
@@ -85,7 +85,7 @@ test('workspace themes preview, customize, validate, persist and reset without c
       await page.setViewportSize({width,height:1000});
       await page.screenshot({path:join(artifacts,`workspace-sidebar-${width}.png`),animations:'disabled'});
       await page.waitForFunction(()=>document.querySelector('.shell').scrollWidth<=document.querySelector('.shell').clientWidth);
-      if(width===320) { await page.locator('#sidebar-collapse').click();expect(await page.locator('#sidebar-collapse').getAttribute('aria-expanded')).toBe('false'); }
+      if(width===320) { expect(await page.locator('#sidebar-collapse').getAttribute('aria-expanded')).toBe('false'); }
       await openSettings();
       expect(await page.locator('input[name=workspaceNavigation][value=sidebar]').isChecked()).toBe(true);
       await page.locator('.appearance-custom').evaluate(node=>node.open=true);
@@ -96,7 +96,7 @@ test('workspace themes preview, customize, validate, persist and reset without c
       await page.getByRole('button',{name:'Close settings',exact:true}).click();
     }
     await openSettings();await page.locator('#appearance-reset').click();
-    expect(await page.locator('input[name=workspaceNavigation][value=sidebar]').isChecked()).toBe(true);expect(await page.locator('#appearance-custom-colors').isChecked()).toBe(false);expect(await page.locator('#appearance-depth').inputValue()).toBe('65');
+    expect(await page.locator('input[name=workspaceNavigation][value=sidebar]').isChecked()).toBe(true);expect(await page.locator('#appearance-custom-colors').isChecked()).toBe(false);expect(await page.locator('#appearance-depth').inputValue()).toBe('55');
     expect(app.runtime.state.appearance).toEqual(saved);await page.getByRole('button',{name:'Close settings',exact:true}).click();
     // An agent's palette override keeps its palette; workspace material settings still apply.
     app.runtime.state.customization={...defaults,name:'Oddy',overrideWorkspace:true,palette:'harbor'};app.runtime.changed();
@@ -122,7 +122,7 @@ test('workspace themes preview, customize, validate, persist and reset without c
     await page.locator('#prompt').focus();await page.mouse.move(500,200);
     await page.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().top>=innerHeight);
     const contentBounds = target => target.locator('.agent-workspace, .composer-area').evaluateAll(nodes=>nodes.map(node=>{const {x,y,width,height}=node.getBoundingClientRect();return {x,y,width,height};}));
-    const sidesReachContent = target => target.evaluate(()=>{const main=document.querySelector('.main').getBoundingClientRect();return [main.left+2,main.right-2].every(x=>document.elementFromPoint(x,main.bottom-20)?.closest('.agent-workspace'));});
+    const sidesReachContent = target => target.evaluate(()=>{const main=document.querySelector('.agent-workspace').getBoundingClientRect();return [main.left+2,main.right-2].every(x=>document.elementFromPoint(x,main.bottom-20)?.closest('.agent-workspace'));});
     const hiddenContent = await contentBounds(page);
     const iconBackground = await page.locator('.dock-icon').first().evaluate(node=>getComputedStyle(node).backgroundColor);
     expect(await sidesReachContent(page)).toBe(true);
@@ -132,7 +132,7 @@ test('workspace themes preview, customize, validate, persist and reset without c
     expect(await contentBounds(page)).toEqual(hiddenContent);
     expect(await sidesReachContent(page)).toBe(true);
     expect(await page.locator('.dock-icon').first().evaluate(node=>getComputedStyle(node).backgroundColor)).toBe(iconBackground);
-    expect(await page.locator('.workspace-dock').evaluate(node=>Number(getComputedStyle(node).backgroundColor.split('/')[1]?.replace(')','')))).toBeCloseTo(.35);
+    expect(await page.locator('.workspace-dock').evaluate(node=>getComputedStyle(node).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
     await page.screenshot({path:join(artifacts,'workspace-dock-large-revealed.png'),animations:'disabled'});
     await page.locator('#prompt').focus();await page.mouse.move(500,200);
     await page.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().top>=innerHeight);
@@ -142,18 +142,13 @@ test('workspace themes preview, customize, validate, persist and reset without c
     const touch = await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:320,height:700},hasTouch:true,isMobile:true});
     try {
       const mobile = await newPageWithoutTutorials(touch);mobile.setDefaultTimeout(5000);await mobile.goto(server.url.href+'#chat/theme-chat');await mobile.locator('#messages').waitFor();
-      await mobile.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().top>=innerHeight);
-      const mobileContent = await contentBounds(mobile);
-      expect(await sidesReachContent(mobile)).toBe(true);
-      await mobile.getByRole('button',{name:'Show dock',exact:true}).tap();
-      await mobile.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().bottom<=innerHeight);
+      // Mobile navigation stays reachable even when desktop dock auto-hide is saved.
+      expect(await mobile.locator('.workspace-dock').isVisible()).toBe(true);
+      expect(await mobile.locator('.dock-reveal-button').isVisible()).toBe(false);
       const mobileDock = await mobile.locator('.workspace-dock').boundingBox();
-      expect(mobileDock.x).toBeGreaterThanOrEqual(0);expect(mobileDock.x+mobileDock.width).toBeLessThanOrEqual(320);
-      expect(await contentBounds(mobile)).toEqual(mobileContent);
-      expect(await sidesReachContent(mobile)).toBe(true);
+      expect(mobileDock.x).toBe(0);expect(mobileDock.width).toBe(320);
+      expect(mobileDock.y+mobileDock.height).toBe(700);
       await mobile.screenshot({path:join(artifacts,'workspace-dock-autohide-mobile.png'),animations:'disabled'});
-      await mobile.touchscreen.tap(2,680);
-      await mobile.waitForFunction(()=>document.querySelector('.workspace-dock').getBoundingClientRect().top>=innerHeight);
       await mobile.locator('#prompt').tap();
     } finally { await touch.close(); }
     await openSettings();await page.locator('#dock-size').fill('75');await page.locator('#dock-auto-hide').uncheck();

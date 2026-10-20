@@ -13,7 +13,7 @@ export function setupOddy(getScreen=()=>({})) {
     <div id="oddy-pending" class="oddy-pending" hidden></div>
     <p id="oddy-status" class="oddy-status" role="status"></p><a id="oddy-provider-settings" class="oddy-provider-settings" href="/?settings=provider&provider=oddy" hidden>Open Oddy AI settings</a>
     <form id="oddy-form" class="composer oddy-form"><label class="sr-only" for="oddy-prompt">Ask Oddy or answer its question</label><textarea id="oddy-prompt" rows="1" maxlength="20000" required aria-describedby="oddy-keyboard-hint" placeholder="Ask Oddy to do something…"></textarea><div class="composer-toolbar oddy-form-actions"><small id="oddy-keyboard-hint">Enter to send<span class="oddy-newline-hint"> · Shift+Enter for a new line</span></small><button type="button" class="text-button" id="oddy-stop" hidden>Stop</button><button type="submit" class="send-button" id="oddy-send" aria-label="Send to Oddy" title="Send message (Enter)" disabled>${icon('arrow-up')}</button></div></form>`;
-  $('#browser-toggle').before(launcher);document.body.append(dialog);
+  $('#conversation-menu').append(launcher);document.body.append(dialog);
   let state=null,timer=null,loading=false,sending=false,messageKey='',pendingKey='',errorMessage='',uploading=false,attachments=[],stateVersion=0;
   const context=$('#oddy-context');let historyKey='';
   const uploads=document.createElement('div');uploads.id='oddy-attachments';uploads.className='oddy-attachments';$('#oddy-prompt').before(uploads);
@@ -85,7 +85,7 @@ export function setupOddy(getScreen=()=>({})) {
   }
   launcher.onclick=()=>{if(dialog.open){dialog.close();return;}if(document.querySelector('dialog:modal'))dialog.showModal();else dialog.show();launcher.setAttribute('aria-expanded','true');if(state)draw();else $('#oddy-status').textContent='Connecting to Oddy…';void refresh();$('#oddy-prompt').focus();};
   $('#oddy-close').onclick=()=>dialog.close();
-  dialog.addEventListener('close',()=>{clearTimeout(timer);launcher.setAttribute('aria-expanded','false');launcher.focus();});
+  dialog.addEventListener('close',()=>{clearTimeout(timer);launcher.setAttribute('aria-expanded','false');(launcher.closest('[popover]:not(:popover-open)') ? $('#conversation-menu-open') : launcher).focus();});
   $('#oddy-form').onsubmit=async event=>{
     event.preventDefault();const prompt=$('#oddy-prompt').value.trim();if((!prompt&&!attachments.length)||$('#oddy-send').disabled)return;
     const job=state?.job,pending=job?.pending;
@@ -124,6 +124,6 @@ export function setupOddy(getScreen=()=>({})) {
     if(!event.target.matches('dialog') || event.target===dialog)return;
     if(event.newState==='open'&&dialog.open)dialog.close();
     const modal=[...document.querySelectorAll('dialog[open]')].filter(node=>node!==dialog).at(-1);
-    if(modal){const toolbar=modal.querySelector('.modal-top')||modal;toolbar.insertBefore(launcher,toolbar.lastElementChild);}else $('#browser-toggle').before(launcher);
+    if(modal){const toolbar=modal.querySelector('.modal-top,.profile-top')||modal;toolbar.insertBefore(launcher,toolbar.lastElementChild);}else $('#conversation-menu').append(launcher);
   },true);
 }

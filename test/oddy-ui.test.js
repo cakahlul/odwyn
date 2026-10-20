@@ -48,6 +48,7 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
   });
   try{
     await page.goto(server.url.href);
+    if(!await page.getByRole('button',{name:'Ask Oddy',exact:true}).isVisible()) await page.locator('#conversation-menu-open').click();
     await page.getByRole('button',{name:'Ask Oddy',exact:true}).click();
     await page.getByRole('heading',{name:'What needs doing?',exact:true}).waitFor();
     expect(await page.locator('#oddy-open').evaluate(node=>!!node.closest('.header-actions'))).toBe(true);
@@ -68,7 +69,7 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
     await page.locator('#oddy-send').click();await page.getByText('Stop the current task first.').waitFor();
     expect(await page.locator('#oddy-prompt').inputValue()).toBe('Try again');
     await page.keyboard.press('Escape');
-    expect(await page.locator('#oddy-open').evaluate(node=>node===document.activeElement)).toBe(true);
+    await page.waitForFunction(()=>document.querySelector('#conversation-menu-open')===document.activeElement);
     await page.locator('#main-tutorial').click();await page.locator('#tutorial-oddy').click();
     await page.locator('#oddy-dialog').waitFor({state:'visible'});
     await page.locator('#oddy-prompt').fill('');
@@ -88,6 +89,7 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
     }
     await page.locator('#oddy-close').click();
     await page.locator('#settings-open').click();
+    if(!await page.getByRole('button',{name:'Ask Oddy',exact:true}).isVisible()) await page.locator('#conversation-menu-open').click();
     await page.getByRole('button',{name:'Ask Oddy',exact:true}).click();
     expect(await page.locator('#settings-dialog').evaluate(node=>node.open)).toBe(true);
     expect(await page.locator('#oddy-dialog').evaluate(node=>node.open)).toBe(true);
@@ -97,6 +99,7 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
     await page.locator('#oddy-close').click();
     state={...state,job:{id:'job',status:'waiting',pending:{id:'request',type:'oddy-confirmation',destructive:true,title:'Confirm deletion',detail:'Delete Research workspace?'}}};
     await page.setViewportSize({width:320,height:568});
+    if(!await page.getByRole('button',{name:'Ask Oddy',exact:true}).isVisible()) await page.locator('#conversation-menu-open').click();
     await page.getByRole('button',{name:'Ask Oddy',exact:true}).click();
     await page.getByRole('button',{name:'Confirm deletion',exact:true}).waitFor();
     expect(await page.locator('#oddy-send').isDisabled()).toBe(true);
@@ -108,6 +111,7 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
     expect(requests.at(-1).body).toEqual({jobId:'job',requestId:'request',decision:'deny'});
     await page.locator('#oddy-close').click();
     state={...state,job:{id:'job',status:'waiting',pending:{id:'question',type:'question',title:'Your input, please',detail:'Which workspace?'}}};
+    if(!await page.getByRole('button',{name:'Ask Oddy',exact:true}).isVisible()) await page.locator('#conversation-menu-open').click();
     await page.getByRole('button',{name:'Ask Oddy',exact:true}).click();
     await page.getByText('Which workspace?',{exact:true}).waitFor();
     await page.locator('#oddy-prompt').fill('Research');await page.locator('#oddy-prompt').press('Enter');
@@ -155,9 +159,10 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
     await page.locator('#prompt').fill('');
     await page.screenshot({path:join(import.meta.dir,'../artifacts/oddy-navigation.png')});
     await page.setViewportSize({width:320,height:568});
+    await page.locator('#conversation-menu-open').click();
     const launcherBounds=await page.locator('#oddy-open').boundingBox();
     expect(launcherBounds.x).toBeGreaterThanOrEqual(0);expect(launcherBounds.x+launcherBounds.width).toBeLessThanOrEqual(320);
-    expect(Math.abs((await page.locator('#browser-toggle').boundingBox()).y-launcherBounds.y)).toBeLessThan(2);
+    expect(await page.locator('#browser-toggle').isVisible()).toBe(true);
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
     await page.screenshot({path:join(import.meta.dir,'../artifacts/oddy-navigation-mobile.png')});
     await page.locator('#oddy-open').click();

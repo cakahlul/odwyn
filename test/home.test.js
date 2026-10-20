@@ -30,6 +30,13 @@ test('Home prioritizes work across agents, updates live, preserves drafts and re
     await page.goto(server.url.href);await page.locator('.home').waitFor();
     expect(await page.locator('#page-title').textContent()).toBe('Home');expect(await page.locator('#composer-area').isVisible()).toBe(false);
     expect(await page.locator('.conversation-controls').isVisible()).toBe(false);
+    expect(await page.locator(':root').getAttribute('data-navigation')).toBe('sidebar');
+    expect(await page.locator('.home .home-agent').count()).toBe(2);
+    expect(await page.locator(`.home .home-agent[data-agent="${first}"]`).textContent()).toContain('Working');
+    expect(await page.locator(`.home .home-agent[data-agent="${second}"]`).textContent()).toContain('Needs you');
+    await page.emulateMedia({reducedMotion:'reduce'});
+    expect(await page.locator('.home .home-agent[data-status=running] .home-agent-avatar').evaluate(node=>getComputedStyle(node).animationName)).toBe('none');
+    await page.emulateMedia({reducedMotion:'no-preference'});
     expect(await page.locator('.home-section h2').allTextContents()).toEqual(['Needs you','In progress','Recent results','Recent conversations']);
     expect(await page.locator('.home-section').first().textContent()).toContain('Which dates work for you?');
     expect(await page.locator('.home [data-conversation="waiting"]').count()).toBe(1);
@@ -48,12 +55,28 @@ test('Home prioritizes work across agents, updates live, preserves drafts and re
     app.runtime.state.jobs[0].pending.title='What is your budget?';app.runtime.changed();
     await page.locator('.home').filter({hasText:'What is your budget?'}).waitFor();
     expect(await page.locator('.home [data-conversation="ready"]').evaluate(node=>document.activeElement===node)).toBe(true);
+    await page.locator('.home .home-agent').first().focus();
+    app.runtime.state.jobs[0].pending.title='Choose departure time';app.runtime.changed();
+    await page.locator('.home').filter({hasText:'Choose departure time'}).waitFor();
+    expect(await page.locator('.home .home-agent').first().evaluate(node=>node===document.activeElement)).toBe(true);
+    await page.locator('#view').evaluate(node=>node.scrollTop=0);
     await page.screenshot({path:join(artifacts,'home-desktop.png')});
     for(const width of [320,768,1024,1440]) {
       await page.setViewportSize({width,height:1000});
+      if(width===320) await page.waitForFunction(()=>document.documentElement.classList.contains('sidebar-collapsed'));
+      if(width===1440) expect(await page.locator('#sidebar-collapse').getAttribute('aria-expanded')).toBe('true');
       await page.waitForFunction(()=>innerWidth>760 || !document.querySelector('#search-dialog').open);
       expect(await page.locator('.home').evaluate(node=>node.getBoundingClientRect().right<=innerWidth && node.scrollWidth<=node.clientWidth)).toBe(true);
-      if(width===320) await page.screenshot({path:join(artifacts,'home-mobile.png')});
+      if(width===320) {
+        expect(await page.locator('#view').evaluate(node=>node.getBoundingClientRect().left)).toBe(0);
+        expect(await page.locator('.workspace-dock').evaluate(node=>node.getBoundingClientRect().bottom)).toBe(1000);
+        await page.locator('#conversation-menu-open').click();
+        for(const id of ['search-open','new-room-top','browser-toggle']) expect(await page.locator('#'+id).isVisible()).toBe(true);
+        await page.keyboard.press('Escape');
+        expect(await page.locator('#conversation-menu-open').evaluate(node=>node===document.activeElement)).toBe(true);
+        await page.locator('#view').evaluate(node=>node.scrollTop=0);
+        await page.screenshot({path:join(artifacts,'home-mobile.png')});
+      }
     }
     await page.getByRole('button',{name:'Find a conversation',exact:true}).click();await page.locator('#search-dialog[open]').waitFor();await page.keyboard.press('Escape');
     await page.locator('.home [data-conversation="ready"]').click();await page.locator('.message-assistant').waitFor();
@@ -65,8 +88,13 @@ test('Home prioritizes work across agents, updates live, preserves drafts and re
     await page.locator('.workspace-dock [data-view=home]').click();await page.locator('.home').waitFor();
     await page.getByRole('button',{name:'Start a conversation',exact:true}).click();await page.locator('.welcome').waitFor();expect(await page.locator('#prompt').isVisible()).toBe(true);
     app.runtime.state.jobs=[];app.runtime.state.conversations=[];app.runtime.changed();
-    await page.goto(server.url.href);await page.getByRole('heading',{name:'What would you like to get done?'}).waitFor();
+    await page.goto(server.url.href);await page.getByRole('heading',{name:'Conversations'}).waitFor();
     expect(await page.locator('.home-section').count()).toBe(0);
+    expect(await page.locator('.home .home-agent').first().textContent()).toContain('Connect provider');
+    await page.locator('.home .home-agent').first().click();await page.locator('.welcome').waitFor();
+    expect(await page.locator('#prompt').evaluate(node=>node===document.activeElement)).toBe(true);
+    await page.screenshot({path:join(artifacts,'redesign-chat.png')});
+    await page.locator('.workspace-dock [data-view=home]').click();await page.locator('.home').waitFor();
     await page.evaluate(()=>localStorage.setItem('odwyn-agent','minimized'));await page.reload();await page.locator('.home').waitFor();
     expect(await page.locator('.workspace-dock [data-view=home]').isDisabled()).toBe(false);
     await page.getByRole('button',{name:'Start a conversation',exact:true}).click();await page.locator('.welcome').waitFor();

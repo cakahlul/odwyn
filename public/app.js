@@ -8,7 +8,7 @@ import {setupWorkspaceSettings} from './workspace-settings.js';
 import {setupSecurity} from './security-ui.js';
 import { renderWorkflows, setupWorkflows } from './workflows-ui.js';
 import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date, workspaceUrl, workspaceId, storageKey } from './ui.js';
-import { renderHome, renderChat, insertMessages, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
+import { renderHome, renderAgentRoster, renderChat, insertMessages, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
 import { setupBrowser, updateBrowser } from './browser-ui.js';
 import { setupCustomization, applyProfile, openCustomization, fillWorkspaceAppearance, readWorkspaceAppearance } from './customize.js';
 import { defaults, agentColor, choices, ownerPreferenceKeys, avatarSvg, currencies, effortLevels } from './profile.js';
@@ -31,6 +31,9 @@ function setSidebarCollapsed(collapsed) {
   button.querySelector('span').textContent = collapsed ? 'Expand' : 'Collapse';
 }
 setSidebarCollapsed(localStorage.getItem(storageKey('odwyn-sidebar-collapsed')) === 'true' || (localStorage.getItem(storageKey('odwyn-sidebar-collapsed')) === null && matchMedia('(max-width:760px)').matches));
+matchMedia('(max-width:760px)').addEventListener('change',event => {
+  setSidebarCollapsed(event.matches || localStorage.getItem(storageKey('odwyn-sidebar-collapsed')) === 'true');
+});
 document.addEventListener('pointerdown',event => {
   if (document.documentElement.dataset.navigation === 'dock' && document.documentElement.dataset.dockAutoHide === 'true' && !event.target.closest('.dock-region') && document.activeElement.closest('.dock-region')) document.activeElement.blur();
 });
@@ -41,6 +44,24 @@ $('#sidebar-collapse').onclick = () => {
   const collapsed = !document.documentElement.classList.contains('sidebar-collapsed');
   setSidebarCollapsed(collapsed);localStorage.setItem(storageKey('odwyn-sidebar-collapsed'),String(collapsed));
 };
+
+const mobileLayout = matchMedia('(max-width:760px)');
+function positionWorkspacePicker() {
+  const picker = $('.workspace-home-picker');
+  const parent = mobileLayout.matches ? (document.documentElement.dataset.screen === 'home' ? $('.breadcrumb') : $('#conversation-menu')) : $('.rail-heading');
+  if (picker.parentElement !== parent) parent.append(picker);
+}
+function syncConversationMenu() {
+  const menu = $('#conversation-menu');
+  if (menu.matches(':popover-open')) menu.hidePopover();
+  menu.setAttribute('popover','auto');
+  positionWorkspacePicker();
+}
+syncConversationMenu();
+mobileLayout.addEventListener('change',syncConversationMenu);
+$('#conversation-menu').addEventListener('click',event => {
+  if (event.target.closest('button:not([popovertarget])') && event.currentTarget.matches(':popover-open')) event.currentTarget.hidePopover();
+});
 
 const navigationDock = $('#workspace-navigation'), dockItems = [...navigationDock.querySelectorAll('.dock-item')];
 function magnifyDock(clientX = null) {
@@ -64,7 +85,7 @@ navigationDock.addEventListener('focusout',() => magnifyDock());
 for (const key of ['language','detail']) $(`#global-${key}`).innerHTML = Object.entries(choices[key]).map(([value,label])=>`<option value="${value}">${label}</option>`).join('');
 
 let state = null, conversationId = null, view = 'home', filter = 'all', signature = '', busy = false, attachments = [], pendingAttachments = [], providerAgentId = null, providerGlobal = false, providerAdding = false;
-let workspace = null, agentId = localStorage.getItem(storageKey('odwyn-agent')), switching = false, dockSignature = '';
+let workspace = null, agentId = localStorage.getItem(storageKey('odwyn-agent')), switching = false, dockSignature = '', rosterSignature = '';
 const drafts = new Map(JSON.parse(sessionStorage.getItem(storageKey('odwyn-drafts')) || '[]'));
 const closedAgents = new Set(JSON.parse(localStorage.getItem(storageKey('odwyn-closed-agents')) || '[]'));
 const bubblePositions = JSON.parse(localStorage.getItem(storageKey('odwyn-bubble-positions')) || '{}');
@@ -312,6 +333,10 @@ async function animateAgent(id, restoring) {
   const panel = $('#agent-workspace'), slot = document.querySelector(`#agent-dock [data-bubble="${id}"]`);
   if (!slot) return;
   const box = panel.getBoundingClientRect(), target = slot.getBoundingClientRect();
+  if (!target.width) {
+    if (restoring) await panel.animate([{opacity:.6,transform:'translateY(5px)'},{opacity:1,transform:'none'}],{duration:120,easing:'ease-out'}).finished;
+    return;
+  }
   const small = { transform:`translate(${target.x-box.x}px,${target.y-box.y}px) scale(${target.width/box.width},${target.height/box.height})`, opacity:0 };
   const full = { transform:'none', opacity:1 };
   await panel.animate(restoring ? [small,full] : [full,small], { duration:200, easing:restoring ? 'cubic-bezier(.2,.8,.2,1)' : 'ease-in' }).finished;
@@ -410,6 +435,14 @@ function render() {
   if (!state) return;
   visitTutorial(view);
   renderDock();
+  const roster = renderAgentRoster(workspace,view === 'chat' ? agentId : null);
+  if (roster !== rosterSignature) {
+    const focused = $('#agent-roster').contains(document.activeElement) ? document.activeElement.dataset.agent : null;
+    $('#agent-roster').innerHTML = roster; rosterSignature = roster;
+    if (focused) $('#agent-roster').querySelector(`[data-agent="${CSS.escape(focused)}"]`)?.focus({preventScroll:true});
+  }
+  document.documentElement.dataset.screen = view;
+  positionWorkspacePicker();
   applyProfile(agentId ? state.customization : null,state.appearance,state.owner);
   $('#composer-area').setAttribute('aria-label','Message your assistant');
   renderRooms();
@@ -449,14 +482,14 @@ function render() {
     updateBrowser(state); return;
   }
   $('#composer-area').hidden = view !== 'chat';
-  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'home' ? [workspace.conversations,workspace.jobs,$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? [state.schedules,state.jobs] : view === 'workflows' ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
+  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'home' ? [workspace.conversations,workspace.jobs,workspace.agents.map(agent=>[agent.id,!!agent.runtime?.account]),$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? [state.schedules,state.jobs] : view === 'workflows' ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
-    const homeFocus = view === 'home' && $('#view').contains(document.activeElement) ? document.activeElement.dataset.conversation : null;
+    const homeFocus = view === 'home' && $('#view').contains(document.activeElement) ? document.activeElement.closest('[data-conversation],[data-agent]') : null;
     const pendingCards=[...document.querySelectorAll('#view .approval-card[data-request],#view form[data-room-owner],#view form[data-room-uat]')].map(node=>({node,focus:node.contains(document.activeElement)?document.activeElement:null}));
     $('#view').innerHTML = view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state,filter) : view === 'workflows' ? renderWorkflows(state) : renderFiles(state);
-    if (homeFocus) $('#view').querySelector(`[data-conversation="${CSS.escape(homeFocus)}"]`)?.focus({preventScroll:true});
+    if (homeFocus) { const key = homeFocus.dataset.conversation ? 'conversation' : 'agent'; $('#view').querySelector(`[data-${key}="${CSS.escape(homeFocus.dataset[key])}"]`)?.focus({preventScroll:true}); }
     for(const {node,focus} of pendingCards){const selector=node.dataset.request?`[data-request="${CSS.escape(node.dataset.request)}"]`:node.dataset.roomUat?`form[data-room-uat="${CSS.escape(node.dataset.roomUat)}"][data-checkpoint="${CSS.escape(node.dataset.checkpoint)}"][data-cases="${CSS.escape(node.dataset.cases)}"]`:`form[data-room-owner="${CSS.escape(node.dataset.roomOwner)}"][data-proposal="${CSS.escape(node.dataset.proposal)}"]`;const next=$('#view').querySelector(selector);if(next){if(node.dataset.roomUat)next.closest('details').open=node.closest('details').open;next.replaceWith(node);focus?.focus({preventScroll:true});}}
     if (view === 'chat') insertMessages(state,conversationId);
     updateBrowser(state);
@@ -911,12 +944,18 @@ document.addEventListener('click', event => {
   if (target.dataset.roomAgent) { $('#room-header').close(); const room = currentRoom(); void switchAgent(target.dataset.roomAgent,{sharedChat:room.id,keepDraft:true}).then(()=>openAgentProvider()); return; }
   if (target.dataset.selectAgent) { setNavigation(false); void switchAgent(target.dataset.selectAgent).then(()=>{ if (view === 'home') navigate('chat',conversationId); }); return; }
   if (target.dataset.closeAgent) { closeAgent(target.dataset.closeAgent); return; }
-  if (target.dataset.agent) { void switchAgent(target.dataset.agent).then(()=>{ if (view === 'home') navigate('chat',conversationId); }); return; }
+  if (target.dataset.agent) {
+    if (busy || switching) return;
+    const latest = target.matches('.roster-item') && !drafts.has(target.dataset.agent) ? recentConversations(workspace).find(c=>c.kind !== 'room' && c.agentId === target.dataset.agent) : null;
+    void switchAgent(target.dataset.agent).then(()=>{ if (latest) navigate('chat',latest.id); else if (view === 'home') navigate('chat',conversationId); });
+    return;
+  }
   if (target.hasAttribute('data-mascot-toggle')) {
     const paused = document.body.classList.toggle('mascot-paused');
     target.setAttribute('aria-pressed',String(!paused));
     target.title = `${paused ? 'Resume' : 'Pause'} avatar animation`;
   }
+  if (target.hasAttribute('data-open-agents')) { $('#agents-open').click(); return; }
   if (target.hasAttribute('data-home-search')) { $('#search-open').click(); return; }
   if (target.dataset.view) { event.preventDefault(); navigate(target.dataset.view); }
   if (target.dataset.conversation) { $('#search-dialog').close(); navigate('chat',target.dataset.conversation); }

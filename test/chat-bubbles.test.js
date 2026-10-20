@@ -70,9 +70,12 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
       await page.setViewportSize({width,height:900});
       if(width<=760)await page.waitForFunction(()=>!document.querySelector('#search-dialog').open);
       expect(await page.locator('.topbar').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
+      await page.locator('#conversation-menu-open').click();
       for(const selector of ['#room-details-open','#reply-agent','#minimize-agent','#close-conversation','#browser-toggle','#composer']){
+        expect(await page.locator(selector).isVisible()).toBe(true);
         expect(await page.locator(selector).evaluate(node=>{const box=node.getBoundingClientRect();return box.left>=0 && box.right<=innerWidth;})).toBe(true);
       }
+      await page.keyboard.press('Escape');
       await page.screenshot({path:join(artifacts,`glass-chat-${width}.png`),animations:'disabled'});
     }
     await page.locator('#room-details-open').focus();await page.keyboard.press('Enter');

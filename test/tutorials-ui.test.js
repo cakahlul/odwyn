@@ -24,11 +24,11 @@ test('tutorials guide first visits, replay, persist, hide, reset and fit mobile'
   await page.locator('[data-settings-section=tutorials]').click();await card.waitFor();await skip();
   await page.locator('#tutorial-hide').check();await page.reload();await page.locator('#view h1').first().waitFor();await expectHidden();
   await page.locator('#agents-open').click();await page.locator('#agents-dialog[open]').waitFor();await expectHidden();
-  await page.locator('#agents-dialog .tutorial-replay').click();await card.waitFor();await skip();await page.locator('#agents-dialog .modal-top button').first().click();
+  await page.locator('#agents-dialog .tutorial-replay').click();await card.waitFor();await skip();await page.getByRole('button',{name:'Close agents',exact:true}).click();
   await page.locator('#settings-open').click();await page.locator('[data-settings-section=tutorials]').click();expect(await page.locator('#tutorial-hide').isChecked()).toBe(true);
   await page.locator('#tutorial-reset').click();expect(await page.locator('#tutorial-settings-status').textContent()).toContain('reset');await expectHidden();
   await page.locator('#tutorial-hide').uncheck();await page.locator('[data-settings-section=resources]').click();await card.waitFor();await skip();
-  await page.locator('#settings-dialog .modal-top button').first().click();await page.locator('#agents-open').click();await card.waitFor();await skip();
+  await page.getByRole('button',{name:'Close settings',exact:true}).click();await page.locator('#agents-open').click();await card.waitFor();await skip();
   await page.locator('.agent-menu summary').first().click();await page.locator('[data-agent-action=customize]').first().click();await card.waitFor();await skip();
   await page.locator('#agent-access-tab').click();await card.waitFor();expect(await card.textContent()).toContain('Spaces');
   const before=store.security.access(store.state.agents[0].id);
