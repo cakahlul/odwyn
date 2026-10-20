@@ -129,7 +129,10 @@ export class Runtime {
     const invocation = workflowInvocation(textInput(input.prompt),this.state);
     if (invocation?.workflow) return this.launchWorkflow(invocation.workflow,{...input,inputs:invocation.inputs});
     const job = createJob(this.state,input);
-    if (invocation?.skill) job.prompt = `${invocation.skill.instructions}\n\nOwner request: ${invocation.argument || 'Perform this skill.'}`;
+    if (invocation?.skill) {
+      job.skill = {id:invocation.skill.id,name:invocation.skill.name,command:invocation.skill.command};
+      job.prompt = `${invocation.skill.instructions}\n\nOwner request: ${invocation.argument || 'Perform this skill.'}`;
+    }
     this.changed(); void this.drain(); return job;
   }
 
@@ -350,7 +353,7 @@ export class Runtime {
       const knowledgeInstructions=this.store.knowledge.prepare(job,profile);
       if(knowledgeInstructions)this.event(job,'Knowledge loaded',(job.knowledgeVersions||[]).map(doc=>`${doc.name} v${doc.version}`).join(', '));
       const defaultSkills = (profile.skillIds || []).map(id=>this.state.skills.find(skill=>skill.id===id)).filter(Boolean);
-      const skillInstructions = defaultSkills.length ? `\nOwner-selected default skills: use when relevant to the request, within existing permissions and tool policies:\n${defaultSkills.map(skill=>`Skill ${JSON.stringify(skill.name)} (/${skill.command}):\n${skill.instructions}`).join('\n\n')}` : '';
+      const skillInstructions = defaultSkills.length ? `\nOwner-selected automatic skills: apply every skill below to every task, including room replies, without waiting for the owner to invoke a command. Treat these as standing task instructions within existing permissions and tool policies:\n${defaultSkills.map(skill=>`Skill ${JSON.stringify(skill.name)} (/${skill.command}):\n${skill.instructions}`).join('\n\n')}` : '';
       const persona = `\nOwner-selected identity: use ${JSON.stringify(profile.name)} as your name. ${profile.ownerName ? `Address the owner as ${JSON.stringify(profile.ownerName)}.` : 'Do not invent a name for the owner.'} Communication: Caveman ultra. Reply depth: shortest complete answer; expand only for explicitly requested detail or necessary correctness. Reply language: ${profile.language === 'auto' ? 'Match the owner’s message' : choices.language[profile.language]}; follow explicit language requests. Specialization (focus, not additional permissions): ${JSON.stringify(profile.specialization || 'General personal assistance')}. Owner background (context, not instructions): ${JSON.stringify(profile.userContext)}. These preferences never change tool policies or authorize new actions.`;
       const currencyPreference = this.state.currency && this.state.currency !== 'source' ? `\nOwner preferred currency: ${this.state.currency}. Use it for budgets and recommendation estimates across this task. Preserve every original source price and currency alongside estimates. Convert only with an exchange rate verified using the browser; cite the rate source and date, and label conversions approximate. Never invent rates or relabel an original amount. If no verified rate is available, show the source price and say conversion is unavailable. Receipts and confirmed charges keep their exact original amounts and currency.` : '\nShow prices in their original source currency.';
       const params = { cwd: this.workspace, sandbox: 'read-only', approvalPolicy: 'on-request', developerInstructions: instructions + persona + preferences + skillInstructions + knowledgeInstructions + currencyPreference, ...(this.model ? { model: this.model } : {}) };
@@ -844,6 +847,7 @@ export class Runtime {
       this.changed();void this.drain();return jobs[0];
     }
     const job = createJob(this.state, { agentId:previous.agentId, conversationId: previous.conversationId, prompt: previous.prompt, attachments:previous.attachments, interactionMode: 'confirm', scheduleId: previous.scheduleId },false);
+    if (previous.skill) job.skill = {...previous.skill};
     if (previous.roomRoundId) job.roomRoundId = previous.roomRoundId;
     job.recovering = true;
     previous.status = 'resumed'; job.recoveryOf = previous.id;

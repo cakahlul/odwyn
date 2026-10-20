@@ -28,6 +28,18 @@ test('agent looks preview, save, survive reload and cancel without changing iden
   };
   try {
     await page.goto(server.url.href);await open();
+    await page.locator('input[name=shape][value=orb]').check();
+    const orbit=page.locator('#preview-mascot svg');
+    expect(await orbit.locator('.avatar-orbit-back').count()).toBe(1);
+    expect(await orbit.locator('.avatar-orbit-front').count()).toBe(1);
+    expect(await orbit.evaluate(svg=>{
+      const back=svg.querySelector('.avatar-orbit-back'),front=svg.querySelector('.avatar-orbit-front');
+      const body=back.nextElementSibling;
+      return body.querySelector('circle[r="42"]')!==null && !!(body.compareDocumentPosition(front)&Node.DOCUMENT_POSITION_FOLLOWING);
+    })).toBe(true);
+    await page.locator('.profile-layout').evaluate(node=>node.scrollTop=0);
+    await page.screenshot({path:join(artifacts,'agent-orbit-desktop.png'),animations:'disabled'});
+
     await page.locator('[data-avatar-preset=moss]').click();
     expect(await page.locator('#agent-name-input').inputValue()).toBe('Studio');
     expect(await page.locator('#agent-specialization').inputValue()).toBe('Compare sources');

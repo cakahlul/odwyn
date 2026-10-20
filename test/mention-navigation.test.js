@@ -25,7 +25,7 @@ test('agent, workflow and skill mentions navigate from messages and composer wit
   try {
     await page.goto(server.url.href+'#chat/mentions');await page.locator('#messages').waitFor();
     await page.locator('#messages').getByRole('button',{name:'/pr-review-fe',exact:true}).click();
-    await page.locator('#workflow-editor').waitFor();expect(await page.locator('#workflow-name').inputValue()).toBe('PR Review FE');expect(await page.locator('#page-title').textContent()).toBe('Workflows & skills');
+    await page.locator('#workflow-editor').waitFor();expect(await page.locator('#workflow-name').inputValue()).toBe('PR Review FE');expect(await page.locator('#page-title').textContent()).toBe('Workflows');
     await page.locator('[data-wf-close]').click();await returnToChat();
     await page.locator('#messages').getByRole('button',{name:'/review-code',exact:true}).focus();await page.keyboard.press('Enter');
     await page.locator('#skill-editor').waitFor();expect(await page.locator('#skill-form [name=command]').inputValue()).toBe('review-code');

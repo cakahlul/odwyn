@@ -64,7 +64,7 @@ test('workspace dock separates conversations, agents, and tools while keeping ch
     }
     expect(new Set(backgrounds).size).toBe(4);
     app.runtime.state.appearance = originalAppearance;app.runtime.changed();
-    for(const label of ['Routines','Workflows & skills','Files & results','Task runs']){
+    for(const label of ['Routines','Workflows','Files & results','Task runs']){
       await page.getByRole('button',{name:'Tools',exact:true}).click();
       expect(await page.locator('#tools-dialog').evaluate(node=>node.matches(':modal'))).toBe(true);
       await page.getByRole('button',{name:label,exact:true}).click();

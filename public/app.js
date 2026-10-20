@@ -357,7 +357,7 @@ async function switchAgent(nextId, { closing = false, sharedChat = null, keepDra
     selectState(); const draft = restoreDraft();
     signature = ''; render(); setNavigation(false);
     $('#view').scrollTo({top:draft?.scroll || 0,behavior:'instant'}); panel.scrollTo({top:draft?.mainScroll || 0,behavior:'instant'});
-    history.replaceState(null,'',view === 'home' ? '#home' : conversationId ? `#chat/${conversationId}` : `#${view}`);
+    history.replaceState(null,'',view === 'chat' && conversationId ? `#chat/${conversationId}` : `#${view}`);
     await animateAgent(agentId,true);
     $('#agent-announcement').textContent = agentId ? `${state.customization?.name || 'Odwyn'} restored` : closing ? 'Conversation closed. Available in history.' : 'All agents minimized';
   } finally { switching = false; transitionAgentId = null; panel.inert = false; renderDock(); renderRooms(); }
@@ -417,7 +417,7 @@ function navigate(next = 'chat', id = null) {
   if (next === 'home') id = conversationId;
   const chat = workspace.conversations.find(c => c.id === id), owner = chat?.lastAgentId || chat?.agentId;
   if (next !== 'home' && (owner && id !== conversationId && owner !== agentId || !agentId)) { void switchAgent(owner || workspace.agents[0].id,{sharedChat:id}).then(() => { if (agentId) navigate(next,id); }); return; }
-  view = next; conversationId = id; signature = ''; render();
+  view = next; if (next === 'chat') conversationId = id; signature = ''; render();
   $('#agent-workspace').scrollTop = 0;
   setNavigation(false);
   if (view === 'chat') $('#prompt').focus();
@@ -453,7 +453,7 @@ function render() {
   $('#prompt').placeholder = conversation?.kind === 'room' ? 'Message the room, or @mention an agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#agent-workspace').classList.toggle('chat-start', view === 'chat' && !conversation);
-  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { home:'Home', runs:'Task runs', routines:'Routines', files:'Files & results', workflows:'Workflows & skills' }[view];
+  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { home:'Home', runs:'Task runs', routines:'Routines', files:'Files & results', workflows:'Workflows', skills:'Skills' }[view];
   $('#agent-name').textContent = view === 'home' ? 'Odwyn' : state.customization?.name || defaults.name;
   $('#page-title').disabled = view !== 'chat' || !conversation;
   $('#page-title').title = conversation && view === 'chat' ? 'Rename conversation' : '';
@@ -465,7 +465,7 @@ function render() {
     return `<button class="history-item ${c.id === conversationId && view === 'chat' ? 'selected' : ''}" data-conversation="${esc(c.id)}"><span class="history-bullet ${job?.status === 'running' ? 'running' : ''}"></span><span>${esc(c.title)}</span>${job?.status === 'waiting' ? '<span class="needs-you-dot" title="Needs your input">!</span>' : ''}</button>`;
   }).join('') : '<p class="sidebar-empty">No conversations yet.</p>';
   $('#menu-button').classList.toggle('active',view === 'chat');
-  $('#tools-open').classList.toggle('active',['routines','workflows','files','runs'].includes(view));
+  $('#tools-open').classList.toggle('active',['routines','workflows','skills','files','runs'].includes(view));
   if ($('#search-dialog').open) search();
   if (!agentId && view !== 'home') {
     $('#agent-workspace').classList.remove('chat-start'); $('#main').classList.remove('chat-start'); $('#composer-area').hidden = true;
@@ -475,13 +475,15 @@ function render() {
     updateBrowser(state); return;
   }
   $('#composer-area').hidden = view !== 'chat';
-  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'home' ? [workspace.conversations,workspace.jobs,workspace.agents.map(agent=>[agent.id,!!agent.runtime?.account]),$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? [state.schedules,state.jobs] : view === 'workflows' ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
+  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'home' ? [workspace.conversations,workspace.jobs,workspace.agents.map(agent=>[agent.id,!!agent.runtime?.account]),$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? [state.schedules,state.jobs] : ['workflows','skills'].includes(view) ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
+    const libraryFocus = document.activeElement?.dataset.librarySearch ? {key:document.activeElement.dataset.librarySearch,start:document.activeElement.selectionStart,end:document.activeElement.selectionEnd} : null;
     const homeFocus = view === 'home' && $('#view').contains(document.activeElement) ? document.activeElement.closest('[data-conversation],[data-agent]') : null;
     const pendingCards=[...document.querySelectorAll('#view .approval-card[data-request],#view form[data-room-owner]')].map(node=>({node,focus:node.contains(document.activeElement)?document.activeElement:null}));
-    $('#view').innerHTML = view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state,filter) : view === 'workflows' ? renderWorkflows(state) : renderFiles(state);
+    $('#view').innerHTML = view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state,filter) : ['workflows','skills'].includes(view) ? renderWorkflows(state,view) : renderFiles(state);
+    if (libraryFocus) { const input=$('#view').querySelector(`[data-library-search="${libraryFocus.key}"]`); input?.focus({preventScroll:true}); if(input && libraryFocus.start!==null)input.setSelectionRange(libraryFocus.start,libraryFocus.end); }
     if (homeFocus) { const key = homeFocus.dataset.conversation ? 'conversation' : 'agent'; $('#view').querySelector(`[data-${key}="${CSS.escape(homeFocus.dataset[key])}"]`)?.focus({preventScroll:true}); }
     for(const {node,focus} of pendingCards){const selector=node.dataset.request?`[data-request="${CSS.escape(node.dataset.request)}"]`:`form[data-room-owner="${CSS.escape(node.dataset.roomOwner)}"][data-proposal="${CSS.escape(node.dataset.proposal)}"]`;const next=$('#view').querySelector(selector);if(next){next.replaceWith(node);focus?.focus({preventScroll:true});}}
     if (view === 'chat') insertMessages(state,conversationId);
@@ -917,7 +919,7 @@ document.addEventListener('click', event => {
     $('#image-preview-image').src = workspaceUrl(`/api/files/${encodeURIComponent(file.id)}/preview`);
     $('#image-preview').showModal(); return;
   }
-  if (target.dataset.mentionCommand) { navigate('workflows');return; }
+  if (target.dataset.mentionCommand) { navigate(workspace.skills.some(s=>s.command===target.dataset.mentionCommand) ? 'skills' : 'workflows');return; }
   if (target.dataset.agentAction) {
     if (busy || switching) return;
     const id = target.dataset.agentId, action = target.dataset.agentAction, agent = workspace.agents.find(a=>a.id===id);
@@ -934,12 +936,12 @@ document.addEventListener('click', event => {
     return;
   }
   if (target.dataset.roomAgent) { $('#room-header').close(); const room = currentRoom(); void switchAgent(target.dataset.roomAgent,{sharedChat:room.id,keepDraft:true}).then(()=>openAgentProvider()); return; }
-  if (target.dataset.selectAgent) { setNavigation(false); void switchAgent(target.dataset.selectAgent).then(()=>{ if (view === 'home') navigate('chat',conversationId); }); return; }
+  if (target.dataset.selectAgent) { setNavigation(false); void switchAgent(target.dataset.selectAgent).then(()=>{ navigate('chat',conversationId); }); return; }
   if (target.dataset.closeAgent) { closeAgent(target.dataset.closeAgent); return; }
   if (target.dataset.agent) {
     if (busy || switching) return;
     const latest = target.matches('.roster-item') && !drafts.has(target.dataset.agent) ? recentConversations(workspace).find(c=>c.kind !== 'room' && c.agentId === target.dataset.agent) : null;
-    void switchAgent(target.dataset.agent).then(()=>{ if (latest) navigate('chat',latest.id); else if (view === 'home') navigate('chat',conversationId); });
+    void switchAgent(target.dataset.agent).then(()=>{ if (latest) navigate('chat',latest.id); else navigate('chat',conversationId); });
     return;
   }
   if (target.hasAttribute('data-mascot-toggle')) {
@@ -990,7 +992,7 @@ setupOddy(()=>({view,conversationId:conversationId||'',agentId:agentId||''}));
 await refresh();
 if (state && agentId) { restoreDraft(); signature = ''; render(); }
 const initial = location.hash.slice(1).split('/');
-if (['home','chat','runs','routines','files','workflows'].includes(initial[0]) && (agentId || initial[0] === 'home')) { view = initial[0]; conversationId = initial[0] === 'home' ? conversationId : initial[1] || null; signature = ''; render(); }
+if (['home','chat','runs','routines','files','workflows','skills'].includes(initial[0]) && (agentId || initial[0] === 'home')) { view = initial[0]; conversationId = initial[0] === 'home' ? conversationId : initial[1] || null; signature = ''; render(); }
 if (!initial[0] && state) { view = 'home'; signature = ''; render(); }
 if (state && agentId && !state.customization) openSettings(true);
 else if (state && agentId && !workspace.globalProvider.configured) openSettings();
@@ -1003,4 +1005,4 @@ setInterval(() => { if (!document.hidden) {
   if(providerOddy&&$('#settings-dialog').open)void api('/api/oddy/provider').then(value=>{if(providerOddy){oddyProviderState=value;updateAccount();}}).catch(()=>{});
 } }, 1000);
 
-setupWorkflows(()=>workspace,()=>agentId,job=>navigate('chat',job.conversationId),refresh);
+setupWorkflows(()=>workspace,()=>agentId,job=>navigate('chat',job.conversationId),refresh,()=>{signature='';render();});

@@ -964,7 +964,7 @@ body.mascot-paused :is(.agent-avatar,.message-avatar,.working-avatar,.avatar-eye
   .workflow-editor-identity { width:100%; gap:8px; }
   #workflow-name { width:auto; flex:1; font-size:14px; }
   .workflow-command input { width:110px; }
-  .workflow-editor-actions { width:100%; justify-content:space-between; }
+  .workflow-editor-actions { width:100%; justify-content:space-between; flex-wrap:wrap; }
   .workflow-workspace.panel-open { grid-template-columns:minmax(0,1fr); }
   .workflow-panel { position:absolute; inset:0 0 0 auto; width:min(360px,100%); z-index:4; border-left:1px solid var(--line); }
   .workflow-editor-footer { flex-direction:column; align-items:start; gap:4px; padding:8px 12px; }
@@ -1284,3 +1284,25 @@ button.attachment-preview:hover { background:var(--paper); }
 
 #tutorial-hide { width:16px; height:16px; margin:0; flex-shrink:0; }
 }
+
+.library-page .collection-toolbar { justify-content:flex-start; margin:24px 0; }
+.library-section { margin-top:32px; padding-top:8px; border-top:1px solid var(--line); }
+.library-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.library-heading h2 { margin:16px 0; }
+.library-heading>span,.library-pagination>span { color:var(--muted); font-size:12px; }
+.library-search { display:block; margin:0 0 12px; font-size:12px; color:var(--muted); }
+.library-search input { display:block; width:100%; margin-top:8px; }
+.library-pagination { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-top:20px; }
+.library-pagination>span:first-child { margin-right:auto; }
+.library-pagination button:disabled { opacity:.45; cursor:default; }
+@media (max-width:420px) {
+  .library-pagination { gap:8px; }
+  .library-pagination>span:first-child { flex-basis:100%; }
+  .library-page .workflow-actions { width:100%; }
+}
+
+.assignment-pagination { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.assignment-pagination button:disabled { opacity:.45; cursor:default; }
+.modal .assignment-search { margin:16px 0; }
+#agent-skill-options,#agent-knowledge-options { display:grid; gap:8px; }
+.modal :is(#agent-skill-options,#agent-knowledge-options) .agent-skill-option { margin:0; }

@@ -34,6 +34,23 @@ test('persistent roster restores drafts, updates previews and keeps menus keyboa
     await page.locator('.message-assistant').filter({hasText:'Two direct trains'}).waitFor();
     await page.locator('#prompt').fill('Compare the local train routes.');
     await page.locator(`#agent-roster [data-agent="${first}"]`).click();await page.waitForFunction(()=>document.querySelector('#prompt').value==='No more than two hours by train.' && !document.querySelector('#agent-workspace').inert);
+    for (const destination of ['routines','workflows','files','runs']) {
+      await page.locator('#tools-open').click();
+      await page.locator(`#tools-dialog [data-view="${destination}"]`).click();
+      await page.locator(`#agent-roster [data-agent="${first}"]`).click();
+      await page.waitForFunction(()=>location.hash==='#chat/trip');
+      expect(await page.locator('#prompt').inputValue()).toBe('No more than two hours by train.');
+      await page.locator('.message-assistant').filter({hasText:'I can help narrow it down.'}).waitFor();
+    }
+    await page.locator('.brand[data-view="home"]').click();
+    await page.locator(`#agent-roster [data-agent="${first}"]`).click();
+    await page.waitForFunction(()=>location.hash==='#chat/trip');
+    await page.locator('#tools-open').click();
+    await page.locator('#tools-dialog [data-view="runs"]').click();
+    await page.locator('#agents-open').click();
+    await page.locator(`#agents-dialog [data-select-agent="${first}"]`).click();
+    await page.waitForFunction(()=>location.hash==='#chat/trip');
+    expect(await page.locator('#agents-dialog').evaluate(node=>node.open)).toBe(false);
     await page.locator('#agent-roster [data-agent=rei]').focus();
     state.conversations[1].messages[0].text='Research, with sources';app.runtime.changed();
     await page.locator('#agent-roster [data-agent=rei]').filter({hasText:'Research, with sources'}).waitFor();

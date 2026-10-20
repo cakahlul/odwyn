@@ -4,7 +4,19 @@ import { defaults, resolveProfile, ownerPreferenceKeys, palettes, choices, avata
 let getState, saved, providerDraft = () => undefined, step = 0, firstRun = false, adding = false, editingId = null, lastApplied = '', appearanceOnly = false;
 const toneDetails = {warm:'Friendly, thoughtful, plainspoken.',crisp:'The answer first. Keep it short.',playful:'A little wit, plenty of useful work.',formal:'Courteous, precise, professional.',patient:'Calm explanations, one step at a time.',coach:'Practical next steps and encouragement.'};
 let ownerDraft = {};
-const readDraft = () => ({...Object.fromEntries(new FormData($('#customize-form'))),...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$('#customize-form').elements.namedItem(key).disabled ? ownerDraft[key] : $('#customize-form').elements.namedItem(key).value])),knowledgeIds:[...$('#agent-knowledge-options').querySelectorAll('input:checked')].map(input=>input.value),skillIds:[...$('#agent-skill-options').querySelectorAll('input:checked')].map(input=>input.value),overrideWorkspace:$('#workspace-override').checked});
+const assignments = {skill:{selected:new Set(),query:'',page:1},knowledge:{selected:new Set(),query:'',page:1}};
+function renderAssignments(kind, renderOptions = true) {
+  const picker=assignments[kind],items=getState()[kind==='skill'?'skills':'knowledge'] || [];
+  const query=picker.query.trim().toLowerCase();
+  const matches=items.filter(item=>[item.name,item.command,item.description,item.summary].some(value=>String(value || '').toLowerCase().includes(query)));
+  const pages=Math.max(1,Math.ceil(matches.length/10));picker.page=Math.min(picker.page,pages);
+  if(renderOptions)$(`#agent-${kind}-options`).innerHTML=matches.slice((picker.page-1)*10,picker.page*10).map(item=>`<label class="agent-skill-option"><input type="checkbox" value="${esc(item.id)}" ${picker.selected.has(item.id)?'checked':''}><span><strong>${esc(item.name)}</strong><small>${kind==='skill'?`/${esc(item.command)}${item.description?' · '+esc(item.description):''}`:`v${item.version}${item.summary?' · '+esc(item.summary):''}`}</small></span></label>`).join('') || `<p class="field-hint">${query?'No matches. Try another search.':kind==='skill'?'No skills yet. Add or import skills on the Skills page.':'No knowledge yet. Add it in Workspace Settings → Knowledge.'}</p>`;
+  $(`#agent-${kind}-summary`).textContent=`${picker.selected.size} selected · ${matches.length?((picker.page-1)*10+1):0}–${Math.min(picker.page*10,matches.length)} of ${matches.length} · Page ${picker.page} of ${pages}`;
+  $(`#agent-${kind}-previous`).disabled=picker.page===1;
+  $(`#agent-${kind}-next`).disabled=picker.page===pages;
+}
+
+const readDraft = () => ({...Object.fromEntries(new FormData($('#customize-form'))),...Object.fromEntries(ownerPreferenceKeys.map(key=>[key,$('#customize-form').elements.namedItem(key).disabled ? ownerDraft[key] : $('#customize-form').elements.namedItem(key).value])),knowledgeIds:[...assignments.knowledge.selected],skillIds:[...assignments.skill.selected],overrideWorkspace:$('#workspace-override').checked});
 export const setAppearance = (node, appearance) => {
   const vars = appearanceVars(appearance);node.dataset.scheme = vars.scheme;
   Object.entries(vars).forEach(([key,value])=>node.style.setProperty(`--${key}`,value));
@@ -74,8 +86,11 @@ export function openCustomization(onboarding = false, newAgent = false, workspac
   for (const key of ownerPreferenceKeys) $('#customize-form').elements.namedItem(key).disabled = false;
   for (const [key,value] of Object.entries(draft)) { const field = $('#customize-form').elements.namedItem(key); if (field) field.value = value; }
   syncHexColors($('#customize-form'));
-  $('#agent-skill-options').innerHTML = (getState().skills || []).map(skill=>`<label class="agent-skill-option"><input type="checkbox" value="${esc(skill.id)}" ${(draft.skillIds || []).includes(skill.id) ? 'checked' : ''}><span><strong>${esc(skill.name)}</strong><small>/${esc(skill.command)}${skill.description ? ' · '+esc(skill.description) : ''}</small></span></label>`).join('') || '<p class="field-hint">No skills yet. Add or import skills in Workflows &amp; skills.</p>';
-  $('#agent-knowledge-options').innerHTML=(getState().knowledge||[]).map(doc=>`<label class="agent-skill-option"><input type="checkbox" value="${esc(doc.id)}" ${(draft.knowledgeIds||[]).includes(doc.id)?'checked':''}><span><strong>${esc(doc.name)}</strong><small>v${doc.version}${doc.summary?' · '+esc(doc.summary):''}</small></span></label>`).join('')||'<p class="field-hint">No knowledge yet. Add it in Workspace Settings → Knowledge.</p>';
+  for (const kind of ['skill','knowledge']) {
+    const items=getState()[kind==='skill'?'skills':'knowledge'] || [];
+    assignments[kind]={selected:new Set((draft[`${kind}Ids`] || []).filter(id=>items.some(item=>item.id===id))),query:'',page:1};
+    $(`#agent-${kind}-search`).value='';renderAssignments(kind);
+  }
   $('#workspace-override').checked = !adding && !!getState()?.customization?.overrideWorkspace;
   $('#agent-appearance-controls').hidden = appearanceOnly;
   $('.profile-sidebar').hidden = appearanceOnly;
@@ -102,7 +117,7 @@ async function save(profile, resetAppearance = false) {
     $('#customize-dialog').close(); await saved(result,newAgent,agentSetup); toast(workspaceSetup ? 'Appearance saved.' : newAgent || agentSetup ? 'Agent created.' : 'Agent saved. Changes apply to its next task.');
     if (continueSetup) openCustomization(true);
   } catch (error) { $('#customize-status').textContent = ''; handleError(error); }
-  finally { buttons.forEach(button=>button.disabled=false); }
+  finally { buttons.forEach(button=>button.disabled=false); for(const kind of ['skill','knowledge'])renderAssignments(kind); }
 }
 
 export function readWorkspaceAppearance() {
@@ -141,6 +156,12 @@ export function fillWorkspaceAppearance(appearance = {}) {
 
 export function setupCustomization(state, onSaved, readProvider = () => undefined) {
   getState = state; saved = onSaved; providerDraft = readProvider;
+  for (const kind of ['skill','knowledge']) {
+    $(`#agent-${kind}-search`).oninput=event=>{event.stopPropagation();assignments[kind].query=event.target.value;assignments[kind].page=1;renderAssignments(kind);};
+    $(`#agent-${kind}-options`).oninput=event=>{if(event.target.type!=='checkbox')return;const picker=assignments[kind];if(event.target.checked)picker.selected.add(event.target.value);else picker.selected.delete(event.target.value);renderAssignments(kind,false);};
+    for (const [direction,delta] of [['previous',-1],['next',1]]) $(`#agent-${kind}-${direction}`).onclick=()=>{assignments[kind].page+=delta;renderAssignments(kind);$(`#agent-${kind}-search`).focus({preventScroll:true});};
+  }
+
   for (const hex of document.querySelectorAll('[data-color-for]')) {
     const color=$('#'+hex.dataset.colorFor);
     color.addEventListener('input',()=>{hex.value=color.value;});

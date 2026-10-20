@@ -29,14 +29,16 @@ try {
   await page.goto(server.url.href);
   await page.locator('#tools-open').click();
   await page.locator('[data-view="workflows"]').click();
-  await page.getByRole('heading',{name:'Workflows & skills'}).waitFor();
+  await page.getByRole('heading',{name:'Workflows',exact:true}).waitFor();
+  await page.locator('#tools-open').click();await page.locator('[data-view=skills]').click();
   await page.locator('[data-skill-new]').click();
   await page.locator('#skill-form [name="name"]').fill('Sources');
   await page.locator('#skill-form [name="command"]').fill('sources');
   await page.locator('#skill-form [name="instructions"]').fill('Cite verified sources.');
   await page.locator('#skill-form button[type="submit"], #skill-form .primary-button').click();
   await page.locator('#skill-editor').waitFor({state:'hidden'});
-  await page.locator('[data-workflow-template]').click();
+  await page.locator('#tools-open').click();await page.locator('[data-view=workflows]').click();
+  await page.locator('#workflow-import-file').setInputFiles({name:'research.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({name:'Research and report',command:'research',description:'Research a topic, review the draft, then prepare the final report.',inputs:[{name:'topic',label:'Topic',required:true}],start:'research',maxSteps:100,steps:[{id:'research',name:'Research',type:'agent',prompt:'Research {{inputs.topic}}. Cite sources.',tools:['browser','search','ask'],skills:[],next:'review'},{id:'review',name:'Review draft',type:'approval',prompt:'Review the draft below.\n{{steps.research}}',next:'report'},{id:'report',name:'Final report',type:'agent',prompt:'Prepare the final report from {{steps.research}} and {{steps.review.answer}}',tools:[],skills:[],next:null}]}))});
   const bounds=await page.locator('#workflow-editor').boundingBox();
   assert.ok(bounds.width>=1440*.9 && bounds.height>=960*.9,'Editor should fill the viewport');
   assert.ok(await page.locator('.workflow-edge').count()>=3,'Canvas should show connected steps');
@@ -65,7 +67,7 @@ try {
   await page.getByLabel('Keep this finding',{exact:true}).check();
   await page.locator('#owner-answer').fill('Approved report');
   await page.locator('.answer-form .primary-button').click();
-  await page.getByText('Final: Approved report',{exact:true}).waitFor();
+  await page.locator('#messages').getByText('Final: Approved report',{exact:true}).waitFor();
   await page.locator('#new-chat').click();
   await page.locator('#prompt').fill('/res');
   await page.locator('[data-workflow-command="/research"]').click();
@@ -76,7 +78,7 @@ try {
   assert.match(await page.locator('.approval-card').innerText(),/Draft: Command invocation/);
   await page.locator('#owner-answer').fill('Command worked');
   await page.locator('.answer-form .primary-button').click();
-  await page.getByText('Final: Command worked',{exact:true}).waitFor();
+  await page.locator('#messages').getByText('Final: Command worked',{exact:true}).waitFor();
   await page.reload();
   await page.locator('#tools-open').click();
   await page.locator('[data-view="workflows"]').click();

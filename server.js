@@ -386,6 +386,7 @@ export function createApp(options = {}) {
           if (!action && (req.method==='POST' && !id || req.method==='PUT' && id)) {
             const input={...await json(req),id:id || randomUUID()};
             const item=collection==='workflows' ? validateWorkflow(input,store.state):validateSkill(input);
+            if (collection==='skills' && items.some(s=>s.id!==id && s.name.trim().toLowerCase()===item.name.toLowerCase())) throw new Error('Skill name already exists.');
             if (collection==='skills' && (items.some(s=>s.id!==id && s.command===item.command) || store.state.workflows.some(w=>w.command===item.command))) throw new Error('Command already exists.');
             if(existing) items.splice(items.indexOf(existing),1,item);else items.unshift(item);
             runtime.changed();return response(item,existing ? 200:201);

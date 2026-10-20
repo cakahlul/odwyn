@@ -125,6 +125,14 @@ test('workflow and skill APIs validate, persist and launch versioned runs', asyn
     expect(app.runtime.state.skills).toHaveLength(0);
     expect((await request('/api/skills/import','POST',{source:'broken'})).status).toBe(400);
     const skill=await (await request('/api/skills','POST',{name:'Sources',command:'sources',instructions:'Cite sources.'})).json();expect(skill.id).toBeTruthy();
+    for (const name of ['Sources',' sources ','SOURCES']) {
+      const duplicate=await request('/api/skills','POST',{name,command:'different-command',instructions:'Different instructions.'});
+      expect(duplicate.status).toBe(400);expect((await duplicate.json()).error).toBe('Skill name already exists.');
+    }
+    expect((await request(`/api/skills/${skill.id}`,'PUT',{...skill,name:' Sources '})).status).toBe(200);
+    const second=await (await request('/api/skills','POST',{name:'Other',command:'other',instructions:'Other instructions.'})).json();
+    expect((await request(`/api/skills/${second.id}`,'PUT',{...second,name:'sources'})).status).toBe(400);
+    expect(app.runtime.state.skills.find(s=>s.id===second.id).name).toBe('Other');
     const res=await request('/api/workflows','POST',{...definition,steps:[{id:'read',type:'agent',prompt:'Read {{inputs.topic}}',skills:[skill.id]}]});expect(res.status).toBe(201);
     const workflow=await res.json();
     expect((await request('/api/workflows','POST',{...definition})).status).toBe(400);
@@ -132,7 +140,11 @@ test('workflow and skill APIs validate, persist and launch versioned runs', asyn
     const edit=await request(`/api/workflows/${workflow.id}`,'PUT',{...workflow,name:'Edited'});expect(edit.status).toBe(200);
     expect(app.runtime.state.workflowRuns[0].workflow.name).toBe('Research');
     expect((await request(`/api/skills/${skill.id}`,'DELETE')).status).toBe(400);
-    const reopened=openStore(directory);expect(reopened.state.workflows[0].name).toBe('Edited');reopened.close();
+    const skillJob=await (await request('/api/jobs','POST',{prompt:'/sources Check the report.'})).json();
+    expect(skillJob.skill).toEqual({id:skill.id,name:'Sources',command:'sources'});
+    expect((await request(`/api/skills/${skill.id}`,'PUT',{...skill,name:'Verified sources'})).status).toBe(200);
+    const reopened=openStore(directory);expect(reopened.state.workflows[0].name).toBe('Edited');
+    expect(reopened.state.jobs.find(job=>job.id===skillJob.id).skill.name).toBe('Sources');reopened.close();
     expect((await request('/workflows-ui.js')).status).toBe(200);
   } finally {await app.close();rmSync(directory,{recursive:true,force:true});}
 });
