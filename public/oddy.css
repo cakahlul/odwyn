@@ -41,7 +41,7 @@
   border-radius:18px;
   background:var(--surface);
   color:var(--ink);
-  box-shadow:0 24px 60px color-mix(in srgb,var(--shadow-ink) 18%,transparent);
+  box-shadow:0 16px 40px -8px color-mix(in oklab,var(--shadow-ink) 14%,transparent);
   overflow:hidden;
 }
 .oddy-panel[open] { display:flex; flex-direction:column; }
@@ -85,7 +85,7 @@
   border:1px solid var(--line);
   border-radius:14px;
   background:var(--surface);
-  box-shadow:0 16px 38px color-mix(in srgb,var(--shadow-ink) 16%,transparent);
+  box-shadow:0 10px 28px -6px color-mix(in oklab,var(--shadow-ink) 12%,transparent);
 }
 .oddy-menu-items>button {
   display:block;
@@ -151,7 +151,7 @@
   border-radius:18px 18px 6px 18px;
   background-color:var(--wash);
   background-image:linear-gradient(145deg,color-mix(in srgb,var(--orange) 10%,color-mix(in srgb,var(--ink) 8%,transparent)) 0%,transparent 75%);
-  box-shadow:inset 0 1px 0 color-mix(in srgb,var(--ink) 16%,transparent);
+  box-shadow:none;
 }
 .oddy-message .message-text { font-size:14px; }
 .oddy-message pre { overflow:auto; max-width:100%; }
