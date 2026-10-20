@@ -427,6 +427,7 @@ export class Runtime {
     }
     if (params.turnId && job.turnId && params.turnId !== job.turnId) return;
     if(method==='turn/completed'&&job.turnId&&params.turn.id!==job.turnId)return;
+    if(method==='odwyn/taskModel'&&typeof params.model==='string'&&params.model.length<=200){job.providerSnapshot={...job.providerSnapshot,resolvedModel:params.model};this.changed();return;}
     if(method==='odwyn/activity'){this.event(job,params.label,params.detail);return;}
     if(method==='odwyn/taskUsage'){
       job.usageReports ||= {};job.usageReports[params.turnId]=params.usage;

@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 const args=process.argv.slice(2),emit=value=>console.log(JSON.stringify(value));
+if(args.includes('/settings')){emit({status:'SUCCESS',command:{name:'config',data:{config:{model:'Gemini 4 Argon (Medium)'}}}});process.exit();}
 if(args.includes('/usage')){emit({status:'SUCCESS',command:{name:'usage',data:{groups:[]}}});process.exit();}
 const name=args[args.indexOf('--agent')+1],directory=process.env.ODWYN_AGY_TEST_DIRECTORY;
 const path=join(directory,'config/agents',name+'.md'),system=readFileSync(path,'utf8'),settings=JSON.parse(system.split('\n')[1]),model=args.includes('--model')?args[args.indexOf('--model')+1]:'default';

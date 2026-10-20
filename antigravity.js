@@ -27,6 +27,11 @@ export class AntigravityHeadless {
       }
     }
   }
+  async defaultModel(signal){
+    const file=join(this.configDirectory,'antigravity-cli/settings.json');
+    try{if(existsSync(file)){const model=JSON.parse(readFileSync(file,'utf8')).model;if(typeof model==='string'&&model.trim())return model;}}catch{}
+    try{const {stdout}=await promisify(execFile)(this.command,['-p','/settings','--output-format','json','--print-timeout','10s'],{env:this.env,signal,timeout:20000,maxBuffer:100000});const data=JSON.parse(stdout);const model=data.command?.data?.config?.model;return data.status==='SUCCESS'&&typeof model==='string'?model:null;}catch{return null;}
+  }
   async account(){
     this.subscriptionSettings();
     let data;try{const {stdout}=await promisify(execFile)(this.command,['-p','/usage','--output-format','json','--print-timeout','10s'],{env:this.env,timeout:20000,maxBuffer:100000});data=JSON.parse(stdout);}catch{throw Error('Sign in with your personal Google subscription using agy on this server, then Refresh.');}
@@ -35,6 +40,8 @@ export class AntigravityHeadless {
   }
   async run(provider,run,params) {
     this.subscriptionSettings();
+    const resolvedModel=run.config.model==='default'?await this.defaultModel(run.controller.signal):run.config.model;
+    if(resolvedModel)provider.notify(run,'odwyn/taskModel',{model:resolvedModel});
     const agentName='odwyn-'+randomUUID(),agentPath=join(this.configDirectory,'config','agents',agentName+'.md');
     const images=params.input.filter(part=>part.type==='image').map(part=>{const match=part.url?.match(/^data:image\/(png|jpeg|webp|gif);base64,([A-Za-z0-9+/=]+)$/);if(!match)throw Error('Antigravity needs an uploaded PNG, JPEG, WebP or GIF image.');return {type:'image',mimeType:'image/'+match[1],data:match[2]};});
     const taskTools=[...run.thread.dynamicTools,...(images.length?[{name:'odwyn_task_images',description:'Read images uploaded with the current task.',inputSchema:{type:'object',properties:{},additionalProperties:false}}]:[])];

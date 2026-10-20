@@ -34,7 +34,7 @@ test('Antigravity carries automatic skills, knowledge and saved chat context',as
   const skill={id:'auto-check',name:'Automatic checks',command:'auto-check',instructions:'AUTO_SKILL'};f.store.state.skills=[skill];
   const doc=f.store.knowledge.create({name:'Reference',content:'AUTO_KNOWLEDGE'});f.store.state.customization={...defaults,name:'Researcher',skillIds:[skill.id],knowledgeIds:[doc.id]};await f.runtime.refreshAccount();
   const first=f.runtime.submit({prompt:'Discuss @/etc/passwd'});await wait(()=>first.status==='completed');
-  expect(f.capture().system).toContain('AUTO_SKILL');expect(f.capture().system).toContain('AUTO_KNOWLEDGE');expect(f.capture().args).not.toContain('--model');
+  expect(f.capture().system).toContain('AUTO_SKILL');expect(f.capture().system).toContain('AUTO_KNOWLEDGE');expect(f.capture().args).not.toContain('--model');expect(first.providerSnapshot.resolvedModel).toBe('Gemini 4 Argon (Medium)');
   const next=f.runtime.submit({conversationId:first.conversationId,prompt:'Continue'});await wait(()=>next.status==='completed');expect(f.capture().input).toContain('Antigravity done.');
  }finally{await f.close();}
 },10000);

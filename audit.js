@@ -1,3 +1,4 @@
+import {withCostEstimate} from './pricing.js';
 export function openAudit(db,state,credentials){
   db.exec(`CREATE TABLE IF NOT EXISTS audit_jobs(id TEXT PRIMARY KEY,agentId TEXT,createdAt TEXT,payload TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS audit_agent_time ON audit_jobs(agentId,createdAt);
@@ -27,7 +28,7 @@ export function openAudit(db,state,credentials){
     const bindings=[agent,agent,from,from,to,to];
     const total=db.query('SELECT count(*) AS n FROM audit_jobs'+where).get(...bindings).n;
     const pages=Math.max(1,Math.ceil(total/20)),current=Math.min(Math.floor(page),pages);
-    const rows=db.query('SELECT payload FROM audit_jobs'+where+' ORDER BY createdAt DESC,id DESC LIMIT 20 OFFSET ?').all(...bindings,(current-1)*20).map(row=>JSON.parse(row.payload));
+    const rows=db.query('SELECT payload FROM audit_jobs'+where+' ORDER BY createdAt DESC,id DESC LIMIT 20 OFFSET ?').all(...bindings,(current-1)*20).map(row=>withCostEstimate(JSON.parse(row.payload)));
     const agents=db.query('SELECT agentId,payload FROM audit_jobs GROUP BY agentId').all().map(row=>({id:row.agentId,name:JSON.parse(row.payload).agentName}));
     return credentials.sanitize({rows,total,page:current,pages,agents});
   }
@@ -36,7 +37,7 @@ export function openAudit(db,state,credentials){
     const total=db.query('SELECT count(*) AS n FROM audit_events WHERE jobId=?').get(id).n;
     const pages=Math.max(1,Math.ceil(total/50)),page=Math.min(pages,Math.max(1,Math.floor(Number(params.get('page'))||1)));
     const events=db.query('SELECT payload FROM audit_events WHERE jobId=? ORDER BY at,rowid LIMIT 50 OFFSET ?').all(id,(page-1)*50).map(row=>JSON.parse(row.payload));
-    return credentials.sanitize({...JSON.parse(row.payload),events,total,page,pages});
+    return credentials.sanitize({...withCostEstimate(JSON.parse(row.payload)),events,total,page,pages});
   }
   return {sync,list,detail};
 }
