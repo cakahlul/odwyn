@@ -6,7 +6,7 @@ export const workspaceUrl = path => workspaceId === 'default' ? path : `${path}$
 export const storageKey = key => workspaceId === 'default' ? key : `${key}:${workspaceId}`;
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 const paths = {
-  more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  more:'<circle cx="5.5" cy="12" r="1.25" fill="currentColor"/><circle cx="12" cy="12" r="1.25" fill="currentColor"/><circle cx="18.5" cy="12" r="1.25" fill="currentColor"/>',
   computer:'<rect x="3" y="4" width="18" height="13" rx="3"/><path d="M8 21h8m-4-4v4"/>',
   home: '<path d="m3 10 9-7 9 7v11h-6v-7H9v7H3V10Z"/>',
   chat: '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 10 10 0 0 1-4-.8L3 21l1.8-5a9 9 0 1 1 16.2-4.5Z"/>',
@@ -17,7 +17,7 @@ const paths = {
   activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   folder: '<path d="M3 7V5h6l3 3h9v12H3V7Z"/>', search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
   settings: '<path d="M4 7h5m4 0h7M4 17h9m4 0h3"/><circle cx="11" cy="7" r="2"/><circle cx="15" cy="17" r="2"/>',
-  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  menu: '<path d="M4 7h16M4 12h11M4 17h16"/>',
   close: '<path d="m6 6 12 12M6 18 18 6"/>', globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>',
   chevron: '<path d="m14 6-6 6 6 6"/>',
   minimize: '<path d="M5 18h14"/>',

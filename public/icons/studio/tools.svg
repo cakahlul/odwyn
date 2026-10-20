@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="tool-main" x1="8" y1="8" x2="36" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fffdf9"/>
+      <stop offset="0.65" stop-color="#f2ebe0"/>
+      <stop offset="1" stop-color="#ddd2c2"/>
+    </linearGradient>
+    <linearGradient id="tool-top" x1="35" y1="8" x2="56" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff8c66"/>
+      <stop offset="0.55" stop-color="#e65a35"/>
+      <stop offset="1" stop-color="#b83b1b"/>
+    </linearGradient>
+    <linearGradient id="tool-bot" x1="35" y1="34" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4e5d73"/>
+      <stop offset="1" stop-color="#232b38"/>
+    </linearGradient>
+    <filter id="tool-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="3" flood-color="#0f141c" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <g filter="url(#tool-shadow)">
+    <rect x="8" y="9" width="23" height="46" rx="8" fill="url(#tool-main)" stroke="#ffffff" stroke-width="1.3"/>
+    <path d="M15.5 23.5 L20.5 28 L15.5 32.5" stroke="#252d3d" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M15.5 40 H23.5" stroke="#e05632" stroke-width="3" stroke-linecap="round"/>
+    <rect x="35" y="9" width="21" height="21" rx="7.5" fill="url(#tool-top)" stroke="#ffbfa8" stroke-opacity="0.6" stroke-width="1.1"/>
+    <path d="M46.5 14.5 L42 20.5 H46 L44.5 25.5 L49 19.5 H45 L46.5 14.5 Z" fill="#fffdf9"/>
+    <rect x="35" y="34" width="21" height="21" rx="7.5" fill="url(#tool-bot)" stroke="#73849e" stroke-opacity="0.45" stroke-width="1.1"/>
+    <circle cx="45.5" cy="44.5" r="4.2" stroke="#fffdf9" stroke-width="2.6"/>
+  </g>
+</svg>
