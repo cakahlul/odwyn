@@ -7,7 +7,6 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { createApp } from '../server.js';
-import { grantFiles } from '../tests/security/access-fixtures.js';
 import { defaults } from '../public/profile.js';
 
 class RoomAI extends EventEmitter {
@@ -106,9 +105,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aXioAAAAASUVORK5CYII=','base64');
     writeFileSync(join(app.runtime.workspace,'answer.png'),png);
     writeFileSync(join(app.runtime.workspace,'itinerary.csv'),'City,Days\nKyoto,2\n');
-    const resources=grantFiles(app.runtime.store,primary,['answer.png','itinerary.csv']);
-    const p=app.runtime.store.security;p.putAccess(scout.id,{revision:p.revision,spaceIds:[p.legacySpaceId],grants:Object.values(resources).map(resourceId=>({spaceId:p.legacySpaceId,resourceId,action:"file.download",mode:"auto"}))});
-    const attach = (job,path) => app.runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_send_file',arguments:{path,resourceId:resources[path]}}});
+    const attach = (job,path) => app.runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_send_file',arguments:{path}}});
     await attach(jobs[0],'answer.png'); await attach(jobs[0],'itinerary.csv');
     complete(first,jobs[0],'Pip suggests Kyoto.'); await app.runtime.drain();
     await page.locator('.working-row strong').filter({hasText:'Scout'}).waitFor();
@@ -179,6 +176,7 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     }
     await page.locator('#room-details-open').click(); await page.locator('#edit-room').click(); await page.locator('#room-name').fill('Unsaved name'); await page.keyboard.press('Escape');
     expect(await page.locator('#room-heading').textContent()).toBe('Weekend planning');
+    if(!await page.locator('#close-conversation').isVisible())await page.locator('#conversation-menu-open').click();
     await page.locator('#close-conversation').click(); await page.waitForFunction(()=>document.querySelector('#room-details-open').hidden);
     if(!await page.locator('#search-dialog').evaluate(node=>node.open)) await page.locator('#menu-button').click();
     await page.locator('#room-list [data-conversation]').click(); await page.locator('#room-details-open').waitFor({state:'visible'});
@@ -223,50 +221,4 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     expect(await page.locator('#history [data-conversation],#room-list [data-conversation]').count()).toBe(0);
     expect(errors).toEqual([]);
   } finally {await browser.close(); await server.stop(); await app.close(); rmSync(directory,{recursive:true,force:true});}
-},30_000);
-
-test('room editor selects a permanent Space, filters agents, and rejects stale membership', async () => {
-  const directory=mkdtempSync(join(tmpdir(),'odwyn-room-space-ui-'));
-  let app;
-  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
-  app=createApp({directory,user:'owner',password:'test-password-long-enough',origin:server.url.origin,codex:new RoomAI(),browser:{close:async()=>{}}});
-  app.runtime.state.customization={...defaults,name:'Pip'};app.runtime.state.provider.configured=true;app.runtime.state.globalProvider.configured=true;
-  const p=app.runtime.store.security,primary=app.runtime.state.agents[0].id;
-  const request=async path=>{
-    const response=await app.fetch(new Request(new URL('/api/agents',server.url),{method:'POST',headers:{authorization:'Basic '+Buffer.from('owner:test-password-long-enough').toString('base64'),origin:server.url.origin,'content-type':'application/json'},body:JSON.stringify({...defaults,name:path})}));
-    expect(response.status).toBe(201);return response.json();
-  };
-  const scout=await request('Scout'),foreign=await request('Foreign');
-  const A=p.createSpace({name:'Room Space A'}),B=p.createSpace({name:'Room Space B'}),empty=p.createSpace({name:'Empty Space'});
-  const membership=(id,spaces,defaultSpaceId)=>p.putAccess(id,{revision:p.revision,spaceIds:spaces,grants:[],...(defaultSpaceId?{defaultSpaceId}:{})});
-  membership(primary,[A.id],A.id);membership(scout.id,[A.id,B.id]);membership(foreign.id,[B.id]);app.runtime.changed();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'}}),page=await newPageWithoutTutorials(context);
-  page.setDefaultTimeout(5000);
-  try{
-    await page.goto(server.url.href+'#chat');await page.locator('#menu-button').click();await page.locator('#new-room').click();
-    expect(await page.locator('#room-space').inputValue()).toBe(A.id);
-    const options=()=>page.locator('#room-agent-options input').evaluateAll(nodes=>nodes.map(n=>n.value));
-    expect(await options()).toEqual([primary,scout.id]);
-    await page.locator('#room-space').selectOption(B.id);expect(await options()).toEqual([scout.id,foreign.id]);
-    await page.locator('#room-space').selectOption(empty.id);expect(await options()).toEqual([]);
-    expect(await page.locator('#room-agent-options').textContent()).toContain('No agents belong');
-    await page.locator('#room-space').selectOption(p.legacySpaceId);expect(await options()).toEqual([primary,scout.id,foreign.id]);
-    await page.locator('#room-space').selectOption(A.id);await page.locator('#room-name').fill('Selected Space room');
-    await page.locator(`#room-agent-options input[value="${scout.id}"]`).check();await page.locator('#room-save').click();
-    await page.locator('#room-label').filter({hasText:'Selected Space room'}).waitFor();
-    const room=app.runtime.state.conversations.find(c=>c.kind==='room');expect(room.spaceId).toBe(A.id);
-    await page.reload();await page.locator('#room-label').filter({hasText:'Selected Space room'}).waitFor();
-    expect(app.runtime.state.conversations.find(c=>c.id===room.id).spaceId).toBe(A.id);
-    await page.locator('#room-details-open').click();await page.locator('#edit-room').click();
-    expect(await page.locator('#room-space').isDisabled()).toBe(true);expect(await page.locator('#room-space').inputValue()).toBe(A.id);
-    await page.locator('#room-space').evaluate((node,id)=>{node.disabled=false;node.value=id;},B.id);
-    await page.locator('#room-save').click();await page.locator('#toast').filter({hasText:'Room Space cannot change'}).waitFor();
-    expect(room.spaceId).toBe(A.id);
-    await page.locator('#room-space').evaluate((node,id)=>{node.value=id;node.disabled=true;},A.id);
-    membership(scout.id,[B.id]);
-    await page.locator('#room-name').fill('Rejected stale edit');await page.locator('#room-save').click();
-    await page.locator('#toast').filter({hasText:'Space membership denied'}).waitFor();
-    expect(room.title).toBe('Selected Space room');expect(room.memberIds).toEqual([primary,scout.id]);
-    expect(p.access(primary).grants).toEqual([]);expect(p.access(scout.id).grants).toEqual([]);
-  }finally{await browser.close();await server.stop();await app.close();rmSync(directory,{recursive:true,force:true});}
 },30_000);

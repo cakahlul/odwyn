@@ -69,7 +69,7 @@ test('Oddy operates across workspaces independently and binds deletion to an exp
   };
   try{
     expect((await app.fetch(new Request(options.origin+'/api/oddy'))).status).toBe(401);
-    expect((await app.fetch(new Request(options.origin+'/api/oddy',{headers:{authorization:'Bearer invalid'}}))).status).toBe(403);
+    expect((await app.fetch(new Request(options.origin+'/api/oddy',{headers:{authorization:'Bearer invalid'}}))).status).toBe(401);
     expect((await app.fetch(new Request(options.origin+'/api/oddy',{method:'POST',headers:{...headers,origin:'https://evil.test'},body:'{}'}))).status).toBe(403);
     const workspace=await (await request('/api/workspaces','POST',{name:'Research'})).json();
     const form=new FormData();form.append('file',new File(['Owner supplied reference'], 'brief.txt'));
@@ -108,7 +108,7 @@ test('Oddy operates across workspaces independently and binds deletion to an exp
     const preferences=await tool({action:'read_history',workspaceId:'default',targetId:'preferences',parameters:{collection:'configuration'}});
     expect(JSON.parse(preferences.contentItems[0].text).text).toContain('Prefer short replies');
     expect(JSON.stringify(preferences)).not.toContain('protected-history-canary');
-    for(const collection of ['audit','memory','approvals','exports'])expect((await tool({action:'search_history',workspaceId:'default',parameters:{collection}})).success).toBe(true);
+    for(const collection of ['audit','memory','approvals','exports'])expect((await tool({action:'search_history',workspaceId:'default',parameters:{collection}})).success).toBe(false);
     expect((await tool({action:'cancel_job',workspaceId:'default',targetId:busy.id})).success).toBe(true);
     expect(busy.status).toBe('cancelled');
     const deniedWrite=tool({action:'create_agent',parameters:{name:'Denied'}},'odwyn_manage',false);

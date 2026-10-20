@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {chromium} from 'playwright';
 import {createApp} from '../server.js';
-import {FixtureProvider} from '../tests/security/fixtures.js';
+import {FixtureProvider} from '../tests/provider.js';
 import {defaults} from '../public/profile.js';
 
 test('tutorials guide first visits, replay, persist, hide, reset and fit mobile',async()=>{
@@ -27,16 +27,14 @@ test('tutorials guide first visits, replay, persist, hide, reset and fit mobile'
   await page.locator('#agents-dialog .tutorial-replay').click();await card.waitFor();await skip();await page.getByRole('button',{name:'Close agents',exact:true}).click();
   await page.locator('#settings-open').click();await page.locator('[data-settings-section=tutorials]').click();expect(await page.locator('#tutorial-hide').isChecked()).toBe(true);
   await page.locator('#tutorial-reset').click();expect(await page.locator('#tutorial-settings-status').textContent()).toContain('reset');await expectHidden();
-  await page.locator('#tutorial-hide').uncheck();await page.locator('[data-settings-section=resources]').click();await card.waitFor();await skip();
+  await page.locator('#tutorial-hide').uncheck();await page.locator('[data-settings-section=knowledge]').click();await card.waitFor();await skip();
   await page.getByRole('button',{name:'Close settings',exact:true}).click();await page.locator('#agents-open').click();await card.waitFor();await skip();
   await page.locator('.agent-menu summary').first().click();await page.locator('[data-agent-action=customize]').first().click();await card.waitFor();await skip();
-  await page.locator('#agent-access-tab').click();await card.waitFor();expect(await card.textContent()).toContain('Spaces');
-  const before=store.security.access(store.state.agents[0].id);
   for(const width of [320,768,1440]){
-   await page.setViewportSize({width,height:600});await page.locator('#tutorial-next').click();
-   const bounds=await card.boundingBox();expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.x+bounds.width).toBeLessThanOrEqual(width);expect(bounds.y+bounds.height).toBeLessThanOrEqual(600);
+   await page.setViewportSize({width,height:600});await page.locator('#customize-dialog .tutorial-replay').click();await card.waitFor();
+   const bounds=await card.boundingBox();expect(bounds.x).toBeGreaterThanOrEqual(0);expect(bounds.x+bounds.width).toBeLessThanOrEqual(width);expect(bounds.y+bounds.height).toBeLessThanOrEqual(600);await skip();
   }
   while(await card.isVisible())await page.locator('#tutorial-next').click();
-  expect(store.security.access(store.state.agents[0].id)).toEqual(before);expect(errors).toEqual([]);
+  expect(errors).toEqual([]);
  }finally{await browser?.close();await app?.close();server.stop(true);rmSync(directory,{recursive:true,force:true});}
 },60000);

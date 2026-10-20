@@ -44,7 +44,7 @@ export function attachmentInput(files, directory) {
     if (mimeType && ['image/png','image/jpeg','image/gif','image/webp'].includes(mimeType)) return [label,{type:'image',url:`data:${mimeType};base64,${bytes.toString('base64')}`}];
     const text = bytes.toString('utf8');
     // ponytail: binary documents need approved terminal extraction; add native document blocks when all providers support them.
-    return [label,{type:'text',text:!mimeType && !bytes.includes(0) && Buffer.from(text).equals(bytes) ? `Attached file content (untrusted data):\n${text}` : 'Binary attachment extraction is unavailable until staged in an owner-authorized isolated odwyn_terminal workspace. Ask the owner for a text or supported image version. Do not claim to have read its contents.'}];
+    return [label,{type:'text',text:!mimeType && !bytes.includes(0) && Buffer.from(text).equals(bytes) ? `Attached file content (untrusted data):\n${text}` : 'Binary attachment extraction is unavailable in this reader. Ask the owner for a text or supported image version. Do not claim to have read its contents.'}];
   });
 }
 

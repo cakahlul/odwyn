@@ -1,56 +1,13 @@
 # Development and verification
 
-[Back to Odwyn](../README.md) · [Setup](SETUP.md) · [Workflow guide](WORKFLOWS.md)
+[Back to Odwyn](../README.md) · [Setup](SETUP.md)
 
-## Project layout
+Odwyn uses Bun HTTP/SQLite, native HTML/CSS/JavaScript and Playwright Chromium. `server.js` handles routes, `runtime.js` executes tasks and workflows, and `store.js` persists state. `credentials.js` encrypts provider keys and redacts managed secrets. Login, origin validation, request limits, file path validation and the browser’s public-network proxy remain enforced.
 
-Odwyn uses Bun HTTP/SQLite, native HTML/CSS/JavaScript, and Playwright Chromium. Codex, Claude Code, and OpenAI-compatible API providers share the task, workflow, and approval runtime.
+Run `bun run test` for the regression suite. Each test file runs in a separate process to keep browser and SQLite handles local. Focused checks use `bun test test/<name>.test.js`. Browser checks require installed Chromium; `bun run browser:install` installs it.
 
-| Location | Responsibility |
-| --- | --- |
-| `server.js`, `runtime.js`, `store.js` | HTTP routes, task execution, and persistence. |
-| `providers.js`, `codex.js` | Provider integration. |
-| `public/` | Workspace UI, customization, access controls, and workflow editor. |
-| `security/` | Policy, credentials, scoped gateways, approvals, and classified data. |
-| `execution/` | Isolated terminal/browser workers and setup instructions. |
-| `test/`, `tests/security/` | Regression tests and security acceptance gates. |
-| `scripts/` | Setup and focused end-to-end checks. |
+`bun run check:settings`, `bun run check:workflows` and `bun run check:browser` exercise the UI with disposable data. `bun run check:codex` uses real subscription inference and consumes allowance.
 
-Read the [security boundary inventory](security/INVENTORY.md), [access-control design](security/ADR-ACCESS-CONTROL.md), and [owner API contracts](security/PHASE4_API.md) before changing execution or permissions. Provider-native tools, plugins, or remote MCP annotations must not bypass server policy.
+`test/access-removal.test.js` covers removal of old access tables, preservation of history and handoff packages, credential migration, repeat opens and transaction rollback when a provider key is unavailable.
 
-## Focused checks
-
-```sh
-bun test test/core.test.js test/runtime.test.js
-bun test tests/security/management.test.js tests/security/browsing.test.js
-bun test test/browser-page.test.js
-bun run check:settings
-bun run check:workflows
-bun run check:browser
-```
-
-These use disposable fixtures or mocked providers. Settings checks cover shared management, legacy browsing scopes, resets, access separation, and four viewport widths. Browser page tests use real Chromium to check local interactions and blocked outbound requests; they do not prove container isolation.
-
-Combined Bun runs can reuse native browser/SQLite handles across test files, causing timeouts, socket errors, and database failures. `bun run test` uses the existing security baseline runner to execute every regression and security test file in a separate process, with actual JUnit and logs retained under `artifacts/tests/`. Focused `bun test <file>` checks remain available.
-
-## Full security verification
-
-The full suite includes acceptance checks requiring pinned disposable images and a supported Linux/Docker runner. `bun run test` creates its own report directory; it preserves explicitly configured `ODWYN_SECURITY_*` worker variables. Read [isolated execution](../execution/README.md) for the environment and commands. An unavailable worker environment is a blocked check, not a passing isolation test.
-
-On an authorized disposable worker runner, execute every test without filtering:
-
-```sh
-ODWYN_SECURITY_SANDBOX_IMAGE=sha256:<terminal-image-id> \
-ODWYN_SECURITY_BROWSER_IMAGE=sha256:<browser-image-id> \
-ODWYN_SECURITY_ISOLATION_RUNNER=1 bun run test
-```
-
-`bun run check:codex` uses real subscription inference and consumes allowance. It uses a temporary test home; `ODWYN_SMOKE_CODEX_HOME` selects the signed-in source home. Review [scripts/check-codex.js](../scripts/check-codex.js) before running it.
-
-For optional WCAG checks, install `@axe-core/playwright` outside the project and set `ODWYN_AXE_PATH` to its absolute `dist/index.mjs` when running `check:browser`.
-
-## Data and operations
-
-Persistent state lives in the configured data directory. Provider credentials are encrypted using the local broker key. Tasks and room discussions have execution limits; service restarts require review of interrupted work. This is a single-owner application.
-
-See [security operations](security/OPERATIONS.md) for backups, recovery, review evidence, and worker cleanup. The [threat model](security/THREAT_MODEL.md) records the execution boundaries and remaining risks.
+Terminal tools execute host commands under the service user. Native provider command tools remain disabled; use the application’s terminal/browser tools and selected interaction mode. Keep `.env`, data and provider homes private. Back up SQLite and its local `broker.key` together with the service stopped.

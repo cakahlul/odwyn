@@ -13,14 +13,14 @@ Workflow settings hold launch inputs and the execution limit. Connecting back to
 | Block | Behavior |
 | --- | --- |
 | Agent | Runs custom instructions with selected tools and text or JSON output. |
-| Browser | Requests a browser action through the agent's resource permissions. |
-| Terminal | Runs a command in the granted isolated workspace. |
+| Browser | Uses the workspace browser and selected interaction mode. |
+| Terminal | Runs a host command in the workspace folder. |
 | Condition | Compares values without executing expressions. |
 | Approval | Pauses for owner instructions and optional item selection. |
 | Output | Displays mapped text or JSON in chat. |
 | Room stage | Runs a configured room goal with participants, deliverables, reviewers, and optional owner approval. |
 
-Workflow tool selection does not grant access. Browser, terminal, and connector operations still require resource permissions and a configured executor. Raw provider MCP servers and their read-only annotations cannot authorize access; use reviewed connections and scoped resources.
+Workflow steps use their selected tools and the task’s interaction mode. Native MCP tools are available only when the step enables MCP.
 
 ## Run commands
 
@@ -61,7 +61,7 @@ Names can be up to 80 characters, descriptions 500, and instructions 20,000. Wor
 
 On an Agent or Output node, open **Interactive response**. Set the returned array field, button text, and follow-up instructions. Leaving instructions empty keeps the result read-only.
 
-The result shows selectable records. Submitting sends selected records, owner notes, and original result context to the producing agent as a new task in the same chat after the workflow finishes. It does not resume the workflow or grant new resource access. Selections and notes survive reload; a result can be submitted once.
+The result shows selectable records. Submitting sends selected records, owner notes, and original result context to the producing agent as a new task in the same chat after the workflow finishes. It does not resume the workflow or authorize unrelated actions. Selections and notes survive reload; a result can be submitted once.
 
 Use an Approval block when selections should instead feed connected workflow steps. Map its `answer` or `selected` output into the next step.
 
@@ -76,41 +76,23 @@ Editing a definition affects future runs. Failed, cancelled, or interrupted runs
 ## Room stages
 
 Create a workflow and add **Room stage** blocks. **Configure room** opens the
-existing room editor: choose Space, members, facilitator, reviewers, observers,
-required outputs, owner approval, and concurrency. Give each stage a goal and
+existing room editor: choose members, facilitator, reviewers, observers,
+required outputs, owner approval. Give each stage a goal and
 connect its Next step. Room stages belong together in a room workflow; ordinary
-agent/action workflows remain separate. No resource access is inherited.
+agent/action workflows remain separate.
 
 Supply launch inputs before running. The first room starts immediately. After its
 review gates pass, **Pass to next room** uses the snapshotted next stage settings
-and lets you select the package and optional checkpoint. The next room is created
+and lets you select the approved deliverable package. The next room is created
 with **Start stage**; creating it does not start its agents. Final stages finish
 the workflow. Changing definitions affects future runs. Bounded loops work with
 the same explicit handoff gate. Stage instructions accept `{{inputs.name}}` and
 run metadata. Previous stages arrive through the selected package, not `steps.*`.
 
-For Studio, create the workspace, five agent profiles and five Spaces in Settings.
-Grant each agent only the resources needed in its Spaces. Configure these stages:
-
-| Stage | Participants and roles | Required package / gate |
-| --- | --- | --- |
-| Grooming | Lead facilitates; Backend, Frontend, QA contribute; Release observes | Contracts, TRDs, draft cases and tasks, UAT scenarios; Lead reviews drafts |
-| Planning | All five; Lead facilitates/reviews | Revised TRDs/contracts and plan; owner approval publishes development files |
-| Execution | Lead, Backend, Frontend; Lead reviews; optional concurrency | Implementation checkpoint and actual unit-test evidence |
-| Testing | Lead, Backend, Frontend, QA; QA and Lead review | Cases, defect fixes, passing retests at the current checkpoint |
-| Release | Lead, QA, Release Manager; Release Manager reviews | QA UAT evidence, approved TRDs and release package; green light to Lead |
-
-Put the responsibilities and ritual in each stage goal, including asking the
-owner about unclear requirements. Define evidence outputs for gates requiring
-actual test results. Reissue imported draft documents as the next stage's required
-outputs so its reviewers approve those exact versions. Transfer a checkpoint into
-an empty destination workspace resource and grant execution/read access there.
-Do not copy source grants. The same editor supports Research → Editorial review
-or any other reviewed deliverable flow; these stage names have no special logic.
-
+For Studio, create five agent profiles and configure Grooming, Planning, Execution, Testing and Release stages. Give each stage the appropriate authors, reviewers and deliverables. Planning can require owner approval; testing and release deliverables should include actual verification results. The same editor supports Research → Editorial review or other reviewed deliverable flows.
 
 ## Launch requirements and attachments
 
 For room workflows, put the run identifier first in Inputs (for example **Feature Identifier**), followed by the requirement or brief. The first input remains a short field and prefixes each generated room title: `Feature001 · Grooming`, `Feature001 · Planning`, and so on. Remaining room-workflow inputs use large, resizable multiline fields. Titles use up to 40 identifier characters and the existing 70-character room-title limit; saved workflow stage names stay unchanged.
 
-The Run workflow dialog accepts files through **Attach files**, image paste, or file drop. Review/remove attachment cards before running. Existing chat limits apply: up to 20 files, 20 MB each. Files are uploaded into the first step's Space and included in its first task/room message for the participants; later Spaces still require explicit room handoff/export. Cancelling or removing an attachment leaves its uploaded file in Files & results, as in chat. Supported text/images are supplied through the existing attachment reader; uploading a binary document does not add a new PDF/Word parser.
+The Run workflow dialog accepts files through **Attach files**, image paste, or file drop. Review/remove attachment cards before running. Existing chat limits apply: up to 20 files, 20 MB each. Files are saved in the workspace and included in the first task or room message. Later stages receive selected deliverables through room handoffs. Cancelling or removing an attachment leaves its uploaded file in Files & results, as in chat. Supported text/images are supplied through the existing attachment reader; uploading a binary document does not add a new PDF/Word parser.

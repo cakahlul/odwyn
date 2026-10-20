@@ -218,18 +218,18 @@ test('a deleted command pauses its routine instead of crashing the scheduler', (
   expect(state.schedules[0].enabled).toBe(false);expect(state.schedules[0].error).toBe('Unknown command');
 });
 
-test('direct terminal steps quote mapped data and fail closed without a sandbox', async () => {
+test('direct terminal steps quote mapped data and report failed commands', async () => {
   const dir=mkdtempSync(join(tmpdir(),'odwyn-workflow-terminal-')),store=openStore(dir),runtime=new Runtime({store,codex:new Provider(),browser:{},workspace:dir});
   try {
     await runtime.refreshAccount();
     const workflow=validateWorkflow({name:'Terminal',command:'terminal',inputs:[{name:'value'}],steps:[{id:'shell',type:'terminal',action:{command:"printf '%s' {{inputs.value}}",reason:'Print data'},next:'report'},{id:'report',type:'output',prompt:'{{steps.shell.stdout}}'}]},store.state);
     store.state.workflows.push(workflow);const value="'; touch unexpected; $(echo injected)";
-    runtime.submit({prompt:'/terminal '+JSON.stringify({value})});await runtime.drain();await runtime.starting;
-    expect(store.state.workflowRuns[0].status).toBe('failed');expect(store.state.jobs[0].workflowOutput).toBeUndefined();
+    runtime.submit({prompt:'/terminal '+JSON.stringify({value}),interactionMode:'allow'});await runtime.drain();await runtime.starting;await runtime.drain();
+    expect(store.state.workflowRuns[0].status).toBe('completed');expect(store.state.workflowRuns[0].outputs.shell.stdout).toBe(value);
     expect(await Bun.file(join(dir,'unexpected')).exists()).toBe(false);
     const bad=validateWorkflow({name:'Failure',command:'failure',steps:[{id:'shell',type:'terminal',action:{command:'exit 7',reason:'Check exit status'}}]},store.state);
     store.state.workflows.push(bad);runtime.submit({prompt:'/failure',interactionMode:'allow'});await runtime.drain();await runtime.starting;
-    expect(store.state.workflowRuns[0].status).toBe('failed');expect(store.state.jobs[0].workflowOutput).toBeUndefined();
+    expect(store.state.workflowRuns[0].status).toBe('failed');expect(store.state.jobs[0].workflowOutput.exitCode).toBe(7);
     store.deleteConversation(store.state.workflowRuns[0].conversationId);expect(store.state.workflowRuns).toHaveLength(1);
   }finally{runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
 });

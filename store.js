@@ -1,12 +1,8 @@
+import {openCredentials} from './credentials.js';
 import {openKnowledge} from './knowledge.js';
-import {securityBackup,openMigration} from './security/migration.js';
-import { openPolicy, statePolicy } from './security/policy.js';
-import {openApprovals} from './security/approvals.js';
-import {openData,stateData} from './security/data.js';
-import {openConnectors} from './security/connectors.js';
 import { defaults, ownerPreferenceKeys } from './public/profile.js';
 import { Database } from 'bun:sqlite';
-import { mkdirSync, chmodSync, existsSync } from 'node:fs';
+import { mkdirSync, chmodSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { textInput, interactionModes } from './security.js';
@@ -29,22 +25,72 @@ export function openStore(directory) {
   for (const item of [...state.conversations, ...state.jobs, ...state.schedules]) item.agentId ||= state.agents[0].id;
   for (const conversation of state.conversations) for (const message of conversation.messages) message.agentId ||= state.jobs.find(j => j.id === message.jobId)?.agentId || conversation.agentId;
   db.exec('CREATE VIRTUAL TABLE IF NOT EXISTS chat_chunks USING fts5(messageId UNINDEXED, conversationId UNINDEXED, text)');
-  let security;
-  try { security=openPolicy(db,state,directory); } catch(error) { db.close(); throw error; }
-  if(!db.query("SELECT name FROM sqlite_master WHERE name='classified_messages'").get()){
-    securityBackup(db,directory,'pre-data-security-');
-  }
-  const plaintextProviderKeys=[state.provider,state.globalProvider,...state.agents.map(a=>a.provider)].some(c=>c?.apiKey);
-  if(!db.query("SELECT name FROM sqlite_master WHERE name='approval_requests'").get()){securityBackup(db,directory,'pre-approval-security-');}
-  let data,connectors,approvals,migration;try{db.transaction(()=>{data=openData(db,state,security);connectors=openConnectors(db,security,directory);connectors.hydrateProviders(state);approvals=openApprovals(db,security,connectors);migration=openMigration(db,state,directory);security.configureRedactor(text=>connectors.redact(text));})();}catch(error){db.close();throw error;}
+  const removedTables=['approval_keys','owner_reauth','approval_requests','security_pauses','agent_security_settings','security_presets','task_exports','workflow_output_sources','room_proposal_sources','task_tokens','data_exports','space_memory','classified_files','data_sources','classified_messages','classified_conversations','task_security_contexts','grants','memberships','security_events','resources','spaces','security_meta','security_migration','isolated_workspaces','git_merge_reviews','git_merge_requests','git_work_branches','connectors'];
+  const hasTable=name=>!!db.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name);
+  const migrating=removedTables.some(hasTable);
+  const plaintextProviderKeys=[state.provider,state.globalProvider,...state.agents.map(agent=>agent.provider)].some(config=>config?.apiKey);
+  let credentials;
+  try { db.transaction(()=>{
+    credentials=openCredentials(db,directory);credentials.hydrateProviders(state);
+    if(migrating){
+      // Preserve selected room handoff contents before removing scoped export records.
+      if(hasTable('data_exports'))for(const room of state.conversations)if(room.handoff?.exportId){
+        const row=db.query('SELECT payload FROM data_exports WHERE id=? AND revoked=0').get(room.handoff.exportId);
+        if(row)room.handoff.package=JSON.parse(row.payload).roomHandoff;
+      }
+      const strip=(value,keys)=>{if(value)for(const key of keys)delete value[key];};
+      const removedTools=new Set(['action','export_read','repository_sync','repository_read','mcp_repository_read','repository_branch','repository_push','repository_patch','repository_merge','repository_review','checkpoint','run_test','test_case']);
+      const stepClean=step=>{
+        strip(step,['spaceId','workspaceResourceId']);strip(step.room,['spaceId']);strip(step.room?.governance,['concurrency']);strip(step.action,['resourceId','approvalId']);
+        if(step.tools)step.tools=step.tools.filter(tool=>!removedTools.has(tool));
+        if(typeof step.prompt==='string'&&/odwyn_(?:checkpoint|run_test|repository_)|isolated workspace/i.test(step.prompt)){
+          step.prompt=step.prompt
+            .replace(/Use the isolated workspace resource named:\n[^\n]+/g,'Use the persistent host workspace and the repository/branch identified in the approved handoff. Use odwyn_terminal for Git, file changes and tests.')
+            .replace(/authorized isolated workspace/gi,'repository in the persistent host workspace')
+            .replace(/odwyn_run_test with purpose "uat",\n[^.]+\./g,'odwyn_terminal on the development branch, recording the exact tested Git commit, command, exit status and result.')
+            .replaceAll('odwyn_repository_branch','odwyn_terminal with Git branch/checkout commands')
+            .replaceAll('odwyn_repository_push','odwyn_terminal with git push')
+            .replaceAll('odwyn_repository_merge','odwyn_terminal with Git merge commands')
+            .replaceAll('odwyn_repository_review','odwyn_room_review on the current proposal after inspecting the exact diff and test results')
+            .replaceAll('odwyn_checkpoint','odwyn_terminal with Git status/diff/commit commands')
+            .replaceAll('odwyn_run_test','odwyn_terminal with actual test commands')
+            .replace(/odwyn_(?:mcp_repository_read|repository_(?:sync|read|patch))/g,'odwyn_terminal with Git commands')
+            .replace(/registered task/g,'task').replace(/checkpoint/gi,'commit');
+        }
+
+      };
+      strip(state,['checkpoints','executionHeads']);
+      for(const room of state.conversations){
+        strip(room,['spaceId','sessions','threadId','providerKey','checkpoints','targetCheckpointId','cases','evidence']);
+        strip(room.handoff,['exportId']);strip(room.handoff?.package,['upstreamExports']);strip(room.governance,['concurrency']);
+        for(const message of room.messages)strip(message,['spaceId','resourceId','exportId']);
+        for(const artifact of [...(room.artifacts||[]),...(room.archivedArtifacts||[])])for(const version of artifact.versions)strip(version,['evidenceIds']);
+        for(const outcome of [room.discussion?.outcome,...(room.discussion?.previousOutcomes||[])])strip(outcome,['checks']);
+        for(const handoff of room.handoffs||[])strip(handoff,['exportId']);
+      }
+      for(const job of state.jobs){
+        strip(job,['spaceId','securityContext','workspacePin','workspaceDirty','checkpointConflict','approvalWait']);
+        for(const reference of [...(job.knowledgeContext||[]),...(job.knowledgeVersions||[])])strip(reference,['resourceId']);
+        if(job.pending?.type==='security')job.pending=null;
+        if(job.workflowStep)stepClean(job.workflowStep);
+      }
+      for(const item of [...state.files,...state.schedules])strip(item,['spaceId','resourceId','exportId']);
+      for(const doc of state.knowledge)strip(doc,['resources']);
+      for(const run of state.workflowRuns){strip(run,['spaceId','outputTasks']);strip(run.recovery,['checkpointId']);}
+      for(const workflow of [...state.workflows,...state.workflowRuns.map(run=>run.workflow)])for(const step of workflow?.steps||[])stepClean(step);
+      for(const name of removedTables)db.exec('DROP TABLE IF EXISTS "'+name+'"');
+    }
+    if(migrating||plaintextProviderKeys)db.query('INSERT INTO state VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET value=excluded.value').run(credentials.serialize(state));
+  })(); } catch(error) { db.close();throw error; }
+  if(migrating||plaintextProviderKeys)db.exec('PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE)');
+  for(const name of readdirSync(directory))if(['checkpoints','sources'].includes(name)||/^pre-(?:security|data-security|approval-security|isolated-workspaces|git-work|grants)-/.test(name))rmSync(join(directory,name),{recursive:true,force:true});
   const indexed = new Map();
   const removeChunks = db.query('DELETE FROM chat_chunks WHERE messageId = ?');
   const insertChunk = db.query('INSERT INTO chat_chunks(messageId, conversationId, text) VALUES (?, ?, ?)');
   const query = db.query('INSERT INTO state VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET value=excluded.value');
   const save = db.transaction(() => {
-    data.sync();
     state.agents[0].customization = state.customization;
-    query.run(connectors.serialize(state));
+    query.run(credentials.serialize(state));
     for (const conversation of state.conversations) for (const message of conversation.messages) {
       if (indexed.get(message.id) === message.text) continue;
       removeChunks.run(message.id);
@@ -52,17 +98,17 @@ export function openStore(directory) {
       indexed.set(message.id, message.text);
     }
   });
-  const search = (text, agentId, spaceId, task) => {
+  const search = (text, agentId) => {
     // ponytail: lexical search; add semantic retrieval only if keyword recall proves insufficient.
     const terms = text.match(/[\p{L}\p{N}_]+/gu)?.slice(0, 12).map(word => `"${word}"`).join(' OR ');
     if (!terms) return [];
-    const conversations = state.conversations.filter(c => (!spaceId || c.spaceId === spaceId) && (!agentId || (c.kind === 'room' ? c.memberIds.includes(agentId) : c.agentId === agentId)));
-    const authorized=conversations.flatMap(c=>c.messages).filter(m=>!task||data.readable(task,m.id)).map(m=>m.id);
+    const conversations = state.conversations.filter(c => (!agentId || (c.kind === 'room' ? c.memberIds.includes(agentId) : c.agentId === agentId)));
+    const authorized=conversations.flatMap(c=>c.messages).map(m=>m.id);
     return db.query("SELECT messageId, conversationId, text FROM chat_chunks WHERE chat_chunks MATCH ? AND messageId IN (SELECT value FROM json_each(?)) ORDER BY rank LIMIT 5").all(terms, JSON.stringify(authorized)).map(chunk => {
       const conversation = state.conversations.find(c => c.id === chunk.conversationId);
       const message = conversation?.messages.find(m => m.id === chunk.messageId);
       return { ...chunk, title: conversation?.title, role: message?.role, at: message?.at };
-    }).filter(chunk=>!task||data.readable(task,chunk.messageId));
+    });
   };
   const deleteConversation = db.transaction(id => {
     const conversation = state.conversations.find(c=>c.id===id);
@@ -72,7 +118,6 @@ export function openStore(directory) {
     const conversations = state.conversations, jobs = state.jobs, workflowRuns = state.workflowRuns;
     try {
       state.conversations = conversations.filter(c=>c.id!==id);
-      // SQLite task identities, data sources and exports outlive chat jobs for checkpoint handoffs.
       state.jobs = jobs.filter(j=>j.conversationId!==id);
       state.workflowRuns = workflowRuns.filter(r=>r.conversationId!==id);
       for (const message of conversation.messages) indexed.delete(message.id);
@@ -80,14 +125,7 @@ export function openStore(directory) {
       save();
     } catch(error) { state.conversations = conversations; state.jobs = jobs; state.workflowRuns = workflowRuns; throw error; }
   });
-  if(plaintextProviderKeys){save();db.exec('PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE)');}
-  const store={ directory, state, security, data, connectors, approvals, migration, save, search, deleteConversation, close: () => db.close() };
-  store.ownerHistory=collection=>{
-    const queries={memory:'SELECT id,space_id AS spaceId,resource_id AS resourceId,task_id AS taskId,text FROM space_memory ORDER BY rowid DESC',audit:'SELECT id,at,task_id AS taskId,agent_id AS agentId,space_id AS spaceId,resource_id AS resourceId,action,mode,reason FROM security_events ORDER BY rowid DESC',approvals:'SELECT id,status,digest,expires_at AS expiresAt,envelope,receipt FROM approval_requests ORDER BY rowid DESC',exports:'SELECT id,message_id AS messageId,destination_space AS destinationSpaceId,purpose,payload,revoked FROM data_exports ORDER BY rowid DESC'};
-    if(!Object.hasOwn(queries,collection))throw Error('Unsupported owner history collection.');
-    const jsonFields={approvals:['envelope','receipt'],exports:['payload']}[collection]||[];
-    return db.query(queries[collection]).all().map(row=>Object.fromEntries(Object.entries(row).map(([key,value])=>[key,jsonFields.includes(key)&&value!==null?JSON.parse(value):value])));
-  };
+  const store={directory,state,credentials,save,search,deleteConversation,close:()=>db.close()};
   store.knowledge=openKnowledge(db,store);return store;
 }
 
@@ -129,22 +167,21 @@ export function findRoom(state, id) {
   return room;
 }
 
-function roomDetails(state, input, spaceId) {
+function roomDetails(state, input) {
   const title = textInput(input.title,70);
   if (/[\x00-\x1f\x7f]/.test(title)) throw new Error('Use a single line for the room name.');
   const memberIds = input.memberIds;
   if (!Array.isArray(memberIds) || memberIds.length < 2 || memberIds.length > 5 || memberIds.some(id => typeof id !== 'string' || !id) || new Set(memberIds).size !== memberIds.length) throw new Error('Choose 2 to 5 different agents.');
-  for (const id of memberIds) { findAgent(state,id); state[statePolicy].visible(id,spaceId); }
+  for (const id of memberIds) findAgent(state,id);
   const governance=input.governance;
   if(governance!==undefined && governance!==null){
-    if(typeof governance!=='object'||Array.isArray(governance)||Object.keys(governance).some(key=>!['facilitatorId','reviewerIds','observerIds','outputs','ownerApproval','concurrency'].includes(key)))throw new Error('Invalid room roles.');
+    if(typeof governance!=='object'||Array.isArray(governance)||Object.keys(governance).some(key=>!['facilitatorId','reviewerIds','observerIds','outputs','ownerApproval'].includes(key)))throw new Error('Invalid room roles.');
     const {facilitatorId=null,reviewerIds=[],observerIds=[]}=governance;
     for(const ids of [reviewerIds,observerIds])if(!Array.isArray(ids)||ids.length>5||new Set(ids).size!==ids.length||ids.some(id=>!memberIds.includes(id)))throw new Error('Room roles require different room participants.');
     if(facilitatorId!==null && !memberIds.includes(facilitatorId))throw new Error('Facilitator must be a room participant.');
     if(observerIds.length===memberIds.length||observerIds.includes(facilitatorId)||reviewerIds.some(id=>observerIds.includes(id)))throw new Error('Observers cannot facilitate or review. Keep at least one contributor.');
     const options={};
     if(governance.ownerApproval!==undefined){if(typeof governance.ownerApproval!=='boolean')throw new Error('Choose an owner approval mode.');if(governance.ownerApproval)options.ownerApproval=true;}
-    if(governance.concurrency!==undefined){if(!Number.isInteger(governance.concurrency)||governance.concurrency<1||governance.concurrency>5)throw new Error('Room concurrency must be between 1 and 5.');if(governance.concurrency>1)options.concurrency=governance.concurrency;}
     if(governance.outputs!==undefined){
       if(!Array.isArray(governance.outputs)||governance.outputs.length>20)throw new Error('Choose up to 20 required outputs.');
       options.outputs=governance.outputs.map(output=>{
@@ -160,23 +197,21 @@ function roomDetails(state, input, spaceId) {
 }
 
 export function validateRoomConfig(state,input) {
-  return {spaceId:input.spaceId,...roomDetails(state,input,input.spaceId)};
+  return roomDetails(state,input);
 }
 
 export function createRoom(state, input) {
-  const spaceId = input.spaceId;
-  const details = roomDetails(state,input,spaceId);
-  const room = {id:randomUUID(),kind:'room',spaceId,...details,agentId:details.memberIds[0],createdAt:new Date().toISOString(),messages:[]};
+  const details = roomDetails(state,input);
+  const room = {id:randomUUID(),kind:'room',...details,agentId:details.memberIds[0],createdAt:new Date().toISOString(),messages:[]};
   state.conversations.unshift(room); return room;
 }
 
 export function updateRoom(state, id, input) {
   const room = findRoom(state,id);
-  if (Object.hasOwn(input,'spaceId') && input.spaceId !== room.spaceId) throw new Error('Room Space cannot change.');
-  const details = roomDetails(state,{...input,governance:Object.hasOwn(input,'governance') ? input.governance : room.governance},room.spaceId);
+  const details = roomDetails(state,{...input,governance:Object.hasOwn(input,'governance') ? input.governance : room.governance});
   if (state.jobs.some(j => j.conversationId === id && ['queued','running','waiting','takeover','stopping'].includes(j.status))) throw new Error('Stop the room discussion before editing its participants.');
   const removed=room.memberIds.filter(id=>!details.memberIds.includes(id));
-  const records=[...(room.artifacts||[]).flatMap(artifact=>[artifact.versions.at(-1),...(artifact.versions.at(-1)?.reviewEvents||[])]),...(room.evidence||[]),...(room.checkpoints||[]),...(room.cases||[])].filter(Boolean);
+  const records=[...(room.artifacts||[]).flatMap(artifact=>[artifact.versions.at(-1),...(artifact.versions.at(-1)?.reviewEvents||[])])].filter(Boolean);
   if(removed.length&&records.some(record=>[record.taskId,...(record.sourceTaskIds||[])].some(taskId=>removed.includes(state.jobs.find(job=>job.id===taskId)?.agentId))))throw new Error('Retain participants referenced by room work, or pass approved work to a new room with different participants.');
   if(room.discussion && (JSON.stringify(room.memberIds)!==JSON.stringify(details.memberIds)||JSON.stringify(room.governance)!==JSON.stringify(details.governance))){
     room.discussion.status='stopped';room.discussion.invalidatedReason='Room configuration changed. Start a new discussion and review the new result.';
@@ -204,19 +239,13 @@ export function createJob(state, input, recordMessage = true) {
   const agent = findAgent(state, input.agentId ?? conversation?.lastAgentId ?? conversation?.agentId);
   if (conversation?.kind === 'room') {
     if (!conversation.memberIds.includes(agent.id)) throw new Error('This agent is not in the room.');
-    for (const id of conversation.memberIds) state[statePolicy].visible(id,conversation.spaceId);
   }
-  const policy=state[statePolicy], spaceId=input.spaceId ?? conversation?.spaceId ?? policy?.defaultSpace(agent.id);
-  if (conversation && input.spaceId && input.spaceId !== conversation.spaceId) throw new Error('Conversation Space cannot change.');
-  state[stateData]?.sync();for(const id of attachments)state[stateData]?.assertFileSpace(id,spaceId);
-  const taskId=randomUUID(), securityContext=policy?.bind(taskId,agent.id,spaceId);
   const now = new Date().toISOString();
   if (!conversation) {
-    conversation = { id: randomUUID(), agentId: agent.id, spaceId, title: prompt.slice(0, 70), threadId: null, createdAt: now, messages: [] };
+    conversation = { id: randomUUID(), agentId: agent.id, title: prompt.slice(0, 70), threadId: null, createdAt: now, messages: [] };
     state.conversations.unshift(conversation);
   }
-  const job = { id: taskId, agentId: agent.id, spaceId, conversationId: conversation.id, prompt, attachments, interactionMode, status: 'queued', createdAt: now, events: [], toolCount: 0, files: [], scheduleId: input.scheduleId || null };
-  if(securityContext) Object.defineProperty(job,'securityContext',{value:securityContext,enumerable:true});
+  const job = { id: randomUUID(), agentId: agent.id, conversationId: conversation.id, prompt, attachments, interactionMode, status: 'queued', createdAt: now, events: [], toolCount: 0, files: [], scheduleId: input.scheduleId || null };
   conversation.lastAgentId = agent.id;
   if (recordMessage) conversation.messages.push({ id: randomUUID(), agentId:agent.id, role: 'user', text: prompt, attachments, at: now, jobId: job.id });
   state.jobs.unshift(job);
@@ -241,7 +270,7 @@ export function enqueueSchedules(state, now = new Date(), submit = input=>create
   for (const schedule of state.schedules) {
     if (!schedule.enabled || new Date(schedule.nextAt) > now) continue;
     if (state.jobs.some(j => j.scheduleId === schedule.id && ['queued','running','waiting','takeover','stopping','interrupted'].includes(j.status))) continue;
-    try { submit({ prompt: schedule.prompt, agentId: schedule.agentId, spaceId:schedule.spaceId, interactionMode: schedule.interactionMode, scheduleId: schedule.id }); delete schedule.error; }
+    try { submit({ prompt: schedule.prompt, agentId: schedule.agentId, interactionMode: schedule.interactionMode, scheduleId: schedule.id }); delete schedule.error; }
     catch(error) { schedule.enabled=false; schedule.error=error.message; count++; continue; }
     schedule.lastAt = now.toISOString();
     if (schedule.intervalMinutes) schedule.nextAt = new Date(now.valueOf() + schedule.intervalMinutes * 60_000).toISOString();

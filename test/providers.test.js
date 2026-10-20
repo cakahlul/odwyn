@@ -132,7 +132,7 @@ test('provider settings validate, persist, protect keys, and preserve chats and 
   } finally { await app.close(); rmSync(directory, { recursive: true }); }
 });
 
-test('OpenAI-compatible owner questions, resource denials, resume and cancel', async () => {
+test('OpenAI-compatible owner questions, browser, search, terminal, resume and cancel', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'odwyn-provider-openai-'));
   const store = openStore(directory); const requests = []; let hanging = false, aborted = false;
   const completion = (content, tool_calls) => Response.json({ choices: [{ finish_reason: tool_calls ? 'tool_calls' : 'stop', message: { role: 'assistant', content, ...(tool_calls ? { tool_calls } : {}) } }] });
@@ -149,7 +149,7 @@ test('OpenAI-compatible owner questions, resource denials, resume and cancel', a
   const old = createJob(store.state, { prompt: 'Serpong hotel budget: Rp2 million.' }); old.status = 'completed';
   const runtime = new Runtime({ store, codex: provider, browser: { action: async () => ({ image: 'test-base64', text: 'Screenshot' }) }, workspace: directory, model: 'vision-model' });
   try {
-    await runtime.refreshAccount(); const job = runtime.submit({ prompt: 'Research hotels' });
+    await runtime.refreshAccount(); const job = runtime.submit({ prompt: 'Research hotels',interactionMode:'allow' });
     await wait(() => job.status === 'waiting'); expect(requests).toHaveLength(1);
     runtime.answer(job.id, { requestId: job.pending.id, answer: 'Rp2 million' });
     await wait(() => job.status === 'completed');
@@ -158,10 +158,9 @@ test('OpenAI-compatible owner questions, resource denials, resume and cancel', a
     expect(requests[0].body.tools[0].function.parameters.type).toBe('object');
     expect(Object.hasOwn(requests[0].body,'reasoning_effort')).toBe(false);
     expect(requests[1].body.messages.some(m => m.role === 'tool' && m.content.includes('Rp2 million'))).toBe(true);
-    expect(requests[2].body.messages.at(-1).content).toContain('Invalid security context');
-    expect(requests[3].body.messages.at(-1).content).not.toContain('Serpong hotel budget');
-    expect(requests[3].body.messages.at(-1).content).toContain('Invalid security context');
-    expect(requests[4].body.messages.at(-1).content).toContain('Invalid security context');
+    expect(requests[2].body.messages.some(message=>message.role==='tool'&&message.content?.includes('Screenshot'))).toBe(true);
+    expect(requests[3].body.messages.at(-1).content).toContain('Serpong hotel budget');
+    expect(requests[4].body.messages.at(-1).content).toContain('api-terminal');
     const follow = runtime.submit({ conversationId: job.conversationId, prompt: 'Recall the result' });
     await wait(() => follow.status === 'completed');
     expect(requests.at(-1).body.messages.some(m => m.role === 'assistant' && m.content === 'Result saved.')).toBe(true);
@@ -191,8 +190,8 @@ test('Claude SDK uses restricted tools, streams output, waits for owner input, a
       expect(listed.tools.some(t => t.name === 'odwyn_terminal')).toBe(true);
       const answer = await client.callTool({ name: 'odwyn_ask', arguments: { question: 'Your preference?' } }, undefined, { timeout: 5000 });
       expect(answer.content[0].text).toContain('Morning');
-      const terminal = await client.callTool({ name: 'odwyn_terminal', arguments: { command: 'printf claude-terminal', reason: 'Check terminal access',resourceId:'ungranted' } }, undefined, { timeout: 5000 });
-      expect(terminal.isError).toBe(true);expect(terminal.content[0].text).toContain('Resource/action mismatch');
+      const terminal = await client.callTool({ name: 'odwyn_terminal', arguments: { command: 'printf claude-terminal', reason: 'Check terminal access' } }, undefined, { timeout: 5000 });
+      expect(terminal.isError).toBeFalsy();expect(terminal.content[0].text).toContain('claude-terminal');
       yield { type: 'stream_event', event: { type: 'message_start' } };
       yield { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Understood.' } } };
       yield { type: 'assistant', message: { content: [{ type: 'text', text: 'Understood.' }] } };
@@ -203,7 +202,7 @@ test('Claude SDK uses restricted tools, streams output, waits for owner input, a
   })() });
   const runtime = new Runtime({ store, codex: provider, browser: {}, workspace: directory, model: 'sonnet' });
   try {
-    await runtime.refreshAccount(); const job = runtime.submit({ conversationId: conversation.id, prompt: 'Ask my preference' });
+    await runtime.refreshAccount(); const job = runtime.submit({ conversationId: conversation.id, prompt: 'Ask my preference', interactionMode:'allow' });
     await wait(() => job.status === 'waiting'); runtime.answer(job.id, { requestId: job.pending.id, answer: 'Morning' });
     await wait(() => job.status === 'completed');
     expect(runtime.conversation(job).messages.filter(m => m.role === 'assistant').map(m => m.text)).toEqual(['Understood.']);
@@ -212,7 +211,7 @@ test('Claude SDK uses restricted tools, streams output, waits for owner input, a
     expect(usage.limits[1]).toMatchObject({name:'Weekly limit',usedPercent:null,status:'allowed'});
     expect(usage.lastRun).toEqual({inputTokens:153,outputTokens:45});
     await runtime.refreshAccount();expect(runtime.accounts.get(store.state.agents[0].id).usage).toEqual(usage);
-    const follow = runtime.submit({ conversationId: job.conversationId, prompt: 'Ask again' });
+    const follow = runtime.submit({ conversationId: job.conversationId, prompt: 'Ask again', interactionMode:'allow' });
     await wait(() => follow.status === 'waiting'); runtime.answer(follow.id, { requestId: follow.pending.id, answer: 'Morning' });
     await wait(() => follow.status === 'completed');
     expect(optionsSeen[1].resume).toBe(optionsSeen[0].sessionId);

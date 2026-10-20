@@ -46,11 +46,6 @@ test('tutorial navigation, dismissal, replay, reset, storage failures and worksp
   visit=setupTutorials();visit('home');flush();expect(nodes.get('#tutorial-hide').checked).toBe(true);expect(nodes.get('#tutorial-progress').textContent).toBe('');
   click('main-tutorial');expect(nodes.get('#tutorial-progress').textContent).toBe('Home · 1 / 2');click('tutorial-skip');
   nodes.get('#tutorial-hide').onchange({target:{checked:false}});click('tutorial-reset');
-  for(const id of ['access-memberships','access-space','access-resource','access-actions','access-advanced > summary','access-preview','access-save'])nodes.set('#'+id,new Node(id));
-  dialogs.push(new Node('security-dialog'));visit('chat');flush();
-  expect(nodes.get('#tutorial-progress').textContent).toBe('Access & Autonomy · 1 / 7');
-  for(let step=1;step<7;step++)click('tutorial-next');
-  expect(nodes.get('#tutorial-next').textContent).toBe('Finish');expect(nodes.get('#tutorial-copy').textContent).toContain('does not save anything');click('tutorial-next');
   writesBlocked=true;click('tutorial-reset');expect(nodes.get('#tutorial-settings-status').textContent).toContain('could not be saved');
  }finally{for(const [key,value] of Object.entries(original))if(value===undefined)delete globalThis[key];else globalThis[key]=value;mock.restore();}
 });

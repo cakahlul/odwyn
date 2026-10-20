@@ -39,7 +39,6 @@ try {
   await page.locator('[data-wf-add-type="room"]').click();
   await page.locator('[data-wf-field="step.prompt"]').fill('Prepare a reviewed research brief.');
   await page.locator('[data-wf-room-configure]').click();
-  assert.equal(await page.locator('#room-space').isDisabled(),false);
   await page.locator('#room-name').fill('Research review');
   await page.locator(`#room-agent-options input[value="${second.id}"]`).check();
   await page.locator('#room-governance').check();
@@ -70,7 +69,6 @@ try {
   await page.reload();await page.locator('#tools-open').click();await page.locator('[data-view="workflows"]').click();
   await page.locator(`[data-workflow-edit="${saved.id}"]`).click();await page.locator('[data-wf-select="0"]').click();
   await page.locator('[data-wf-room-configure]').click();assert.equal(await page.locator('#room-name').inputValue(),'Research review');
-  assert.equal(await page.locator('#room-space').isDisabled(),false);
   assert.equal(await page.locator('#room-output-options input').inputValue(),'Research brief');
   assert.deepEqual(errors,[]);
 } catch(error){console.log(await page.locator('body').innerText());console.log(errors);throw error;} finally {await context.close();await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
@@ -98,7 +96,7 @@ test('owner approves and publishes a reviewed stage, passes its package, then ex
     const response=await app.fetch(new Request(new URL('/api/agents',server.url),{method:'POST',headers,body:JSON.stringify({...defaults,name:'Writer'})}));assert.equal(response.status,201);
     const peer=(await response.json()).id;runtime.providers.get(peer).stop();runtime.addProvider(peer,new Provider());runtime.addProvider(primary,new Provider());
     await runtime.refreshAccount(primary);await runtime.refreshAccount(peer);
-    const rooms=['Research review','Editorial release'].map(title=>({title,spaceId:runtime.store.security.legacySpaceId,memberIds:[primary,peer],governance:{facilitatorId:primary,reviewerIds:[primary],ownerApproval:true,outputs:[{id:'brief',title:'Research brief',agentId:peer}]}}));
+    const rooms=['Research review','Editorial release'].map(title=>({title,spaceId:'legacy',memberIds:[primary,peer],governance:{facilitatorId:primary,reviewerIds:[primary],ownerApproval:true,outputs:[{id:'brief',title:'Research brief',agentId:peer}]}}));
     const created=await app.fetch(new Request(new URL('/api/workflows',server.url),{method:'POST',headers,body:JSON.stringify({name:'Research publication',command:'research-publication',inputs:[],steps:rooms.map((room,index)=>({id:`stage-${index}`,name:room.title,type:'room',prompt:index?'Validate and publish the reviewed brief.':'Prepare a research brief with cited evidence.',room}))})}));assert.equal(created.status,201);
     const workflow=await created.json(),job=runtime.launchWorkflow(workflow,{inputs:{}});await runtime.drain();
     const source=runtime.conversation(job),run=runtime.state.workflowRuns[0];
@@ -122,7 +120,6 @@ test('owner approves and publishes a reviewed stage, passes its package, then ex
     await page.locator('#room-pass-next').click();await page.locator('#room-handoff-dialog').waitFor({state:'visible'});
     assert.equal(await page.locator('#room-handoff-form input[name=title]').inputValue(),'Editorial release');
     assert.equal(await page.locator('#room-handoff-form input[name=title]').getAttribute('readonly'),'');
-    assert.equal(await page.locator('#room-handoff-space').isDisabled(),true);
     for(const id of [primary,peer]){const input=page.locator(`#room-handoff-members input[value="${id}"]`);assert.equal(await input.isChecked(),true);assert.equal(await input.isDisabled(),true);}
     assert.equal(await page.locator('#room-handoff-artifacts input').isChecked(),true);
     await page.locator('#room-handoff-form textarea[name=openQuestions]').fill('Verify citations before release.');
@@ -137,15 +134,6 @@ test('owner approves and publishes a reviewed stage, passes its package, then ex
     await page.getByRole('button',{name:'Start stage',exact:true}).waitFor({state:'hidden'});
     assert.equal(destination.discussion.status,'active');assert.equal(destination.discussion.goal,'Validate and publish the reviewed brief.');assert.equal(run.status,'running');assert.equal(runtime.active.conversationId,destination.id);
     assert.equal(await page.locator('#room-pass-next').isVisible(),false);
-    destination.targetCheckpointId='a'.repeat(64);await call('odwyn_test_case',{title:'Owner acceptance scenario'});
-    await page.getByText('Record manual UAT evidence',{exact:true}).click();
-    const manual=page.locator('form[data-room-uat] textarea');await manual.fill('Owner checked the acceptance scenario.');
-    runtime.event(runtime.active,'Concurrent progress','Keep owner evidence draft');
-    await page.waitForTimeout(1200);assert.equal(await manual.inputValue(),'Owner checked the acceptance scenario.');
-    await page.getByRole('button',{name:'Record owner evidence',exact:true}).click();
-    await page.waitForFunction(()=>document.querySelector('.room-work')?.textContent.includes('Owner supplied evidence'));
-    assert.equal(destination.evidence[0].source,'owner');assert.equal(destination.evidence[0].checkpointId,destination.targetCheckpointId);assert.equal(destination.cases[0].status,'passed');
-
     assert.deepEqual(errors,[]);
   }catch(error){console.log(await page.locator('body').innerText());console.log(errors);throw error;}
   finally{await context.close();await browser.close();server.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}

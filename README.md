@@ -8,7 +8,7 @@ Give Odwyn a goal. Your agents can research, compare, discuss the options, and b
 
 [Get started](docs/SETUP.md) · [See how to use it](docs/USAGE.md) · [Technical guides](#technical-guides)
 
-![How Odwyn works: give it a goal, let your agents research or discuss it using resources you grant, then review the result and approve actions when required.](docs/images/how-odwyn-works.svg)
+![How Odwyn works: give it a goal, let your agents research or discuss it using browser and terminal tools, then review the result and approve actions when required.](docs/images/how-odwyn-works.svg)
 
 ## Make it yours
 
@@ -16,7 +16,7 @@ Name your agents. Give them different jobs, personalities, and ways of replying.
 
 Save work you repeat as a workflow. Schedule a routine for the next check. Your chats, preferences, and results stay available when you return.
 
-**Oddy** in the top navigation opens the platform assistant from any screen, including Settings, to operate Odwyn in plain language. Oddy keeps its conversations across workspaces and inherits the Default workspace's AI provider and account. Choose an independent Oddy provider under **Settings → AI provider → Oddy**. Ask it to create a workspace or agent, set up workflows and rooms, run or stop jobs, schedule routines, or check progress. It works independently of busy workspace agents and shows a review and requires your approval before every write, including creating, updating, deleting and launching work. Rejecting applies nothing; approval is single use. Credentials, access grants, worker installation, and execution approvals remain in their existing setup flows. Oddy can investigate saved conversations, messages, complete job events, workflow runs, knowledge, memory, audit history, approvals and user configuration across your workspaces. Reads are paginated and managed credentials are redacted; this does not grant other agents access. File history exposes metadata, not binary file contents. Open it with the **Oddy** button or **⌘/Ctrl Shift O**. Both chat composers send with Enter; Shift+Enter adds a new line. Oddy includes an attachment button (up to 20 files, 20 MB each) and receives the current workspace, page, dialog, settings section, and selected conversation/agent with each request. The context label shows the current page; passwords and unsaved form contents are not captured. Images and UTF-8 text use the existing attachment reader; binary document extraction remains unavailable in Oddy. The ? tutorial also includes **Ask Oddy**. Oddy’s conversation menu includes New chat, New room, chat history, and Clear this chat. New chat preserves previous conversations; clearing requires confirmation and removes only the selected Oddy conversation, keeping uploaded files. Long workspace/context labels are truncated in the header; hover to read the full label.
+**Oddy** in the top navigation opens the platform assistant from any screen, including Settings, to operate Odwyn in plain language. Oddy keeps its conversations across workspaces and inherits the Default workspace's AI provider and account. Choose an independent Oddy provider under **Settings → AI provider → Oddy**. Ask it to create a workspace or agent, set up workflows and rooms, run or stop jobs, schedule routines, or check progress. It works independently of busy workspace agents and shows a review and requires your approval before every write, including creating, updating, deleting and launching work. Rejecting applies nothing; approval is single use. Provider credentials remain in Settings. Oddy can investigate saved conversations, messages, complete job events, workflow runs, knowledge and user configuration across your workspaces. Reads are paginated and managed credentials are redacted; this does not grant other agents access. File history exposes metadata, not binary file contents. Open it with the **Oddy** button or **⌘/Ctrl Shift O**. Both chat composers send with Enter; Shift+Enter adds a new line. Oddy includes an attachment button (up to 20 files, 20 MB each) and receives the current workspace, page, dialog, settings section, and selected conversation/agent with each request. The context label shows the current page; passwords and unsaved form contents are not captured. Images and UTF-8 text use the existing attachment reader; binary document extraction remains unavailable in Oddy. The ? tutorial also includes **Ask Oddy**. Oddy’s conversation menu includes New chat, New room, chat history, and Clear this chat. New chat preserves previous conversations; clearing requires confirmation and removes only the selected Oddy conversation, keeping uploaded files. Long workspace/context labels are truncated in the header; hover to read the full label.
 
 | Give Odwyn a goal | Get something you can use |
 | --- | --- |
@@ -26,20 +26,17 @@ Save work you repeat as a workflow. Schedule a routine for the next check. Your 
 
 ## Your workspace, your rules
 
-Run Odwyn on your computer or VPS. Connect Codex, Claude Code, or an OpenAI-compatible API. Choose which Spaces and resources each agent can use, and whether actions are blocked, automatic, or need your approval.
+Run Odwyn on your computer or VPS. Connect Codex, Claude Code, or an OpenAI-compatible API. Choose when browser interactions and terminal commands need confirmation.
 
-Use the workspace picker at the top to switch homes, or its + button to create one. Each home has the same features and its own agents, chats, files, browser sessions, connections, and settings. Existing data stays in Default. Tasks and routines continue when you switch away. In Settings → Workspaces, create, rename, or permanently delete a home after confirmation. Stop its tasks before deleting it. The first workspace can be renamed but cannot be deleted.
+Use the workspace picker at the top to switch homes, or its + button to create one. Each home has the same features and its own agents, chats, files, browser sessions and settings. Existing data stays in Default. Tasks and routines continue when you switch away. In Settings → Workspaces, create, rename, or permanently delete a home after confirmation. Stop its tasks before deleting it. The first workspace can be renamed but cannot be deleted.
 
 In Settings → Sharing, enable **Share to all workspaces** for saved appearance, preferences and memory, or AI provider defaults. Future changes from any home stay linked, including newly created homes. Turning sharing off leaves independent copies. Provider sharing includes the API key, requires your owner password, and preserves agent overrides; account sign-ins remain separate.
 
-Browsing and terminal work require configured isolated workers. Website behavior and provider limits still apply. [Set up your workspace](docs/SETUP.md).
+Terminal commands run on the host in the workspace folder with the server user’s filesystem and network permissions. Browser work uses the workspace’s persistent Chromium session. [Set up your workspace](docs/SETUP.md).
 
 ## Technical guides
 
 - [Setup, providers, and deployment](docs/SETUP.md)
-- [Agents, rooms, resources, and permissions](docs/USAGE.md)
+- [Agents, rooms, and task confirmations](docs/USAGE.md)
 - [Workflows, skills, and routines](docs/WORKFLOWS.md)
 - [Development and verification](docs/DEVELOPMENT.md)
-- [Isolated browser and terminal execution](execution/README.md)
-- [Security operations and backups](docs/security/OPERATIONS.md)
-- [Owner security API](docs/security/PHASE4_API.md)

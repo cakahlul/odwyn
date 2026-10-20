@@ -15,8 +15,8 @@ test('persistent roster restores drafts, updates previews and keeps menus keyboa
   const state=app.runtime.state,first=state.agents[0].id,at=new Date().toISOString();
   state.customization={...defaults};state.globalProvider.configured=true;state.agents[0].provider.configured=true;
   state.agents.push({id:'rei',customization:{...defaults,name:'Rei',bodyColor:'#668ad6',specialization:'Research and careful comparisons'},provider:{...state.provider,configured:false}});
-  state.conversations=[{id:'trip',agentId:first,title:'A quieter weekend',createdAt:at,spaceId:app.runtime.store.security.legacySpaceId,messages:[{id:'user',role:'user',text:'Find a quiet place near the coast for the weekend.',at},{id:'reply',role:'assistant',agentId:first,text:'I can help narrow it down. How far would you like to travel, and will you be taking the train?',at}]}];
-  state.conversations.push({id:'research',agentId:'rei',title:'Train routes',createdAt:at,spaceId:app.runtime.store.security.legacySpaceId,messages:[{id:'research-result',role:'assistant',agentId:'rei',text:'Two direct trains run each morning.',at}]});
+  state.conversations=[{id:'trip',agentId:first,title:'A quieter weekend',createdAt:at,spaceId:'legacy',messages:[{id:'user',role:'user',text:'Find a quiet place near the coast for the weekend.',at},{id:'reply',role:'assistant',agentId:first,text:'I can help narrow it down. How far would you like to travel, and will you be taking the train?',at}]}];
+  state.conversations.push({id:'research',agentId:'rei',title:'Train routes',createdAt:at,spaceId:'legacy',messages:[{id:'research-result',role:'assistant',agentId:'rei',text:'Two direct trains run each morning.',at}]});
   app.runtime.changed();
   const browser=await chromium.launch(),page=await newPageWithoutTutorials(browser,{httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:960}});
   page.setDefaultTimeout(5000);const errors=[];page.on('pageerror',error=>errors.push(error.message));

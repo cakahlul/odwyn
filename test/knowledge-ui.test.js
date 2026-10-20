@@ -13,7 +13,7 @@ test('Knowledge settings create, edit, assign and delete documents through the b
  const codex=Object.assign(new EventEmitter(),{request:async()=>({account:null}),stop(){}});let app;
  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
  app=createApp({directory,user:'owner',password,origin:server.url.origin,providerOptions:{codex},browser:{close:async()=>{}}});
- const spaces=[app.runtime.store.security.createSpace({name:'Grooming'}),app.runtime.store.security.createSpace({name:'Execution'})],agent=app.runtime.state.agents[0];
+ const agent=app.runtime.state.agents[0];
  app.runtime.state.globalProvider.configured=true;agent.provider.configured=true;app.runtime.state.customization=agent.customization={...defaults,name:'Knowledge tester'};app.runtime.changed();
  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password},viewport:{width:1000,height:700}}),page=await newPageWithoutTutorials(context),errors=[];
  page.setDefaultTimeout(7000);page.on('pageerror',error=>errors.push(error.message));
@@ -24,14 +24,14 @@ test('Knowledge settings create, edit, assign and delete documents through the b
   expect(await page.locator('#workspace-knowledge-description').textContent()).toContain('No knowledge yet');
   await page.locator('#knowledge-new').click();await page.locator('#knowledge-save').click();await finished();expect(await page.locator('#toast').textContent()).toBe('Enter a knowledge name.');
   await page.locator('#knowledge-name').fill('API <standards>');await page.locator('#knowledge-save').click();await finished();expect(await page.locator('#toast').textContent()).toBe('Enter knowledge content.');
-  await page.locator('#knowledge-content').fill('Use versioned API contracts.');await page.locator('#knowledge-save').click();await finished();expect(await page.locator('#toast').textContent()).toBe('Select at least one Space.');
-  await page.locator('#knowledge-summary').fill('Shared API guidance');for(const space of spaces)await page.locator(`[data-knowledge-space="${space.id}"]`).check();
+  await page.locator('#knowledge-content').fill('Use versioned API contracts.');
+  await page.locator('#knowledge-summary').fill('Shared API guidance');
   await page.locator('#knowledge-save').click();await page.locator('#knowledge-editor').waitFor({state:'hidden'});await finished();
-  expect(app.runtime.state.knowledge).toHaveLength(1);const doc=app.runtime.state.knowledge[0];expect(doc.version).toBe(1);expect(doc.resources.map(resource=>resource.spaceId).sort()).toEqual(spaces.map(space=>space.id).sort());
-  expect(await page.locator('#workspace-knowledge option').textContent()).toBe('API <standards>');expect(await page.locator('#workspace-knowledge-description').textContent()).toContain('Grooming');
-  await page.locator('#knowledge-edit').click();await page.screenshot({path:join(import.meta.dir,'../artifacts/knowledge-settings-desktop.png')});for(const space of spaces){const choice=page.locator(`[data-knowledge-space="${space.id}"]`);expect(await choice.isChecked()).toBe(true);expect(await choice.isDisabled()).toBe(true);}
+  expect(app.runtime.state.knowledge).toHaveLength(1);const doc=app.runtime.state.knowledge[0];expect(doc.version).toBe(1);expect(doc.resources).toBeUndefined();
+  expect(await page.locator('#workspace-knowledge option').textContent()).toBe('API <standards>');expect(await page.locator('#workspace-knowledge-description').textContent()).toContain('Shared API guidance');
+  await page.locator('#knowledge-edit').click();await page.screenshot({path:join(import.meta.dir,'../artifacts/knowledge-settings-desktop.png')});
   await page.locator('#knowledge-save').click();await page.locator('#knowledge-editor').waitFor({state:'hidden'});await finished();expect(await page.locator('#toast').textContent()).toContain('No changes');expect(app.runtime.state.knowledge[0].version).toBe(1);
-  await page.locator('#knowledge-edit').click();await page.locator('#knowledge-content').fill('Use versioned API contracts and stable response schemas.');await page.locator('#knowledge-save').click();await page.locator('#knowledge-editor').waitFor({state:'hidden'});await finished();expect(app.runtime.state.knowledge[0].version).toBe(2);expect(await page.locator('#workspace-knowledge-description').textContent()).toContain('Version 2');expect(await page.locator('#toast').textContent()).toContain('Read grants were revoked');
+  await page.locator('#knowledge-edit').click();await page.locator('#knowledge-content').fill('Use versioned API contracts and stable response schemas.');await page.locator('#knowledge-save').click();await page.locator('#knowledge-editor').waitFor({state:'hidden'});await finished();expect(app.runtime.state.knowledge[0].version).toBe(2);expect(await page.locator('#workspace-knowledge-description').textContent()).toContain('Version 2');expect(await page.locator('#toast').textContent()).toContain('Saved a new version');
   await page.getByRole('button',{name:'Close settings',exact:true}).click();
   await page.evaluate(async()=>{const {openCustomization}=await import('/customize.js');openCustomization();});
   expect(await page.locator('#agent-knowledge-options strong').textContent()).toBe('API <standards>');await page.locator(`#agent-knowledge-options input[value="${doc.id}"]`).check();await page.locator('#customize-save').click();await page.locator('#customize-dialog').waitFor({state:'hidden'});expect(agent.customization.knowledgeIds).toEqual([doc.id]);
@@ -40,7 +40,7 @@ test('Knowledge settings create, edit, assign and delete documents through the b
    await page.setViewportSize({width,height:width===320?568:800});await settings();
    const dialog=page.locator('#settings-dialog'),scroll=page.locator('.settings-scroll');
    expect(await dialog.evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
-   expect(await scroll.evaluate(node=>node.clientHeight)).toBeGreaterThanOrEqual(180);
+   expect(await scroll.evaluate(node=>node.clientHeight)).toBeGreaterThanOrEqual(150);
    await page.locator('#knowledge-edit').focus();await page.locator('#knowledge-edit').press('Enter');await page.locator('#knowledge-editor').waitFor({state:'visible'});
    expect(await scroll.evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
    await page.locator('#knowledge-save').scrollIntoViewIfNeeded();

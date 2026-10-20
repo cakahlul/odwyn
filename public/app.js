@@ -5,7 +5,6 @@ import {setupKnowledgeSettings} from './knowledge-ui.js';
 import {setupRoomWork} from './room-work-ui.js';
 import {setupWorkspaceHomes} from './workspace-homes.js';
 import {setupWorkspaceSettings} from './workspace-settings.js';
-import {setupSecurity} from './security-ui.js';
 import { renderWorkflows, setupWorkflows } from './workflows-ui.js';
 import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date, workspaceUrl, workspaceId, storageKey } from './ui.js';
 import { renderHome, renderAgentRoster, renderChat, insertMessages, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
@@ -98,7 +97,6 @@ const providers = { codex: ['Codex','gpt-6.1-sol'], claude: ['Claude Code','sonn
 const currencyNames = new Intl.DisplayNames(['en'],{type:'currency'});
 $('#preferred-currency').innerHTML = currencies.map(code=>`<option value="${code}">${code === 'source' ? 'Original currency' : `${code} · ${esc(currencyNames.of(code))}`}</option>`).join('');
 hydrateIcons(); setupBrowser(() => state);
-const renderSecuritySpace=setupSecurity(() => state);
 const visitTutorial=setupTutorials();
 setupWorkspaceSettings(refresh);
 setupKnowledgeSettings(refresh);
@@ -226,9 +224,6 @@ function openRoomEditor(room = null, save = null) {
   $('#room-save').childNodes[0].textContent = save ? 'Apply stage' : room ? 'Save' : 'Create room';
   $('#room-dialog .modal-description').textContent = save ? 'Apply this stage to your draft, then click Save at the top of the workflow editor to save the whole workflow.' : 'Choose a name and 2–5 agents to share the conversation.';
   $('#room-name').value = room?.title || ''; $('#room-status').textContent = '';
-  $('#room-space').innerHTML = workspace.security.spaces.map(space=>`<option value="${esc(space.id)}">${esc(space.name)}</option>`).join('');
-  $('#room-space').value = room?.spaceId || workspace.security.defaults[agentId] || workspace.security.legacySpaceId;
-  $('#room-space').disabled = !!room?.id;
   $('#room-governance').checked=!!room?.governance || !!save && !room;
   renderRoomAgents(room);
   $('#room-dialog').showModal(); $('#room-name').focus();
@@ -237,16 +232,15 @@ function openRoomEditor(room = null, save = null) {
 document.addEventListener('room-stage-edit',event=>openRoomEditor(event.detail.room,event.detail.save));
 
 function renderRoomAgents(room = null) {
-  const spaceId = $('#room-space').value;
-  $('#room-agent-options').innerHTML = workspace.agents.filter(a=>spaceId === workspace.security.legacySpaceId || workspace.security.memberships[a.id]?.includes(spaceId)).map(a=>`<label class="room-agent-option"><input type="checkbox" name="memberIds" value="${esc(a.id)}" ${room ? room.memberIds.includes(a.id) ? 'checked' : '' : a.id === agentId ? 'checked' : ''}>${avatarSvg(a.customization || defaults)}<span><strong>${esc(a.customization?.name || defaults.name)}</strong><small>${esc(providers[a.provider.type][0])} · ${a.runtime.account ? 'Ready' : 'Connect provider'}</small></span></label>`).join('');
-  if (!$('#room-agent-options').children.length) $('#room-agent-options').innerHTML = '<p class="field-hint">No agents belong to this Space. Assign membership in agent settings.</p>';
+  $('#room-agent-options').innerHTML = workspace.agents.map(a=>`<label class="room-agent-option"><input type="checkbox" name="memberIds" value="${esc(a.id)}" ${room ? room.memberIds.includes(a.id) ? 'checked' : '' : a.id === agentId ? 'checked' : ''}>${avatarSvg(a.customization || defaults)}<span><strong>${esc(a.customization?.name || defaults.name)}</strong><small>${esc(providers[a.provider.type][0])} · ${a.runtime.account ? 'Ready' : 'Connect provider'}</small></span></label>`).join('');
+  if (!$('#room-agent-options').children.length) $('#room-agent-options').innerHTML = '<p class="field-hint">Add agents to this workspace.</p>';
   const needsAgent=$('#room-agent-options').querySelectorAll('input').length<2;$('#room-setup-hint').hidden=!needsAgent;$('#room-save').disabled=needsAgent;
   renderRoomRoles(room?.governance || {});
 }
 
 function roomRoleValues(){
   const outputs=[...document.querySelectorAll('#room-output-options .room-output-row')].map(row=>({id:row.dataset.outputId,title:row.querySelector('input').value,agentId:row.querySelector('[data-output-agent]').value,kind:row.querySelector('[data-output-kind]').value}));
-  return {facilitatorId:$('#room-facilitator').value||null,reviewerIds:[...document.querySelectorAll('#room-role-options input:checked')].map(node=>node.value),observerIds:[...document.querySelectorAll('#room-role-options select')].filter(node=>node.value==='observer').map(node=>node.dataset.agent),...(outputs.length?{outputs}:{}),...($('#room-owner-approval').checked?{ownerApproval:true}:{}),...(Number($('#room-concurrency').value)>1?{concurrency:Number($('#room-concurrency').value)}:{})};
+  return {facilitatorId:$('#room-facilitator').value||null,reviewerIds:[...document.querySelectorAll('#room-role-options input:checked')].map(node=>node.value),observerIds:[...document.querySelectorAll('#room-role-options select')].filter(node=>node.value==='observer').map(node=>node.dataset.agent),...(outputs.length?{outputs}:{}),...($('#room-owner-approval').checked?{ownerApproval:true}:{})};
 }
 
 function renderRoomRoles(governance={}){
@@ -259,12 +253,12 @@ function renderRoomRoles(governance={}){
     const name=agent.customization?.name||defaults.name,observer=governance.observerIds?.includes(agent.id);
     return `<fieldset class="room-role-row"><legend>${esc(name)}</legend><label for="room-role-${index}">Participation for ${esc(name)}</label><select id="room-role-${index}" data-agent="${esc(agent.id)}"><option value="contributor">Contributor</option><option value="observer" ${observer?'selected':''}>Observer</option></select><label class="room-review-choice"><input type="checkbox" value="${esc(agent.id)}" ${governance.reviewerIds?.includes(agent.id)?'checked':''}>Require review from ${esc(name)}</label></fieldset>`;
   }).join('');
-  $('#room-owner-approval').checked=!!governance.ownerApproval;$('#room-concurrency').value=String(governance.concurrency||1);
+  $('#room-owner-approval').checked=!!governance.ownerApproval;
   $('#room-output-options').innerHTML=(governance.outputs||[]).map(output=>roomOutputRow(output,members)).join('');
   updateRoomRoleAvailability();
 }
 
-function roomOutputRow(output,members){return `<div class="room-output-row" data-output-id="${esc(output.id)}"><label>Output title<input maxlength="120" required value="${esc(output.title)}"></label><label>Responsible agent<select data-output-agent><option value="">Choose contributor</option>${members.map(agent=>`<option value="${esc(agent.id)}" ${agent.id===output.agentId?'selected':''}>${esc(agent.customization?.name||defaults.name)}</option>`).join('')}</select></label><label>Output kind<select data-output-kind><option value="document">Document</option><option value="evidence" ${output.kind==='evidence'?'selected':''}>Passing check evidence</option></select></label><button type="button" class="text-button" data-output-remove>Remove output</button></div>`;}
+function roomOutputRow(output,members){return `<div class="room-output-row" data-output-id="${esc(output.id)}"><label>Output title<input maxlength="120" required value="${esc(output.title)}"></label><label>Responsible agent<select data-output-agent><option value="">Choose contributor</option>${members.map(agent=>`<option value="${esc(agent.id)}" ${agent.id===output.agentId?'selected':''}>${esc(agent.customization?.name||defaults.name)}</option>`).join('')}</select></label><label>Output kind<select data-output-kind><option value="document">Document</option><option value="evidence" ${output.kind==='evidence'?'selected':''}>Evidence</option></select></label><button type="button" class="text-button" data-output-remove>Remove output</button></div>`;}
 
 function updateRoomRoleAvailability(){
   const {observerIds}=roomRoleValues();
@@ -454,7 +448,6 @@ function render() {
 
   $('#run-status').hidden = !state.jobs.some(job => activeStatuses.includes(job.status));
   const conversation = state.conversations.find(c => c.id === conversationId);
-  renderSecuritySpace(conversation,busy||switching);
   const permissionJob = state.jobs.find(job=>job.conversationId === conversationId && job.id === state.runtime.activeJobId) || state.jobs.find(job=>job.conversationId === conversationId && job.status === 'queued');
   if (permissionJob && !$('#interaction-mode').disabled) $('#interaction-mode').value = permissionJob.interactionMode;
   $('#prompt').placeholder = conversation?.kind === 'room' ? 'Message the room, or @mention an agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
@@ -487,10 +480,10 @@ function render() {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
     const homeFocus = view === 'home' && $('#view').contains(document.activeElement) ? document.activeElement.closest('[data-conversation],[data-agent]') : null;
-    const pendingCards=[...document.querySelectorAll('#view .approval-card[data-request],#view form[data-room-owner],#view form[data-room-uat]')].map(node=>({node,focus:node.contains(document.activeElement)?document.activeElement:null}));
+    const pendingCards=[...document.querySelectorAll('#view .approval-card[data-request],#view form[data-room-owner]')].map(node=>({node,focus:node.contains(document.activeElement)?document.activeElement:null}));
     $('#view').innerHTML = view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state,filter) : view === 'workflows' ? renderWorkflows(state) : renderFiles(state);
     if (homeFocus) { const key = homeFocus.dataset.conversation ? 'conversation' : 'agent'; $('#view').querySelector(`[data-${key}="${CSS.escape(homeFocus.dataset[key])}"]`)?.focus({preventScroll:true}); }
-    for(const {node,focus} of pendingCards){const selector=node.dataset.request?`[data-request="${CSS.escape(node.dataset.request)}"]`:node.dataset.roomUat?`form[data-room-uat="${CSS.escape(node.dataset.roomUat)}"][data-checkpoint="${CSS.escape(node.dataset.checkpoint)}"][data-cases="${CSS.escape(node.dataset.cases)}"]`:`form[data-room-owner="${CSS.escape(node.dataset.roomOwner)}"][data-proposal="${CSS.escape(node.dataset.proposal)}"]`;const next=$('#view').querySelector(selector);if(next){if(node.dataset.roomUat)next.closest('details').open=node.closest('details').open;next.replaceWith(node);focus?.focus({preventScroll:true});}}
+    for(const {node,focus} of pendingCards){const selector=node.dataset.request?`[data-request="${CSS.escape(node.dataset.request)}"]`:`form[data-room-owner="${CSS.escape(node.dataset.roomOwner)}"][data-proposal="${CSS.escape(node.dataset.proposal)}"]`;const next=$('#view').querySelector(selector);if(next){next.replaceWith(node);focus?.focus({preventScroll:true});}}
     if (view === 'chat') insertMessages(state,conversationId);
     updateBrowser(state);
     $('#view').scrollTop = view !== 'home' && nearBottom ? $('#view').scrollHeight : previousScroll;
@@ -779,7 +772,6 @@ $('#room-details-open').onclick = () => $('#room-header').showModal();
 $('#edit-room').onclick = () => openRoomEditor(currentRoom());
 $('#room-dialog-close').onclick = () => $('#room-dialog').close();
 $('#room-dialog').onclose = () => { saveRoomStage=null; if (editingRoomId && currentRoom()) $('#room-details-open').focus(); };
-$('#room-space').onchange = () => renderRoomAgents();
 $('#room-governance').onchange=()=>{$('#room-role-settings').hidden=!$('#room-governance').checked;};
 $('#room-agent-options').onchange=()=>renderRoomRoles(roomRoleValues());
 $('#room-role-options').onchange=updateRoomRoleAvailability;
@@ -792,7 +784,7 @@ $('#room-form').onsubmit = async event => {
   $('#room-save').disabled = true; $('#room-status').textContent = 'Saving…';
   try {
     const governance=$('#room-governance').checked ? roomRoleValues() : null;
-    const config={title:$('#room-name').value,spaceId:$('#room-space').value,memberIds,governance};
+    const config={title:$('#room-name').value,memberIds,governance};
     if(saveRoomStage){saveRoomStage(config);$('#room-dialog').close();toast('Stage updated in the draft. Save the workflow to keep changes.','warning');return;}
     const room = await api(editingRoomId ? `/api/rooms/${editingRoomId}` : '/api/rooms',config,editingRoomId ? 'PATCH' : 'POST');
     $('#room-dialog').close(); await refresh(); navigate('chat',room.id); toast(editingRoomId ? 'Room updated.' : 'Room ready. Send a message to start the discussion.');
@@ -838,7 +830,7 @@ async function attachFiles(files) {
     if (attachments.length + files.length > 20) throw new Error('Choose up to 20 uploaded files.');
     pendingAttachments = files.map(file=>({name:file.name,mimeType:file.type,size:file.size,uploading:true})); renderAttachments();
     for (const file of files) {
-      const form = new FormData(); form.append('file',file);form.append('spaceId',$('#task-space').value);
+      const form = new FormData(); form.append('file',file);
       const saved = await api('/api/files',form); attachments.push(saved); pendingAttachments.shift(); renderAttachments();
     }
   });
@@ -855,7 +847,7 @@ $('#composer').onsubmit = async event => {
   busy = true; $('#send-button').disabled = true;
   await perform(async () => {
     const room = currentRoom();
-    const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt, spaceId:$('#task-space').value, attachments:attachments.map(file=>file.id), agentId:room ? $('#reply-agent').value : agentId, conversationId, interactionMode:$('#interaction-mode').value });
+    const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt, attachments:attachments.map(file=>file.id), agentId:room ? $('#reply-agent').value : agentId, conversationId, interactionMode:$('#interaction-mode').value });
     $('#prompt').value = ''; $('#prompt').style.height = ''; attachments = []; $('#attachments').replaceChildren(); navigate('chat',room?.id || result.conversationId);
     if (room) { roomRecipients.delete(room.id); $('#reply-agent').value = 'all'; }
   });

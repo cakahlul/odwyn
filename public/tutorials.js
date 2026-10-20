@@ -3,31 +3,22 @@ import {$,storageKey} from './ui.js';
 // Tutorials explain live controls; they never submit forms or change permissions.
 const guides = {
  home: ['Home', [['#view h1','Your starting point','Resume a conversation here, or start a new one.'],['#workspace-navigation','Explore Odwyn','Use the navigation to open conversations, tools, agents and settings.']]],
- chat: ['Conversations', [['#view','Your conversation','Messages, results and approval requests appear here.'],['#prompt','Give your agent a task','Describe your goal and include any constraints. Sending a message starts real work.'],['#interaction-mode','Choose how to work','Review the interaction mode before sending. Resource permissions still apply.']]],
+ chat: ['Conversations', [['#view','Your conversation','Messages, results and approval requests appear here.'],['#prompt','Give your agent a task','Describe your goal and include any constraints. Sending a message starts real work.'],['#interaction-mode','Choose how to work','Review the interaction mode before sending. ']]],
  runs: ['Activity', [['#view','Follow your tasks','Review task status and open a run to inspect its result.']]],
- routines: ['Routines', [['#view','Scheduled work','Routines run tasks on a schedule. Review their agent, Space and timing before enabling them.']]],
+ routines: ['Routines', [['#view','Scheduled work','Routines run tasks on a schedule. Review their agent and timing before enabling them.']]],
  workflows: ['Workflows', [['#view','Repeat a process','Workflows organize reusable steps. Review the steps and agent access before running one.']]],
  files: ['Files', [['#view','Task files','Find files produced by your agents. Open a file to inspect or download it.']]],
  'search-dialog': ['Conversations', [['#search-input','Find a conversation','Search your history, then select a conversation to continue it.']]],
  'agents-dialog': ['Agents', [['#agents-dialog h2','Your agents','Each agent has its own focus and AI provider.'],['#sidebar-agent-list','Manage an agent','Open an agent to chat. Use its menu to customize it or choose its AI provider.']]],
  'tools-dialog': ['Tools', [['#tools-dialog h2','Tools for your work','Choose a tool to manage workflows, routines, files or task activity.']]],
- 'customize-dialog': ['Agent settings', [['#customize-title','Customize this agent','Set its focus, appearance, replies and AI provider.'],['#agent-access-tab','Access & Autonomy','Click here to choose which resources the agent can use and when it must ask you.']]],
- 'security-dialog': ['Access & Autonomy', [
-  ['#access-memberships','1. Choose Spaces','Spaces group resources. Check the Spaces this agent needs. Membership alone does not grant access to their resources.'],
-  ['#access-space','2. Choose the task Space','This is the default Space for new tasks. Choose a checked Space that contains the resource you need.'],
-  ['#access-resource','3. Choose a resource','Configure one specific target at a time. Save your changes before switching resources. Add missing resources in Settings → Resources.'],
-  ['#access-actions','4. Decide when it can act','Blocked prevents an action. Ask first requires approval. Automatic lets the agent act within its saved scope. Some actions always require approval. Review each action separately.'],
-  ['#access-advanced > summary','5. Optional restrictions','Click to see permission templates, branch restrictions and expiry. Templates suggest choices; review them before saving.'],
-  ['#access-preview','6. Preview first','Preview changes checks your unsaved permissions without executing an action. Use it to understand what the agent would be allowed to do.'],
-  ['#access-save','7. Save when ready','Only Save access applies your choices to subsequent calls. This tutorial does not save anything. Skip or finish to return to your settings.']
- ]],
+ 'customize-dialog': ['Agent settings', [['#customize-title','Customize this agent','Set its focus, appearance, replies and AI provider.']]],
  'workspace-create-dialog': ['New workspace', [['#workspace-home-name','Name your workspace','A workspace has separate agents, conversations, files and browser sessions. Enter a name, then create it when ready.']]],
- 'room-header': ['Room details', [['#room-heading','Your shared conversation','Review participants here. Open an agent to manage its settings.'],['#edit-room','Adjust collaboration','Change participants, roles and review requirements. These choices do not grant resource access.']]],
+ 'room-header': ['Room details', [['#room-heading','Your shared conversation','Review participants here. Open an agent to manage its settings.'],['#edit-room','Adjust collaboration','Change participants, roles and review requirements. ']]],
  'workflow-editor': ['Workflow editor', [['#workflow-name','Name your workflow','Give this reusable process a clear name and command.'],['#workflow-viewport','Build the steps','Add blocks and connect their outputs. Review each block’s instructions and permissions before saving.']]],
  'skill-editor': ['Skill editor', [['#skill-form','Reusable instructions','Describe what the skill should do. Saving makes its instructions available for future tasks.']]],
  'workflow-run-dialog': ['Run a workflow', [['#workflow-run-inputs','Review workflow inputs','Fill in the task inputs and attach any needed files. Starting the workflow performs real work using the agents’ saved permissions.']]],
  'workflow-history': ['Workflow history', [['#workflow-history-content','Review previous runs','Inspect past runs and their status before deciding whether to run this workflow again.']]],
- 'room-dialog': ['Rooms', [['#room-name','Name the room','Give the shared conversation a clear purpose.'],['#room-agent-options','Choose participants','Select agents from the same Space. Roles and reviews organize collaboration; they do not grant resource access.']]],
+ 'room-dialog': ['Rooms', [['#room-name','Name the room','Give the shared conversation a clear purpose.'],['#room-agent-options','Choose participants','Select agents from this workspace. Roles and reviews organize collaboration; review their work before publishing.']]],
  'schedule-dialog': ['Schedule a routine', [['#schedule-dialog h2','Plan recurring work','Choose a task, agent and schedule. Saving creates a real routine; review its permissions first.']]]
 };
 const settingsCopy = {
@@ -36,12 +27,7 @@ const settingsCopy = {
  preferences:'Set your name, language, reply length and context shared with your agents.',
  workspaces:'Workspaces keep agents, conversations and files separate. Choose the workspace you want to manage.',
  sharing:'Choose which settings are shared between workspaces. Review the scope before applying changes.',
- spaces:'Create named groups for related resources. Assign agent membership in Access & Autonomy afterwards.',
- resources:'Create specific targets, such as a repository, browser or file. Creation grants no access. Configure the agent separately in Access & Autonomy.',
- knowledge:'Save reference documents for agents. Select documents in agent settings and allow Read knowledge in Access & Autonomy.',
- isolated:'Configure isolated projects and repositories here. Each task uses a separate copy. Grant workspace and repository permissions separately.',
- connections:'Configure endpoints and credentials used by resources. Saving a connection grants no agent access. Changing credentials revokes linked permissions.',
- presets:'Create reusable action selections. Apply a template in Access & Autonomy, then review and save the agent’s permissions.',
+ knowledge:'Save reference documents for agents. Select documents in agent settings.',
  tutorials:'Hide automatic tutorials for every menu, or reset visited menus. Manual replay stays available. Changes here are saved immediately in this browser for this workspace.'
 };
 

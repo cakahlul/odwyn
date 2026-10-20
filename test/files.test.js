@@ -41,7 +41,7 @@ test('attachment inputs keep binary bytes and host paths out of model context', 
       expect(input[0].text).toContain(id);
       expect(input[1].type).toBe('text');
       if (id === 'notes') expect(input[1].text).toContain('not actually a PNG');
-      else expect(input[1].text).toContain('odwyn_terminal');
+      else expect(input[1].text).toContain('Binary attachment extraction is unavailable');
     }
     expect(()=>attachmentInput([{id:'missing',name:'missing.png'}],directory)).toThrow();
   } finally {rmSync(directory,{recursive:true,force:true});}

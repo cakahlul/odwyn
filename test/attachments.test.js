@@ -68,7 +68,7 @@ for (const type of ['codex','claude','openai']) test(`${type} receives attachmen
     await wait(()=>separate.status==='completed'); expect(JSON.stringify(inputs[2])).not.toContain(png.toString('base64'));
     const second = {id:crypto.randomUUID(),customization:{...defaults,name:'Second'}};
     app.runtime.state.agents.push(second);
-    const room = createRoom(app.runtime.state,{spaceId:app.runtime.store.security.legacySpaceId,title:'Attachment room',memberIds:[first.agentId,second.id]});
+    const room = createRoom(app.runtime.state,{spaceId:'legacy',title:'Attachment room',memberIds:[first.agentId,second.id]});
     const roomJob = app.runtime.submitRoom(room.id,{prompt:'',agentId:first.agentId,attachments:[image.id]})[0];
     await wait(()=>inputs.length===4); expectImage(inputs[3]); await app.runtime.cancelRoom(room.id);
     const count = app.runtime.state.jobs.length;

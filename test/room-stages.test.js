@@ -7,7 +7,7 @@ import {join} from 'node:path';
 import {openStore,updateRoom,createRoom,recoverJobs} from '../store.js';
 import {Runtime} from '../runtime.js';
 import {validateWorkflow} from '../workflows.js';
-import {roomCompletion,checkSnapshot} from '../public/room-policy.js';
+import {roomCompletion} from '../public/room-policy.js';
 class Agent extends EventEmitter{child={};replies=[];calls=[];async request(method,params){this.calls.push({method,params});if(method==='account/read')return {account:{type:'chatgpt'}};if(method.startsWith('thread/'))return {thread:{id:params.threadId||randomUUID()}};return {turn:{id:randomUUID()}};}respond(id,reply){this.replies.push(reply);}reject(){}}
 
 for(const autoAdvance of [false,true])for(const names of [['Grooming','Planning','Execution','Testing','Release'],['Research','Editorial review']])test(`room workflow runs ${names.join(' → ')} with ${autoAdvance?'automatic':'explicit owner'} handoffs`,async()=>{
@@ -16,7 +16,7 @@ for(const autoAdvance of [false,true])for(const names of [['Grooming','Planning'
   const call=async(tool,args)=>{const job=runtime.active,p=runtime.providers.get(job.agentId);await runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool,arguments:args}});const reply=p.replies.at(-1);if(!reply.success)throw Error(reply.contentItems[0].text);return JSON.parse(reply.contentItems[0].text);};
   try{
     await runtime.refreshAccount();await runtime.refreshAccount('peer');
-    const definition={name:'Stage flow',command:'stages',inputs:[{name:'goal',required:true}],steps:names.map((name,i)=>({id:`stage-${i}`,name,type:'room',prompt:`${name}: {{inputs.goal}}`,room:{title:name,spaceId:store.security.legacySpaceId,memberIds:[primary,'peer'],governance:{facilitatorId:primary,reviewerIds:[primary],ownerApproval:name==='Planning',outputs:[{id:'package',title:`${name} package`,agentId:'peer'}]}}}))};
+    const definition={name:'Stage flow',command:'stages',inputs:[{name:'goal',required:true}],steps:names.map((name,i)=>({id:`stage-${i}`,name,type:'room',prompt:`${name}: {{inputs.goal}}`,room:{title:name,spaceId:'legacy',memberIds:[primary,'peer'],governance:{facilitatorId:primary,reviewerIds:[primary],ownerApproval:name==='Planning',outputs:[{id:'package',title:`${name} package`,agentId:'peer'}]}}}))};
     definition.autoAdvance=autoAdvance;
     const workflow=validateWorkflow(definition,store.state);store.state.workflows.push(workflow);
     expect(()=>runtime.launchWorkflow(workflow,{inputs:{}})).toThrow('required');
@@ -71,19 +71,6 @@ for(const autoAdvance of [false,true])for(const names of [['Grooming','Planning'
   }finally{await runtime.close();store.close();rmSync(directory,{recursive:true,force:true});}
 });
 
-test('failed, unexecuted, stale and revised cases block reviewed completion; manual UAT stays owner-attributed',()=>{
-  const directory=mkdtempSync(join(tmpdir(),'odwyn-cases-')),store=openStore(directory),runtime=new Runtime({store,codex:new Agent(),browser:{},workspace:directory});
-  try{
-    const primary=store.state.agents[0].id;store.state.agents.push({id:'peer'});
-    const room={...createRoom(store.state,{title:'UAT',spaceId:store.security.legacySpaceId,memberIds:[primary,'peer'],governance:{facilitatorId:primary}}),targetCheckpointId:'a'.repeat(64),cases:[{id:'case',title:'UAT',revision:1,status:'failed'}],evidence:[],discussion:{id:randomUUID(),status:'active',outcome:{id:randomUUID(),confirmations:{[primary]:'yes',peer:'yes'},artifacts:[]}},messages:[]};store.state.conversations[0]=room;store.save();
-    room.discussion.outcome.checks=checkSnapshot(room);expect(roomCompletion(room).pendingCaseIds).toEqual(['case']);expect(roomCompletion(room).ready).toBe(false);
-    expect(()=>runtime.recordOwnerEvidence(room.id,{checkpointId:'stale',caseId:'case',caseRevision:1,status:'passed',summary:'UAT'})).toThrow('changed');
-    const evidence=runtime.recordOwnerEvidence(room.id,{checkpointId:room.targetCheckpointId,caseId:'case',caseRevision:1,status:'passed',summary:'Owner checked the scenario'});
-    expect(evidence.source).toBe('owner');expect(evidence.command).toBeUndefined();expect(room.discussion.outcome).toBeUndefined();expect(roomCompletion(room).pendingCaseIds).toEqual([]);
-    room.targetCheckpointId='b'.repeat(64);expect(roomCompletion(room).pendingCaseIds).toEqual(['case']);room.targetCheckpointId=evidence.checkpointId;room.cases[0].revision++;expect(roomCompletion(room).pendingCaseIds).toEqual(['case']);
-  }finally{runtime.close();store.close();rmSync(directory,{recursive:true,force:true});}
-});
-
 test('Studio five-agent roles complete each stage with the configured participants and reviewers',async()=>{
   const directory=mkdtempSync(join(tmpdir(),'odwyn-studio-')),store=openStore(directory),lead=store.state.agents[0].id,ids=[lead,'backend','frontend','qa','release'];
   for(const id of ids.slice(1))store.state.agents.push({id});
@@ -92,7 +79,7 @@ test('Studio five-agent roles complete each stage with the configured participan
   const call=async(tool,args)=>{const job=runtime.active,provider=runtime.providers.get(job.agentId);await runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool,arguments:args}});const reply=provider.replies.at(-1);expect(reply.success).toBe(true);return JSON.parse(reply.contentItems[0].text);};
   try{
     for(const id of ids)await runtime.refreshAccount(id);
-    const workflow=validateWorkflow({name:'Studio',command:'studio',steps:stages.map(([name,memberIds,reviewerIds,observerIds,authors],index)=>({id:`stage-${index}`,name,type:'room',prompt:`Complete ${name}, ask the owner when requirements are unclear.`,room:{title:name,spaceId:store.security.legacySpaceId,memberIds,governance:{facilitatorId:lead,reviewerIds,observerIds,ownerApproval:name==='Planning',outputs:authors.map(agentId=>({id:agentId,title:`${name} package from ${agentId}`,agentId}))}}}))},store.state);
+    const workflow=validateWorkflow({name:'Studio',command:'studio',steps:stages.map(([name,memberIds,reviewerIds,observerIds,authors],index)=>({id:`stage-${index}`,name,type:'room',prompt:`Complete ${name}, ask the owner when requirements are unclear.`,room:{title:name,spaceId:'legacy',memberIds,governance:{facilitatorId:lead,reviewerIds,observerIds,ownerApproval:name==='Planning',outputs:authors.map(agentId=>({id:agentId,title:`${name} package from ${agentId}`,agentId}))}}}))},store.state);
     let room=runtime.conversation(runtime.launchWorkflow(workflow,{inputs:{}}));await runtime.drain();
     const run=store.state.workflowRuns[0];
     for(let index=0;index<stages.length;index++){

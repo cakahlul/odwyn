@@ -12,18 +12,16 @@ import {defaults} from '../public/profile.js';
 
 class Provider extends EventEmitter{child={};async request(method,params){return method==='account/read'?{account:{type:'chatgpt'}}:method.startsWith('thread/')?{thread:{id:params.threadId||randomUUID()}}:{turn:{id:randomUUID()}};}stop(){}respond(){}reject(){}}
 
-test('workflow launch accepts multiline requirements and scoped chat-style attachments, naming every room from its identifier',async()=>{
+test('workflow launch accepts multiline requirements and chat-style attachments, naming every room from its identifier',async()=>{
  const directory=mkdtempSync(join(tmpdir(),'odwyn-workflow-launch-')),password='test-workflow-password';let app,browser;
  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(request,srv)=>app.fetch(request,srv)});
  try{
   app=createApp({directory,user:'owner',password,origin:server.url.origin,codex:new Provider(),browser:{close:async()=>{}}});
-  const runtime=app.runtime,state=runtime.state,p=runtime.store.security,first=state.agents[0];state.customization=first.customization={...defaults,name:'Lead'};first.provider.configured=true;state.globalProvider.configured=true;
+  const runtime=app.runtime,state=runtime.state,first=state.agents[0];state.customization=first.customization={...defaults,name:'Lead'};first.provider.configured=true;state.globalProvider.configured=true;
   const peer={...structuredClone(first),id:randomUUID(),customization:{...defaults,name:'Engineer'}};state.agents.push(peer);runtime.addProvider(peer.id,new Provider());
-  const space=p.createSpace({name:'Grooming'});for(const agent of [first,peer])p.putAccess(agent.id,{revision:p.revision,spaceIds:[space.id],grants:[]});await runtime.refreshAccount();await runtime.refreshAccount(peer.id);
-  const workflow=validateWorkflow({name:'Feature Delivery',command:'feature-delivery',inputs:[{name:'feature',label:'Feature Identifier',required:true,default:'Feature001'},{name:'requirement',label:'Requirement or feature brief',required:true}],steps:['Grooming','Planning'].map((name,index)=>({id:'stage-'+index,name,type:'room',prompt:'Review {{inputs.feature}}: {{inputs.requirement}}',room:{title:name,spaceId:space.id,memberIds:[first.id,peer.id],governance:{facilitatorId:first.id,reviewerIds:[first.id]}}}))},state);state.workflows.push(workflow);runtime.changed();
-  // Foreign-Space files must fail before creating a room or run.
-  const foreign={id:randomUUID(),kind:'upload',spaceId:p.legacySpaceId,name:'foreign.txt'};state.files.push(foreign);runtime.store.data.sync();const rooms=state.conversations.length;
-  expect(()=>runtime.launchWorkflow(workflow,{agentId:first.id,inputs:{feature:'Wrong',requirement:'Test'},attachments:[foreign.id]})).toThrow();expect(state.conversations).toHaveLength(rooms);expect(state.workflowRuns).toHaveLength(0);
+  await runtime.refreshAccount();await runtime.refreshAccount(peer.id);
+  const workflow=validateWorkflow({name:'Feature Delivery',command:'feature-delivery',inputs:[{name:'feature',label:'Feature Identifier',required:true,default:'Feature001'},{name:'requirement',label:'Requirement or feature brief',required:true}],steps:['Grooming','Planning'].map((name,index)=>({id:'stage-'+index,name,type:'room',prompt:'Review {{inputs.feature}}: {{inputs.requirement}}',room:{title:name,memberIds:[first.id,peer.id],governance:{facilitatorId:first.id,reviewerIds:[first.id]}}}))},state);state.workflows.push(workflow);runtime.changed();
+
   expect(()=>runtime.launchWorkflow(workflow,{agentId:first.id,inputs:{feature:'Wrong',requirement:'Test'},attachments:['missing']})).toThrow();
   browser=await chromium.launch();const context=await browser.newContext({httpCredentials:{username:'owner',password}}),page=await newPageWithoutTutorials(context),errors=[];page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(7000);
   await page.goto(server.url.href);await page.locator('#tools-open').click();await page.locator('[data-view=workflows]').click();await page.locator('[data-workflow-run]').click();
@@ -36,7 +34,7 @@ test('workflow launch accepts multiline requirements and scoped chat-style attac
   await page.locator('#workflow-run-attachments button[aria-label="Remove brief.md"]').click();expect(await page.locator('#workflow-run-attachments .attachment-chip').count()).toBe(1);
   await page.locator('#workflow-run-form').evaluate(node=>{const data=new DataTransfer();data.items.add(new File(['API contract'],'contract.txt',{type:'text/plain'}));node.dispatchEvent(new DragEvent('drop',{dataTransfer:data,bubbles:true,cancelable:true}));});
   await page.waitForFunction(()=>document.querySelector('#workflow-run-attachments').textContent.includes('contract.txt')&&document.querySelector('#workflow-run-attachments').getAttribute('aria-busy')==='false');
-  const uploaded=state.files.filter(file=>['brief.md','mock.png','contract.txt'].includes(file.name));expect(uploaded).toHaveLength(3);expect(uploaded.every(file=>file.spaceId===space.id)).toBe(true);
+  const uploaded=state.files.filter(file=>['brief.md','mock.png','contract.txt'].includes(file.name));expect(uploaded).toHaveLength(3);expect(uploaded.every(file=>file.spaceId===undefined)).toBe(true);
   await page.locator('#workflow-run-files').setInputFiles(Array.from({length:21},(_,i)=>({name:'too-many-'+i+'.txt',mimeType:'text/plain',buffer:Buffer.from('x')})));await page.waitForFunction(()=>document.querySelector('#toast').textContent.includes('20 uploaded files'));expect(state.files.filter(file=>file.name.startsWith('too-many-'))).toHaveLength(0);
   for(const width of [320,768,1024,1440]){await page.setViewportSize({width,height:600});expect(await page.locator('#workflow-run-form button.primary-button').evaluate(button=>{const rect=button.getBoundingClientRect();return button.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2));})).toBe(true);expect(await page.locator('#workflow-run-dialog').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);}
   await page.setViewportSize({width:1440,height:900});await page.locator('#workflow-run-form>.modal-fields').evaluate(node=>node.scrollTop=0);await page.screenshot({path:join(tmpdir(),'odwyn-workflow-launch-preview.png')});

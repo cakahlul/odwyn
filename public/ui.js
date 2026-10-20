@@ -259,3 +259,15 @@ async function saveReceipt(card) {
 }
 
 export const mascot = `<svg class="mascot" viewBox="0 0 240 180" fill="none" aria-hidden="true"><path d="M25 131c-13-30 4-68 35-87M171 36c23 4 42 20 43 40" stroke="#b9bcb2" stroke-width="1.5" stroke-dasharray="4 6"/><path d="m192 27 4 10 11 2-9 7 1 11-9-7-10 4 4-10-6-9 11 1Z" fill="#ff6946"/><ellipse cx="118" cy="161" rx="53" ry="6" fill="#e6e7df"/><path d="M67 98c-14 0-24 7-23 19 1 9 14 12 26 3m103-28c14-2 28 3 26 15-1 9-16 15-28 10" stroke="#292b28" stroke-width="3" stroke-linecap="round"/><path d="M91 142v15m50-15 6 14" stroke="#292b28" stroke-width="4" stroke-linecap="round"/><path d="M68 74c0-27 20-40 54-40 32 0 52 13 52 40v39c0 27-22 40-53 40-32 0-53-13-53-40V74Z" fill="#b8d7ec" stroke="#292b28" stroke-width="2.5"/><path d="M76 67c5-17 18-24 39-25" stroke="#fffaf1" stroke-width="5" stroke-linecap="round"/><g class="mascot-eyes"><path d="M100 79v14m38-14v14" stroke="#292b28" stroke-width="6" stroke-linecap="round"/></g><path d="M110 108q10 9 21 0" stroke="#292b28" stroke-width="3" stroke-linecap="round"/><path d="M126 140h48l-6-30h-45l3 30Z" fill="#fffaf1" stroke="#292b28" stroke-width="2"/><path d="M123 140h57" stroke="#292b28" stroke-width="3" stroke-linecap="round"/><circle cx="146" cy="125" r="4" fill="#ff6946"/><path d="m41 40 3-12m-11 8 13 3" stroke="#292b28" stroke-width="2" stroke-linecap="round"/><circle cx="205" cy="123" r="3" fill="#292b28"/></svg>`;
+
+export async function freshPassword(){
+ dismissToast();
+ let dialog=$('#security-auth');
+ if(!dialog){
+  dialog=document.createElement('dialog');dialog.id='security-auth';dialog.className='modal auth-dialog';dialog.setAttribute('aria-labelledby','security-auth-title');dialog.setAttribute('aria-describedby','security-auth-description');
+  dialog.innerHTML='<form method="dialog"><div class="auth-heading"><span class="auth-symbol" aria-hidden="true">'+icon('lock')+'</span><div><p class="eyebrow">Owner verification</p><h2 id="security-auth-title">Confirm it’s you</h2></div></div><p id="security-auth-description">Enter your Odwyn owner password to confirm this change.</p><label for="security-password">Owner password</label><input id="security-password" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false" required autofocus><p class="field-hint">Your password is cleared after this request.</p><div class="auth-actions"><button type="button" class="secondary-button" value="cancel">Cancel</button><button type="submit" class="primary-button" value="confirm">Confirm exact request</button></div></form>';
+  dialog.querySelector('[value=cancel]').onclick=()=>dialog.close('cancel');document.body.append(dialog);
+ }
+ $('#security-password').value='';dialog.returnValue='';dialog.showModal();
+ return new Promise((resolve,reject)=>dialog.addEventListener('close',()=>{const password=$('#security-password').value;$('#security-password').value='';dialog.returnValue==='confirm'?resolve(password):reject(new Error('Authentication cancelled.'));},{once:true}));
+}

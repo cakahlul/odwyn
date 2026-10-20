@@ -1,5 +1,5 @@
 import { $, esc, api, handleError, workspaceId, icon, toast } from './ui.js';
-import { freshPassword } from './security-ui.js';
+import { freshPassword } from './ui.js';
 
 export function setupWorkspaceHomes() {
   const picker = $('#workspace-home');

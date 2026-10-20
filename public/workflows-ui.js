@@ -23,8 +23,7 @@ export function setupWorkflows(getState,getAgent,onRun,refresh) {
       if(runFiles.length+files.length>20)throw Error('Choose up to 20 uploaded files.');
       if(files.some(file=>!file.size||file.size>20*1024*1024))throw Error('Choose files up to 20 MB each.');
       uploading=true;$('#workflow-run-error').textContent='Uploading…';$('#workflow-run-attachments').setAttribute('aria-busy','true');$('#workflow-run-form button.primary-button').disabled=true;$('#workflow-run-attach').disabled=true;
-      const step=running.steps.find(step=>step.id===running.start),spaceId=step.room?.spaceId||step.spaceId||getState().security?.defaults?.[step.agentId||getAgent()]||$('#task-space').value;
-      for(const file of files){const form=new FormData();form.append('file',file);form.append('spaceId',spaceId);runFiles.push(await api('/api/files',form));drawRunFiles();}
+      for(const file of files){const form=new FormData();form.append('file',file);runFiles.push(await api('/api/files',form));drawRunFiles();}
       $('#workflow-run-error').textContent='';
     }catch(error){$('#workflow-run-error').textContent='';handleError(error);}
     finally{uploading=false;$('#workflow-run-attachments').setAttribute('aria-busy','false');$('#workflow-run-form button.primary-button').disabled=false;$('#workflow-run-attach').disabled=false;$('#workflow-run-files').value='';}

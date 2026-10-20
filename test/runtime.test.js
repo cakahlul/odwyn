@@ -6,7 +6,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore, createRoom, deleteAgent, recoverJobs } from '../store.js';
 import { Runtime } from '../runtime.js';
-import { grantFiles } from '../tests/security/access-fixtures.js';
 import { defaults, agentModeInstructions } from '../public/profile.js';
 
 class FakeCodex extends EventEmitter {
@@ -61,12 +60,12 @@ test('multiple native owner questions resume once and ignore stale completion ev
   }finally{await runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
 });
 
-test('workflow tool budgets continue once and conflicted peers cannot be resumed indirectly',async()=>{
+test('workflow tool budgets continue once without restarting the discussion',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'odwyn-budget-')),store=openStore(dir),codex=new FakeCodex();
   const runtime=new Runtime({store,codex,browser:{},workspace:dir});store.state.agents.push({id:'peer'});runtime.addProvider('peer',new FakeCodex());
   try{
     await runtime.refreshAccount();await runtime.refreshAccount('peer');const primary=store.state.agents[0].id;
-    const job=runtime.launchWorkflow({name:'Budget',command:'budget',inputs:[],steps:[{id:'execute',type:'room',prompt:'Implement',room:{title:'Execution',spaceId:store.security.legacySpaceId,memberIds:[primary,'peer'],governance:{facilitatorId:primary}}}]},{inputs:{}});await runtime.drain();
+    const job=runtime.launchWorkflow({name:'Budget',command:'budget',inputs:[],steps:[{id:'execute',type:'room',prompt:'Implement',room:{title:'Execution',spaceId:'legacy',memberIds:[primary,'peer'],governance:{facilitatorId:primary}}}]},{inputs:{}});await runtime.drain();
     const room=runtime.conversation(job),discussion=room.discussion;
     const request=codex.request.bind(codex);codex.request=async(method,params)=>{
       if(method==='turn/interrupt')codex.emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:job.turnId,status:'interrupted'}}});
@@ -78,9 +77,7 @@ test('workflow tool budgets continue once and conflicted peers cannot be resumed
     expect(codex.calls.filter(c=>c.method==='turn/interrupt')).toHaveLength(1);
     expect(codex.calls.filter(c=>c.method==='turn/start')).toHaveLength(2);
     expect(room.discussion).toBe(discussion);expect(job.status).toBe('running');expect(job.toolCountOffset).toBe(123);
-    await runtime.cancelRoom(room.id);job.checkpointConflict={resourceId:'code',checkpointId:'saved'};
-    const peer=store.state.jobs.find(item=>item.agentId==='peer'),count=store.state.jobs.length;
-    expect(()=>runtime.retry(peer.id)).toThrow('checkpoint');expect(store.state.jobs).toHaveLength(count);
+    await runtime.cancelRoom(room.id);
   }finally{await runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -97,56 +94,6 @@ test('skill commands stay visible while the provider receives snapshotted instru
     expect(codex.calls.find(c=>c.method==='turn/start').params.input[0].text).toContain('Fetch the full report.\n\nOwner request: SLS');
     store.state.skills[0].instructions='Changed';
     expect(job.prompt).toContain('Fetch the full report.');
-  } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
-});
-
-test('raw MCP approvals remain declined under every interaction mode', async () => {
-  for(const mode of ['confirm','safe','allow']) {
-    const dir=mkdtempSync(join(tmpdir(),'odwyn-mcp-approval-')),store=openStore(dir),codex=new FakeCodex();
-    const runtime=new Runtime({store,codex,browser:{},workspace:dir});
-    try {
-      await runtime.refreshAccount();const job=runtime.submit({prompt:'Use MCP',interactionMode:mode});await runtime.drain();
-      expect(codex.calls.find(c=>c.method==='thread/start').params.mcpEnabled).toBe(false);
-      for(const sensitive of [false,true]) {
-        await runtime.handleRequest({id:'approval',method:'mcpServer/elicitation/request',params:{threadId:job.threadId,turnId:job.turnId,serverName:'fixture',mode:'form',message:'Allow tool?',requestedSchema:{type:'object'},_meta:{codex_approval_kind:'mcp_tool_call',codex_sensitive_action:sensitive}}});
-        expect(codex.replies.at(-1).result.action).toBe('decline');expect(job.pending).toBeFalsy();
-        runtime.setInteractionMode(job.id,'allow');expect(job.pending).toBeFalsy();
-      }
-    }finally{runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
-  }
-});
-
-test('owner questions and validated forms survive raw MCP refusal and cancellation', async () => {
-  const dir = mkdtempSync(join(tmpdir(),'odwyn-mcp-input-')), store = openStore(dir), codex = new FakeCodex();
-  const runtime = new Runtime({store,codex,browser:{},workspace:dir});
-  try {
-    await runtime.refreshAccount();
-    const job = runtime.submit({prompt:'Use configured MCP'}); await runtime.drain();
-    expect(codex.calls.find(call=>call.method==='thread/start').params.mcpEnabled).toBe(false);
-    codex.emit('notification',{method:'item/started',params:{threadId:job.threadId,turnId:job.turnId,item:{type:'mcpToolCall',server:'fixture',tool:'echo'}}});
-    expect(job.events.at(-1).detail).toBe('fixture.echo');
-    const invoke = (method, params) => runtime.handleRequest({id:'mcp-input',method,params:{threadId:job.threadId,turnId:job.turnId,...params}});
-    const question = invoke('tool/requestUserInput',{questions:[{id:'approve',header:'MCP approval',question:'Allow this MCP action?',options:[{label:'Accept',description:'Run this action'},{label:'Decline',description:'Refuse'}]}]});
-    await Bun.sleep(1);
-    expect(job.pending.type).toBe('question');
-    runtime.answer(job.id,{requestId:job.pending.id,selected:['0']}); await question;
-    expect(codex.replies.at(-1).result).toEqual({answers:{approve:{answers:['Accept']}}});
-    const params = {serverName:'fixture',mode:'form',message:'Choose count',requestedSchema:{type:'object',properties:{count:{type:'integer',minimum:1}},required:['count'],additionalProperties:false}};
-    await invoke('mcpServer/elicitation/request',params);
-    expect(codex.replies.at(-1).result.action).toBe('decline');
-    const form=runtime.waitForOwner(job,{type:'question',title:'Count',detail:'Choose count',schema:params.requestedSchema});await Bun.sleep(1);
-    const requestId = job.pending.id;
-    expect(()=>runtime.answer(job.id,{requestId,answer:'{"count":"wrong"}'})).toThrow('schema');
-    expect(job.pending.id).toBe(requestId);
-    runtime.answer(job.id,{requestId,answer:'{"count":2}'}); await form;
-    expect(JSON.parse((await form).answer)).toEqual({count:2});
-    const url = invoke('mcpServer/elicitation/request',{serverName:'fixture',mode:'url',message:'Sign in',url:'https://login.example/'}); await Bun.sleep(1);
-    await url;expect(job.pending).toBeNull();
-    expect(codex.replies.at(-1).result.action).toBe('decline');
-    const cancelled=invoke('tool/requestUserInput',{questions:[{id:'cancel',header:'Question',question:'Continue?'}]});await Bun.sleep(1);
-    await runtime.cancel(job.id); await cancelled;
-    expect(codex.replies.at(-1).result).toEqual({answers:{}});
-    expect(job.pending).toBeNull();
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -199,7 +146,7 @@ test('task cleanup blocks the next task, skips queued cancellations and owner ta
     }
     store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
     runtime.addProvider('scout',new FakeCodex()); await runtime.refreshAccount('scout');
-    const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Shared work',memberIds:[store.state.agents[0].id,'scout']});
+    const room = createRoom(store.state,{spaceId:'legacy',title:'Shared work',memberIds:[store.state.agents[0].id,'scout']});
     runtime.submitRoom(room.id,{prompt:'Discuss'}); await runtime.drain();
     runtime.finish(runtime.active,'completed');
     expect(resets).toBe(4);
@@ -218,7 +165,7 @@ test('rooms choose a relevant opener and follow replies instead of fixed partici
   const primary = store.state.agents[0].id, first = new FakeCodex(), scout = new FakeCodex(), writer = new FakeCodex();
   store.state.customization = {...defaults,name:'Pip',specialization:'Coding and debugging'};
   store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout',specialization:'Travel flights and itineraries'}},{id:'writer',customization:{...defaults,name:'Writer',specialization:'Writing and editing'}});
-  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Group',memberIds:[primary,'writer','scout']});
+  const room = createRoom(store.state,{spaceId:'legacy',title:'Group',memberIds:[primary,'writer','scout']});
   const runtime = new Runtime({store,codex:first,browser:{},workspace:dir});
   runtime.addProvider('scout',scout); runtime.addProvider('writer',writer);
   const handoff = async agentId => {
@@ -276,7 +223,7 @@ test('empty assistant output never persists while streamed text and turn fallbac
   const dir = mkdtempSync(join(tmpdir(),'odwyn-empty-messages-')), store = openStore(dir), codex = new FakeCodex();
   const primary = store.state.agents[0].id;
   store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
-  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Empty output',memberIds:[primary,'scout']});
+  const room = createRoom(store.state,{spaceId:'legacy',title:'Empty output',memberIds:[primary,'scout']});
   const runtime = new Runtime({store,codex,browser:{},workspace:dir});
   try {
     await runtime.refreshAccount();
@@ -303,15 +250,13 @@ test('empty assistant output never persists while streamed text and turn fallbac
 test('AI file attachments persist in ordinary chats and rooms with the producing agent', async () => {
   const dir = mkdtempSync(join(tmpdir(),'odwyn-file-runtime-')), store = openStore(dir), codex = new FakeCodex();
   const primary = store.state.agents[0].id; store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
-  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Files room',memberIds:[primary,'scout']});
+  const room = createRoom(store.state,{spaceId:'legacy',title:'Files room',memberIds:[primary,'scout']});
   const runtime = new Runtime({store,codex,browser:{},workspace:dir});
   try {
     await runtime.refreshAccount(); writeFileSync(join(dir,'report.csv'),'Name,Result\nTask,Done\n');
-    const resourceId=grantFiles(store,primary,['report.csv'])['report.csv'];
-    const p=store.security;p.putAccess('scout',{revision:p.revision,spaceIds:[p.legacySpaceId],grants:[resourceId].map(resourceId=>({spaceId:p.legacySpaceId,resourceId,action:"file.download",mode:"auto"}))});
     for (const conversationId of [null,room.id]) {
       const job = runtime.submit({prompt:'Send report',conversationId,agentId:primary}); await runtime.drain();
-      await runtime.handleRequest({id:job.id,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_send_file',arguments:{path:'report.csv',resourceId}}});
+      await runtime.handleRequest({id:job.id,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_send_file',arguments:{path:'report.csv'}}});
       expect(codex.replies.at(-1).result.success).toBe(true);
       const file = store.state.files.find(f=>f.id===job.files[0]); expect(file.jobId).toBe(job.id);
       expect(readFileSync(join(dir,'files',file.id),'utf8')).toContain('Task,Done');
@@ -331,7 +276,7 @@ test('room goals continue automatically, require everyone to verify completion, 
   store.state.customization = {...defaults,name:'Pip'};
   const primary = store.state.agents[0].id;
   store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
-  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Goal room',memberIds:[primary,'scout']});
+  const room = createRoom(store.state,{spaceId:'legacy',title:'Goal room',memberIds:[primary,'scout']});
   const runtime = new Runtime({store,codex:first,browser:{},workspace:dir}); runtime.addProvider('scout',second);
   const complete = async (done = false) => {
     await runtime.drain(); const job = runtime.active, provider = runtime.providers.get(job.agentId);
@@ -416,7 +361,7 @@ test('room agents agree on one revised project recommendation and publish one co
   const dir = mkdtempSync(join(tmpdir(),'odwyn-room-agreement-')), store = openStore(dir);
   const first = new FakeCodex(), second = new FakeCodex(), primary = store.state.agents[0].id;
   store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
-  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Tere Report',memberIds:[primary,'scout']});
+  const room = createRoom(store.state,{spaceId:'legacy',title:'Tere Report',memberIds:[primary,'scout']});
   const runtime = new Runtime({store,codex:first,browser:{},workspace:dir}); runtime.addProvider('scout',second);
   const verify = async args => {
     const job = runtime.active, provider = runtime.providers.get(job.agentId);
@@ -464,7 +409,7 @@ test('room redirects interrupt a turn that is still starting before beginning th
   const dir = mkdtempSync(join(tmpdir(),'odwyn-room-start-')), store = openStore(dir), provider = new FakeCodex();
   const primary = store.state.agents[0].id;
   store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
-  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Starting room',memberIds:[primary,'scout']});
+  const room = createRoom(store.state,{spaceId:'legacy',title:'Starting room',memberIds:[primary,'scout']});
   const runtime = new Runtime({store,codex:provider,browser:{},workspace:dir});
   const original = provider.request.bind(provider); let release, started;
   const starting = new Promise(resolve=>started=resolve), gate = new Promise(resolve=>release=resolve);
@@ -507,7 +452,7 @@ test('room discussions share one owner message, take turns with context, and sto
   store.state.customization = {...defaults,name:'Pip'};
   const primary = store.state.agents[0].id;
   store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
-  const room = createRoom(store.state,{spaceId:store.security.legacySpaceId,title:'Travel room',memberIds:[primary,'scout']});
+  const room = createRoom(store.state,{spaceId:'legacy',title:'Travel room',memberIds:[primary,'scout']});
   let label='Search',browserCalls=0;
   const browser={last:{url:'https://example.com',elements:[]},inspectAction:async()=>({url:'https://example.com',element:{tag:'button',label}}),action:async()=>{browserCalls++;return {text:'Done'};}};
   const runtime = new Runtime({store,codex:first,browser,workspace:dir}); runtime.addProvider('scout',second);
@@ -529,12 +474,13 @@ test('room discussions share one owner message, take turns with context, and sto
     expect(second.calls.find(c=>c.method==='thread/start').params.developerInstructions).toContain('Reply from Pip');
     const invoke=(tool,args,id)=>runtime.handleRequest({id,method:'item/tool/call',params:{threadId:jobs[1].threadId,turnId:jobs[1].turnId,tool,arguments:args}});
     await invoke('odwyn_browser',{action:'click',ref:'0',reason:'Search the requested itinerary'},33);
-    expect(second.replies.at(-1).result.success).toBe(false); expect(browserCalls).toBe(0);
-    label='Pay for ticket'; const payment=invoke('odwyn_browser',{action:'click',ref:'0',reason:'Pay for the ticket'},34); await Bun.sleep(10);
-    await payment;expect(jobs[1].pending).toBeFalsy();expect(browserCalls).toBe(0);expect(second.replies.at(-1).result.success).toBe(false);
-    await invoke('odwyn_remember',{note:'Prefer morning trains'},35); expect(store.state.preferences).toBe('');expect(second.replies.at(-1).result.success).toBe(false);
+    expect(second.replies.at(-1).result.success).toBe(true);expect(browserCalls).toBe(1);
+    label='Pay for ticket';const payment=invoke('odwyn_browser',{action:'click',ref:'0',reason:'Pay for the ticket'},34);await Bun.sleep(10);
+    expect(jobs[1].pending.risk).toBe('payment');runtime.answer(jobs[1].id,{requestId:jobs[1].pending.id,decision:'deny'});
+    await payment;expect(browserCalls).toBe(1);expect(second.replies.at(-1).result.success).toBe(false);
+    await invoke('odwyn_remember',{note:'Prefer morning trains'},35);expect(store.state.preferences).toBe('Prefer morning trains');
     await invoke('odwyn_schedule',{prompt:'Check train times',at:new Date(Date.now()+60_000).toISOString(),intervalMinutes:0,interactionMode:'confirm'},36);
-    expect(second.replies.at(-1).result.success).toBe(false);expect(store.state.schedules).toHaveLength(0);
+    expect(second.replies.at(-1).result.success).toBe(true);expect(store.state.schedules).toHaveLength(1);
     await runtime.cancelRoom(room.id); expect(jobs[1].status).toBe('cancelled');
     const next = runtime.submitRoom(room.id,{prompt:'Discuss transport'}); await runtime.drain();
     await runtime.cancelRoom(room.id); expect(next.every(j=>j.status==='cancelled')).toBe(true);
@@ -689,49 +635,4 @@ test('multiple agents continue one chat with separate sessions and attributed re
     expect(pip.calls.filter(c=>c.method==='thread/start').at(-1).params.developerInstructions).toContain('Reply from Scout');
     complete(pip,continued,'Continuing with saved corrections');
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true});}
-});
-
-test('interaction modes cannot grant browser access for safe payment or credential targets', async () => {
-  const dir=mkdtempSync(join(tmpdir(),'odwyn-approvals-')), store=openStore(dir), codex=new FakeCodex();
-  let label='Search', calls=0;
-  const browser={last:{url:'https://example.com',elements:[{ref:'0',label:'Search'}]},inspectAction:async action=>({url:'https://example.com',element:action.ref === undefined && !(action.x === 469 && action.y === 421) ? null : {tag:'button',label,type:label === 'Password' ? 'password' : undefined},dialog:action.action === 'dialog' ? {type:'confirm',message:label} : undefined}),action:async()=>{calls++;return {text:'Done'};}};
-  const runtime=new Runtime({store,codex,browser,workspace:dir});
-  try {
-    await runtime.refreshAccount();
-    expect(()=>runtime.submit({prompt:'Invalid mode',interactionMode:'yes'})).toThrow();
-    for (const mode of ['confirm','safe','allow']) {
-      const job=runtime.submit({prompt:'Search and save',interactionMode:mode}); await runtime.drain();
-      const invoke=action=>runtime.handleRequest({id:calls+100,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_browser',arguments:{reason:'Perform the requested action',...action}}});
-      for(const action of [
-        ...['Search','Save profile','Add Children','Next month','Continue','Pay now','Password'].flatMap(target=>[
-          {action:'click',ref:'0',target},{action:'fill',ref:'0',text:'100',target},{action:'press',text:'Enter',target},
-          {action:'upload',fileId:'00000000-0000-0000-0000-000000000000',target},
-          {action:'dialog',choice:'accept',target},{action:'click',x:1245,y:400,target}
-        ])
-      ]) {
-        label=action.target;await invoke(action);
-        expect(codex.replies.at(-1).result.success).toBe(false);expect(job.pending).toBeFalsy();expect(calls).toBe(0);
-      }
-      runtime.setInteractionMode(job.id,'allow');await invoke({action:'click',ref:'0'});
-      expect(calls).toBe(0);expect(codex.replies.at(-1).result.success).toBe(false);
-      expect(()=>runtime.setInteractionMode(job.id,'invalid')).toThrow();
-      await runtime.cancel(job.id);
-    }
-  } finally {runtime.close();store.close();rmSync(dir,{recursive:true});}
-});
-
-test('terminal denies host execution across providers and modes; cancellation remains usable', async () => {
-  const dir=mkdtempSync(join(tmpdir(),'odwyn-terminal-runtime-')),store=openStore(dir),codex=new FakeCodex();
-  const runtime=new Runtime({store,codex,browser:{},workspace:dir});
-  try {
-    await runtime.refreshAccount();
-    for(const type of ['codex','claude','openai'])for(const interactionMode of ['confirm','safe','allow']) {
-      codex.config={type};const job=runtime.submit({prompt:'Check terminal',interactionMode});await runtime.drain();
-      expect(codex.calls.filter(c=>c.method==='thread/start').at(-1).params.dynamicTools.some(t=>t.name==='odwyn_terminal')).toBe(true);
-      await runtime.handleRequest({id:job.id,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_terminal',arguments:{command:'touch forbidden',reason:'Fixture'}}});
-      expect(codex.replies.at(-1).result.success).toBe(false);expect(job.pending).toBeFalsy();expect(runtime.terminalRun).toBeFalsy();
-      expect(()=>readFileSync(join(dir,'forbidden'))).toThrow();
-      runtime.setInteractionMode(job.id,'allow');await runtime.cancel(job.id);expect(job.status).toBe('cancelled');
-    }
-  }finally{runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
 });

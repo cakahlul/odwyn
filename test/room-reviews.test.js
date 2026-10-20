@@ -26,7 +26,7 @@ test('room roles persist, reject ambiguous assignments, and never grant resource
   try{
     const primary=store.state.agents[0].id;
     store.state.agents.push({id:'engineer'},{id:'observer'});
-    const input={title:'Review',spaceId:store.security.legacySpaceId,memberIds:[primary,'engineer','observer']};
+    const input={title:'Review',spaceId:'legacy',memberIds:[primary,'engineer','observer']};
     const governance={facilitatorId:primary,reviewerIds:[primary],observerIds:['observer']};
     for(const invalid of [true,[],{...governance,facilitatorId:'outside'},{...governance,reviewerIds:['outside']},{...governance,reviewerIds:[primary,primary]},{...governance,reviewerIds:['observer']},{...governance,observerIds:[primary]},{...governance,observerIds:input.memberIds},{...governance,approved:true}]){
       expect(()=>createRoom(store.state,{...input,governance:invalid})).toThrow();
@@ -34,13 +34,11 @@ test('room roles persist, reject ambiguous assignments, and never grant resource
     expect(store.state.conversations).toHaveLength(0);
     const room=createRoom(store.state,{...input,governance});
     expect(room.governance).toEqual(governance);
-    const access=store.security.access(primary);
     expect(()=>deleteAgent(store.state,primary)).toThrow('room role');
     expect(()=>deleteAgent(store.state,'engineer')).toThrow('room role');
     expect(()=>updateRoom(store.state,room.id,{...input,memberIds:['engineer','observer']})).toThrow();
     updateRoom(store.state,room.id,{...input,title:'Renamed'});
     expect(room.governance).toEqual(governance);
-    expect(store.security.access(primary)).toEqual(access);
     room.discussion={id:'round',status:'completed',outcome:{id:'version',confirmations:{[primary]:'Checked'},reviews:{[primary]:{decision:'approve'}}}};
     updateRoom(store.state,room.id,{...input,governance:{...governance,reviewerIds:['engineer']}});
     expect(room.discussion.status).toBe('stopped');
@@ -58,7 +56,7 @@ test('consensus cannot bypass reviewers, changes require a new version, and obse
   const directory=mkdtempSync(join(tmpdir(),'odwyn-review-runtime-')),store=openStore(directory),lead=new Agent();
   const primary=store.state.agents[0].id;
   store.state.agents.push({id:'engineer',customization:{name:'Engineer',specialization:'build'}},{id:'observer',customization:{name:'Observer'}});
-  const room=createRoom(store.state,{title:'Release review',spaceId:store.security.legacySpaceId,memberIds:['engineer',primary,'observer'],governance:{facilitatorId:primary,reviewerIds:[primary],observerIds:['observer']}});
+  const room=createRoom(store.state,{title:'Release review',spaceId:'legacy',memberIds:['engineer',primary,'observer'],governance:{facilitatorId:primary,reviewerIds:[primary],observerIds:['observer']}});
   const runtime=new Runtime({store,codex:lead,browser:{},workspace:directory});
   runtime.addProvider('engineer',new Agent());runtime.addProvider('observer',new Agent());
   const call=async(tool,args)=>{
@@ -118,41 +116,11 @@ test('consensus cannot bypass reviewers, changes require a new version, and obse
   }finally{await runtime.close();store.close();rmSync(directory,{recursive:true,force:true});}
 });
 
-test('review tools reject non-room tasks and role changes do not bypass current Space grants',async()=>{
-  const directory=mkdtempSync(join(tmpdir(),'odwyn-review-security-')),store=openStore(directory),provider=new Agent();
-  const runtime=new Runtime({store,codex:provider,browser:{},workspace:directory}),primary=store.state.agents[0].id;
-  const call=async(tool,args)=>{const job=runtime.active;await runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool,arguments:args}});return provider.replies.at(-1);};
-  try{
-    await runtime.refreshAccount();runtime.submit({prompt:'Private task'});await runtime.drain();
-    expect((await call('odwyn_room_review',{proposalId:'fake',decision:'approve',summary:'Approve'})).success).toBe(false);
-    await runtime.cancel(runtime.active.id);
-    store.state.agents.push({id:'observer'});runtime.addProvider('observer',new Agent());await runtime.refreshAccount('observer');
-    const p=store.security,space=p.createSpace({name:'Restricted'});
-    for(const agentId of [primary,'observer'])p.putAccess(agentId,{revision:p.revision,spaceIds:[space.id],grants:[]});
-    const room=createRoom(store.state,{title:'Scoped review',spaceId:space.id,memberIds:[primary,'observer'],governance:{facilitatorId:primary,reviewerIds:[primary],observerIds:['observer']}});
-    runtime.submitRoom(room.id,{prompt:'Review scoped result'});await runtime.drain();
-    const source=p.createResource({spaceId:space.id,type:'memory',name:'Restricted notes'});
-    const grant=agentId=>p.putAccess(agentId,{revision:p.revision,spaceIds:[space.id],grants:[{spaceId:space.id,resourceId:source.id,action:'memory.read',mode:'auto'}]});
-    grant(primary);grant('observer');store.data.note(runtime.active,source.id,'memory.read');
-    expect((await call('odwyn_room_done',{result:'Scoped candidate',nextPlan:'Review',summary:'Checked.'})).success).toBe(true);
-    const proposalId=room.discussion.outcome.id;
-    p.putAccess('observer',{revision:p.revision,spaceIds:[space.id],grants:[]});
-    expect((await call('odwyn_room_review',{proposalId,decision:'approve',summary:'Checked.'})).success).toBe(false);
-    expect(room.discussion.outcome.reviews).toEqual({});
-    grant('observer');
-    expect((await call('odwyn_room_review',{proposalId,decision:'approve',summary:'Checked.'})).success).toBe(true);
-    p.putAccess('observer',{revision:p.revision,spaceIds:[],grants:[]});
-    runtime.finish(runtime.active,'completed');
-    expect(room.discussion.status).toBe('paused');
-    expect(room.messages.some(message=>message.roomReport)).toBe(false);
-  }finally{await runtime.close();store.close();rmSync(directory,{recursive:true,force:true});}
-});
-
 test('offline observers cannot strand required reviewers between discussion rounds',async()=>{
   const directory=mkdtempSync(join(tmpdir(),'odwyn-offline-observer-')),store=openStore(directory),provider=new Agent();
   const primary=store.state.agents[0].id;
   store.state.agents.push({id:'engineer'},{id:'offline'});
-  const room=createRoom(store.state,{title:'Review with offline observer',spaceId:store.security.legacySpaceId,memberIds:[primary,'engineer','offline'],governance:{facilitatorId:primary,reviewerIds:[primary],observerIds:['offline']}});
+  const room=createRoom(store.state,{title:'Review with offline observer',spaceId:'legacy',memberIds:[primary,'engineer','offline'],governance:{facilitatorId:primary,reviewerIds:[primary],observerIds:['offline']}});
   const runtime=new Runtime({store,codex:provider,browser:{},workspace:directory});runtime.addProvider('engineer',new Agent());
   const call=async(tool,args)=>{const job=runtime.active;await runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool,arguments:args}});};
   const finish=async()=>{runtime.finish(runtime.active,'completed');await runtime.drain();};
@@ -176,28 +144,5 @@ test('offline observers cannot strand required reviewers between discussion roun
     expect(room.discussion.status).toBe('paused');
     expect(store.state.jobs.filter(job=>job.roomRoundId===room.discussion.id)).toHaveLength(30);
     expect(store.state.jobs.some(job=>['running','queued'].includes(job.status))).toBe(false);
-  }finally{await runtime.close();store.close();rmSync(directory,{recursive:true,force:true});}
-});
-
-test('review rationale keeps the reviewer task provenance when a new resource is read',async()=>{
-  const directory=mkdtempSync(join(tmpdir(),'odwyn-review-provenance-')),store=openStore(directory),provider=new Agent(),primary=store.state.agents[0].id;
-  store.state.agents.push({id:'reviewer'});
-  const runtime=new Runtime({store,codex:provider,browser:{},workspace:directory});runtime.addProvider('reviewer',new Agent());
-  const p=store.security,space=p.createSpace({name:'Review scope'}),resource=p.createResource({spaceId:space.id,name:'Review evidence',type:'memory'});
-  const grant=(agentId,granted)=>p.putAccess(agentId,{revision:p.revision,spaceIds:[space.id],grants:granted?[{spaceId:space.id,resourceId:resource.id,action:'memory.read',mode:'auto'}]:[]});
-  for(const id of [primary,'reviewer'])grant(id,true);
-  const room=createRoom(store.state,{title:'Classified review',spaceId:space.id,memberIds:[primary,'reviewer'],governance:{facilitatorId:primary,reviewerIds:['reviewer'],observerIds:[]}});
-  const call=async(tool,args)=>{const job=runtime.active;await runtime.handleRequest({id:randomUUID(),method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool,arguments:args}});};
-  try{
-    await runtime.refreshAccount();await runtime.refreshAccount('reviewer');runtime.submitRoom(room.id,{prompt:'Review evidence'});await runtime.drain();
-    const author=runtime.active;
-    await call('odwyn_room_done',{result:'Candidate',nextPlan:'Review',summary:'Prepared.'});runtime.finish(author,'completed');await runtime.drain();
-    const reviewer=runtime.active;store.data.note(reviewer,resource.id,'memory.read');
-    await call('odwyn_room_review',{proposalId:room.discussion.outcome.id,decision:'approve',summary:'Evidence contains restricted rationale.'});
-    expect(room.discussion.outcome.reviews.reviewer.summary).toContain('restricted rationale');
-    grant(primary,false);
-    expect(store.data.proposal(author,room.discussion.outcome)).toBeNull();
-    grant(primary,true);expect(store.data.proposal(author,room.discussion.outcome)?.id).toBe(room.discussion.outcome.id);
-    grant('reviewer',false);expect(store.data.proposal(author,room.discussion.outcome)).toBeNull();
   }finally{await runtime.close();store.close();rmSync(directory,{recursive:true,force:true});}
 });

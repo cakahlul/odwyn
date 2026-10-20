@@ -25,18 +25,10 @@ export async function advanceRoomWorkflows(runtime){
       if(run.status==='awaiting_handoff'){
         const next=nextRoomStage(runtime,room);if(!next)continue;
         const input={room:next.room,artifactIds:(room.artifacts||[]).map(item=>item.id),openQuestions:''};
-        if(room.targetCheckpointId&&room.spaceId!==next.room.spaceId){
-          const checkpoint=room.checkpoints?.find(item=>item.id===room.targetCheckpointId);
-          if(!checkpoint||checkpoint.conflict&&!checkpoint.adoptedByOwnerAt)throw Error('Resolve the current checkpoint before passing this stage.');
-          const policy=runtime.store.security,source=policy.resource(checkpoint.resourceId);
-          const targets=next.workspaceResourceId?[policy.resource(next.workspaceResourceId)]:policy.listResources().filter(item=>item.type==='workspace'&&item.spaceId===next.room.spaceId).flatMap(item=>policy.isolatedWorkspaces.targets(item)).filter(item=>item.type==='workspace'&&(source.isolatedWorkspaceId?item.isolatedWorkspaceId===source.isolatedWorkspaceId:source.metadata.repositoryId&&item.metadata.repositoryId===source.metadata.repositoryId));
-          if(targets.length!==1)throw Error('Choose the destination workspace using Pass to next room.');
-          Object.assign(input,{checkpointId:checkpoint.id,workspaceResourceId:targets[0].id});
-        }
         room=await runtime.handoffRoom(room.id,input);
       }
       if(run.status==='ready'&&!runtime.closed)runtime.startRoomStage(room.id,{});
-    }catch(error){run.error=runtime.store.connectors.redact(error.message);run.autoAdvanceBlocked=true;runtime.changed();}
+    }catch(error){run.error=runtime.store.credentials.redact(error.message);run.autoAdvanceBlocked=true;runtime.changed();}
   }
 }
 
@@ -53,11 +45,10 @@ export function launchRoomWorkflow(runtime,workflow,input,inputs){
   const identifier=inputs[workflow.inputs[0]?.name];
   if(typeof identifier==='string'&&identifier.trim())for(const stage of run.workflow.steps)stage.room.title=(`${identifier.trim().replace(/\s+/g,' ').slice(0,40)} · ${stage.room.title}`).slice(0,70);
   const step=run.workflow.steps.find(item=>item.id===workflow.start);
-  for(const id of input.attachments||[])runtime.store.data.assertFileSpace(id,step.room.spaceId);
   const prompt=stagePrompt(run,step);
   const room=createRoom(runtime.state,step.room);
   Object.assign(room,{roomWorkflowRunId:run.id,roomWorkflowStepId:step.id,stagePrompt:prompt});
-  Object.assign(run,{conversationId:room.id,spaceId:room.spaceId,currentStep:step.id});run.roomIds.push(room.id);
+  Object.assign(run,{conversationId:room.id,currentStep:step.id});run.roomIds.push(room.id);
   runtime.state.workflowRuns.unshift(run);
   try{return startRoomStage(runtime,room.id,{},input.attachments);}
   catch(error){runtime.state.workflowRuns=runtime.state.workflowRuns.filter(item=>item!==run);runtime.state.conversations=runtime.state.conversations.filter(item=>item!==room);throw error;}
@@ -84,6 +75,6 @@ export function attachRoomStage(runtime,source,destination){
   if(run.conversationId!==source.id||run.currentStep!==source.roomWorkflowStepId||run.status!=='awaiting_handoff')throw new Error('This workflow is not awaiting its next room.');
   const next=nextRoomStage(runtime,source);if(!next)throw new Error('Room workflow has finished.');
   Object.assign(destination,{roomWorkflowRunId:run.id,roomWorkflowStepId:next.id,stagePrompt:stagePrompt(run,next)});
-  run.roomIds.push(destination.id);run.currentStep=next.id;run.conversationId=destination.id;run.spaceId=destination.spaceId;run.status='ready';
+  run.roomIds.push(destination.id);run.currentStep=next.id;run.conversationId=destination.id;run.status='ready';
   delete run.error;delete run.autoAdvanceBlocked;
 }
