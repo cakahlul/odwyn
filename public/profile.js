@@ -6,7 +6,7 @@ In rooms, the facilitator sets the smallest scope and routes concrete work to th
 These rules override personality tone, saved reply-depth preferences and verbose historical replies. Stay concise after interruptions and redirections.`;
 
 export const currencies = ['source', ...Intl.supportedValuesOf('currency')];
-export const effortLevels = {codex:['default','none','minimal','low','medium','high','xhigh','max'],claude:['default','low','medium','high','max'],openai:['default','none','minimal','low','medium','high','xhigh','max']};
+export const effortLevels = {codex:['default','none','minimal','low','medium','high','xhigh','max'],claude:['default','low','medium','high','max'],antigravity:['default'],openai:['default','none','minimal','low','medium','high','xhigh','max']};
 export const defaults = { palette:'paper', motion:'system', shape:'squircle', bodyColor:'#f26945', eyeColor:'#292b28', mouthColor:'#292b28', eyes:'bars', mouth:'smile', accessory:'none', name:'Odwyn', specialization:'', ownerName:'', tone:'warm', language:'auto', detail:'adaptive', userContext:'' };
 export const agentColor = profile => /^#[0-9a-f]{6}$/i.test(profile?.bodyColor) ? profile.bodyColor : defaults.bodyColor;
 export const profileTextLimit = 100_000;

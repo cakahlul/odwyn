@@ -1,3 +1,4 @@
+import {renderAudit,setupAudit} from './audit-ui.js';
 import {setupChatComposer} from './chat-composer.js';
 import {setupOddy} from './oddy-ui.js';
 import {setupTutorials} from './tutorials.js';
@@ -93,7 +94,7 @@ let renamingConversationId = null;
 let editingRoomId = null, saveRoomStage = null, roomListSignature = '', roomMembersSignature = '';
 const roomRecipients = new Map();
 const currentRoom = () => view === 'chat' && workspace?.conversations.find(c => c.id === conversationId && c.kind === 'room');
-const providers = { codex: ['Codex','gpt-6.1-sol'], claude: ['Claude Code','sonnet'], openai: ['OpenAI-compatible API',''] };
+const providers = { codex: ['Codex','gpt-6.1-sol'], claude: ['Claude Code','sonnet'], antigravity:['Antigravity CLI','default'], openai: ['OpenAI-compatible API',''] };
 const currencyNames = new Intl.DisplayNames(['en'],{type:'currency'});
 $('#preferred-currency').innerHTML = currencies.map(code=>`<option value="${code}">${code === 'source' ? 'Original currency' : `${code} · ${esc(currencyNames.of(code))}`}</option>`).join('');
 hydrateIcons(); setupBrowser(() => state);
@@ -416,7 +417,7 @@ function navigate(next = 'chat', id = null) {
   if (switching) return;
   if (next === 'home') id = conversationId;
   const chat = workspace.conversations.find(c => c.id === id), owner = chat?.lastAgentId || chat?.agentId;
-  if (next !== 'home' && (owner && id !== conversationId && owner !== agentId || !agentId)) { void switchAgent(owner || workspace.agents[0].id,{sharedChat:id}).then(() => { if (agentId) navigate(next,id); }); return; }
+  if (!['home','audit'].includes(next) && (owner && id !== conversationId && owner !== agentId || !agentId)) { void switchAgent(owner || workspace.agents[0].id,{sharedChat:id}).then(() => { if (agentId) navigate(next,id); }); return; }
   view = next; if (next === 'chat') conversationId = id; signature = ''; render();
   $('#agent-workspace').scrollTop = 0;
   setNavigation(false);
@@ -453,7 +454,7 @@ function render() {
   $('#prompt').placeholder = conversation?.kind === 'room' ? 'Message the room, or @mention an agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#agent-workspace').classList.toggle('chat-start', view === 'chat' && !conversation);
-  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { home:'Home', runs:'Task runs', routines:'Routines', files:'Files & results', workflows:'Workflows', skills:'Skills' }[view];
+  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { home:'Home', audit:'Audit log', runs:'Task runs', routines:'Routines', files:'Files & results', workflows:'Workflows', skills:'Skills' }[view];
   $('#agent-name').textContent = view === 'home' ? 'Odwyn' : state.customization?.name || defaults.name;
   $('#page-title').disabled = view !== 'chat' || !conversation;
   $('#page-title').title = conversation && view === 'chat' ? 'Rename conversation' : '';
@@ -465,9 +466,9 @@ function render() {
     return `<button class="history-item ${c.id === conversationId && view === 'chat' ? 'selected' : ''}" data-conversation="${esc(c.id)}"><span class="history-bullet ${job?.status === 'running' ? 'running' : ''}"></span><span>${esc(c.title)}</span>${job?.status === 'waiting' ? '<span class="needs-you-dot" title="Needs your input">!</span>' : ''}</button>`;
   }).join('') : '<p class="sidebar-empty">No conversations yet.</p>';
   $('#menu-button').classList.toggle('active',view === 'chat');
-  $('#tools-open').classList.toggle('active',['routines','workflows','skills','files','runs'].includes(view));
+  $('#tools-open').classList.toggle('active',['audit','routines','workflows','skills','files','runs'].includes(view));
   if ($('#search-dialog').open) search();
-  if (!agentId && view !== 'home') {
+  if (!agentId && !['home','audit'].includes(view)) {
     $('#agent-workspace').classList.remove('chat-start'); $('#main').classList.remove('chat-start'); $('#composer-area').hidden = true;
     $('#page-title').textContent = 'No conversation open';
     if (signature !== 'minimized') $('#view').innerHTML = `<div class="agents-empty"><h1>${workspace.agents.every(a => closedAgents.has(a.id)) ? 'No conversation open' : 'Your agents are minimized'}</h1><p>Choose an agent from Agents or restore a floating bubble. Your conversations stay in history.</p></div>`;
@@ -475,14 +476,14 @@ function render() {
     updateBrowser(state); return;
   }
   $('#composer-area').hidden = view !== 'chat';
-  const nextSignature = JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'home' ? [workspace.conversations,workspace.jobs,workspace.agents.map(agent=>[agent.id,!!agent.runtime?.account]),$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? [state.schedules,state.jobs] : ['workflows','skills'].includes(view) ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
+  const nextSignature = view==='audit'?'audit':JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'home' ? [workspace.conversations,workspace.jobs,workspace.agents.map(agent=>[agent.id,!!agent.runtime?.account]),$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? [state.schedules,state.jobs] : ['workflows','skills'].includes(view) ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
     const libraryFocus = document.activeElement?.dataset.librarySearch ? {key:document.activeElement.dataset.librarySearch,start:document.activeElement.selectionStart,end:document.activeElement.selectionEnd} : null;
     const homeFocus = view === 'home' && $('#view').contains(document.activeElement) ? document.activeElement.closest('[data-conversation],[data-agent]') : null;
     const pendingCards=[...document.querySelectorAll('#view .approval-card[data-request],#view form[data-room-owner]')].map(node=>({node,focus:node.contains(document.activeElement)?document.activeElement:null}));
-    $('#view').innerHTML = view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state,filter) : ['workflows','skills'].includes(view) ? renderWorkflows(state,view) : renderFiles(state);
+    $('#view').innerHTML = view === 'audit' ? renderAudit() : view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state,filter) : ['workflows','skills'].includes(view) ? renderWorkflows(state,view) : renderFiles(state);
     if (libraryFocus) { const input=$('#view').querySelector(`[data-library-search="${libraryFocus.key}"]`); input?.focus({preventScroll:true}); if(input && libraryFocus.start!==null)input.setSelectionRange(libraryFocus.start,libraryFocus.end); }
     if (homeFocus) { const key = homeFocus.dataset.conversation ? 'conversation' : 'agent'; $('#view').querySelector(`[data-${key}="${CSS.escape(homeFocus.dataset[key])}"]`)?.focus({preventScroll:true}); }
     for(const {node,focus} of pendingCards){const selector=node.dataset.request?`[data-request="${CSS.escape(node.dataset.request)}"]`:`form[data-room-owner="${CSS.escape(node.dataset.roomOwner)}"][data-proposal="${CSS.escape(node.dataset.proposal)}"]`;const next=$('#view').querySelector(selector);if(next){next.replaceWith(node);focus?.focus({preventScroll:true});}}
@@ -590,8 +591,8 @@ function updateAccount() {
   const account = connection.account;
   const type = selectedProvider().type;
   $('#account-title').textContent = providers[type][0];
-  $('#account-description').textContent = connection.connectionError || (type === 'claude' ? (account ? `Signed in${account.email ? ` as ${account.email}` : ''}.` : 'Connect your Claude account to start working.') : type === 'openai' ? 'Requests use your configured API URL and model. Provider API billing applies.' : account?.email || 'Connect your ChatGPT account to start working.');
-  $('#connect-account').textContent = account || type === 'openai' ? 'Refresh' : 'Connect';
+  $('#account-description').textContent = connection.connectionError || (type === 'claude' ? (account ? `Signed in${account.email ? ` as ${account.email}` : ''}.` : 'Connect your Claude account to start working.') : type === 'antigravity' ? 'Uses your signed-in Antigravity subscription on this server. Run agy to sign in, set AI Credit Overages to Never, then Refresh.' : type === 'openai' ? 'Requests use your configured API URL and model. Provider API billing applies.' : account?.email || 'Connect your ChatGPT account to start working.');
+  $('#connect-account').textContent = account || ['openai','antigravity'].includes(type) ? 'Refresh' : 'Connect';
   const usage=connection.usage, usagePanel=$('#provider-usage');
   usagePanel.hidden=type === 'openai';
   const limits=(usage?.limits || []).map(limit=>{
@@ -638,7 +639,7 @@ function providerFields() {
   $('#provider-api-fields').hidden = !isAPI;
   $('#provider-base-url').disabled = $('#provider-api-key').disabled = !isAPI;
   $('#provider-base-url').required = isAPI;
-  $('#provider-hint').textContent = type === 'claude' ? 'Uses Claude Code on this server with your Claude account. Connect below after saving.' : isAPI ? 'Use a base URL such as https://api.openai.com/v1. Model must support tool calling; screenshots need vision.' : 'Uses Codex App Server with your ChatGPT subscription. Connect below after saving.';
+  $('#provider-hint').textContent = type === 'antigravity' ? 'Uses your Antigravity subscription via agy. Set AI Credit Overages to Never. Use default, or a model slug from agy models.' : type === 'claude' ? 'Uses Claude Code on this server with your Claude account. Connect below after saving.' : isAPI ? 'Use a base URL such as https://api.openai.com/v1. Model must support tool calling; screenshots need vision.' : 'Uses Codex App Server with your ChatGPT subscription. Connect below after saving.';
 }
 let workspaceSetup = false;
 function openSettings(onboarding = false) {
@@ -894,7 +895,7 @@ $('#preferences-form').onsubmit = async event => {
 $('#connect-account').onclick = () => perform(async () => {
   const connection = selectedConnection(), config = selectedProvider();
   $('#connect-account').disabled = true;
-  try { await providerApi(`${connection.account || config.type === 'openai' ? '/api/account/refresh' : '/api/account/login'}?${providerGlobal ? 'scope=global' : `agentId=${providerAgentId}`}`,{}); }
+  try { await providerApi(`${connection.account || ['openai','antigravity'].includes(config.type) ? '/api/account/refresh' : '/api/account/login'}?${providerGlobal ? 'scope=global' : `agentId=${providerAgentId}`}`,{}); }
   finally { $('#connect-account').disabled = false; }
 });
 $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(async () => {
@@ -992,7 +993,7 @@ setupOddy(()=>({view,conversationId:conversationId||'',agentId:agentId||''}));
 await refresh();
 if (state && agentId) { restoreDraft(); signature = ''; render(); }
 const initial = location.hash.slice(1).split('/');
-if (['home','chat','runs','routines','files','workflows','skills'].includes(initial[0]) && (agentId || initial[0] === 'home')) { view = initial[0]; conversationId = initial[0] === 'home' ? conversationId : initial[1] || null; signature = ''; render(); }
+if (['home','chat','audit','runs','routines','files','workflows','skills'].includes(initial[0]) && (agentId || ['home','audit'].includes(initial[0]))) { view = initial[0]; conversationId = initial[0] === 'home' ? conversationId : initial[1] || null; signature = ''; render(); }
 if (!initial[0] && state) { view = 'home'; signature = ''; render(); }
 if (state && agentId && !state.customization) openSettings(true);
 else if (state && agentId && !workspace.globalProvider.configured) openSettings();
@@ -1006,3 +1007,5 @@ setInterval(() => { if (!document.hidden) {
 } }, 1000);
 
 setupWorkflows(()=>workspace,()=>agentId,job=>navigate('chat',job.conversationId),refresh,()=>{signature='';render();});
+
+setupAudit(()=>view);

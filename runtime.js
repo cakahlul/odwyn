@@ -1,3 +1,4 @@
+import {usage, sumUsage} from './usage.js';
 import {validateCommand,runCommand} from './terminal.js';
 import { workflowInvocation, interpolate, condition, commandParameters } from './workflows.js';
 import { randomUUID } from 'node:crypto';
@@ -106,7 +107,7 @@ export class Runtime {
     try {
       const result = await provider.request('account/read', {});
       if (token !== provider.token || this.closed || this.providers.get(agentId) !== provider) return;
-      account = ['chatgpt','claude','openai'].includes(result.account?.type) ? result.account : null;
+      account = ['chatgpt','claude','antigravity','openai'].includes(result.account?.type) ? result.account : null;
       connectionError = result.account && !account ? 'Codex requires ChatGPT subscription sign-in.' : null;
     } catch (error) { if (token !== provider.token || this.closed || this.providers.get(agentId) !== provider) return; connectionError = error.message; }
     let usage=null, usageError=null;
@@ -331,6 +332,7 @@ export class Runtime {
     if(job.workflowRunId) this.workflowOwner=job.workflowRunId;
     this.codex = this.providers.get(job.agentId); this.model = this.codex.config?.model || this.model;
     this.active = job; this.browser.owner = null; job.status = 'running'; job.startedAt = new Date().toISOString(); job.error = null;
+    job.providerSnapshot={type:this.codex.config?.type||'codex',model:this.model};
     this.event(job, 'Starting', `Opening your ${providerNames[this.codex.config?.type || 'codex']} conversation`);
     return this.trackStart(this.startJob(job));
   }
@@ -394,6 +396,7 @@ export class Runtime {
       if (this.active !== job) return;
       conversation.providerKey = key;
       conversation.threadId = response.thread.id; job.threadId = response.thread.id; this.changed();
+      if(!threadId)session.auditTokenTotal={totalTokens:0,inputTokens:0,outputTokens:0,cachedInputTokens:0,cacheWriteInputTokens:0,reasoningOutputTokens:0};
       session.providerKey = key; session.threadId = response.thread.id; session.toolBrand = toolBrand;
       if (job.status === 'stopping') return;
       const attachedIds = new Set([...history.flatMap(message=>message.attachments || []),...(job.attachments || [])]);
@@ -417,13 +420,28 @@ export class Runtime {
     const job = this.active;
     if (!job || params?.threadId !== job.threadId) return;
     try{params=this.store.credentials.sanitize(params);}catch{this.finish(job,'failed','Credential broker unavailable.');return;}
-    if (job.status === 'stopping' && method !== 'turn/completed') return;
+    if (job.status === 'stopping' && !['turn/completed','odwyn/taskUsage','thread/tokenUsage/updated'].includes(method)) return;
     if (method === 'turn/started') {
       if (job.turnId && params.turn.id !== job.turnId) return;
       job.turnId = params.turn.id; this.changed();
     }
     if (params.turnId && job.turnId && params.turnId !== job.turnId) return;
     if(method==='turn/completed'&&job.turnId&&params.turn.id!==job.turnId)return;
+    if(method==='odwyn/activity'){this.event(job,params.label,params.detail);return;}
+    if(method==='odwyn/taskUsage'){
+      job.usageReports ||= {};job.usageReports[params.turnId]=params.usage;
+      job.usage=sumUsage(Object.values(job.usageReports));this.changed();return;
+    }
+    if(method==='thread/tokenUsage/updated'&&params.tokenUsage?.total){
+      const session=this.conversation(job)?.sessions?.[job.agentId];
+      const total=params.tokenUsage.total,last=params.tokenUsage.last;
+      const previous=session?.auditTokenTotal||job.auditTokenTotal;
+      const baseline=previous||Object.fromEntries(Object.entries(total).map(([key,value])=>[key,Math.max(0,value-(last?.[key]||0))]));
+      const delta=Object.fromEntries(Object.entries(total).map(([key,value])=>[key,Math.max(0,value-(baseline[key]||0))]));
+      const report=usage(delta,'codex');report.partial=!previous||Object.keys(total).some(key=>total[key]<(baseline[key]||0));
+      job.usage=sumUsage([...(job.usage?[job.usage]:[]),report]);
+      job.auditTokenTotal=total;if(session)session.auditTokenTotal=total;this.changed();return;
+    }
     if (['item/started','item/completed'].includes(method) && params.item?.type === 'mcpToolCall') {
       this.event(job, method === 'item/started' ? 'MCP tool' : 'MCP tool finished', `${params.item.server}.${params.item.tool}`);
     }

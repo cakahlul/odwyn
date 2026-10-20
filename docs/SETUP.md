@@ -31,7 +31,14 @@ Terminal commands run directly on the host in the workspace folder. Keep the ser
 | --- | --- |
 | Codex | Install Codex CLI. Save the provider, select **Connect**, and follow sign-in. Odwyn uses Codex App Server and your account's available models and limits. |
 | Claude Code | Install Claude Code. Save the provider, select **Connect**, open the sign-in link, then paste the returned code into **Complete sign-in**. Terminal sign-in with `claude auth login`, followed by **Refresh**, also works. |
+| Antigravity CLI | Install `agy`, sign in with your personal Google subscription and set credit overages to Never. Save **Antigravity CLI**, then **Refresh**. |
 | OpenAI-compatible API | Enter the base URL, model, and optional API key. The endpoint must support Chat Completions and function tools. API billing follows your provider. |
+
+For Antigravity, install [the official CLI](https://www.antigravity.google/docs/getting-started?tab=cli), then run `agy` as the operating-system user running Odwyn and sign in with your personal Google subscription. Set **AI Credit Overages → Never** in Antigravity. Odwyn rejects API-key/ADC mode and enabled credit overages, and removes API-key/Cloud overrides from its CLI environment. Exhausted quota does not fall back to API billing.
+
+Choose **Antigravity CLI** globally or for one agent, then Refresh. Use `default`, or a model slug from `agy models`. Workspaces share the host's Antigravity sign-in. `ODWYN_ANTIGRAVITY_COMMAND` overrides the executable. Saved chats, automatic skills and knowledge are supplied on each task. A temporary custom agent disables inherited customizations and built-in tools; Odwyn supplies tools through an authenticated MCP bridge and keeps its existing approval flow.
+
+`bun run check:antigravity` checks the installed CLI with a small subscription inference request.
 
 Workspace Settings sets the default provider. An agent's **AI provider** section can override it. Stop that agent's active work before changing its provider.
 

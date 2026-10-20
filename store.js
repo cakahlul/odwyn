@@ -1,4 +1,5 @@
 import {openCredentials} from './credentials.js';
+import {openAudit} from './audit.js';
 import {openKnowledge} from './knowledge.js';
 import { defaults, ownerPreferenceKeys } from './public/profile.js';
 import { Database } from 'bun:sqlite';
@@ -84,6 +85,7 @@ export function openStore(directory) {
   })(); } catch(error) { db.close();throw error; }
   if(migrating||plaintextProviderKeys)db.exec('PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA wal_checkpoint(TRUNCATE)');
   for(const name of readdirSync(directory))if(['checkpoints','sources'].includes(name)||/^pre-(?:security|data-security|approval-security|isolated-workspaces|git-work|grants)-/.test(name))rmSync(join(directory,name),{recursive:true,force:true});
+  const audit=openAudit(db,state,credentials);
   const indexed = new Map();
   const removeChunks = db.query('DELETE FROM chat_chunks WHERE messageId = ?');
   const insertChunk = db.query('INSERT INTO chat_chunks(messageId, conversationId, text) VALUES (?, ?, ?)');
@@ -91,6 +93,7 @@ export function openStore(directory) {
   const save = db.transaction(() => {
     state.agents[0].customization = state.customization;
     query.run(credentials.serialize(state));
+    audit.sync();
     for (const conversation of state.conversations) for (const message of conversation.messages) {
       if (indexed.get(message.id) === message.text) continue;
       removeChunks.run(message.id);
@@ -125,8 +128,8 @@ export function openStore(directory) {
       save();
     } catch(error) { state.conversations = conversations; state.jobs = jobs; state.workflowRuns = workflowRuns; throw error; }
   });
-  const store={directory,state,credentials,save,search,deleteConversation,close:()=>db.close()};
-  store.knowledge=openKnowledge(db,store);return store;
+  const store={directory,state,credentials,audit,save,search,deleteConversation,close:()=>db.close()};
+  store.knowledge=openKnowledge(db,store);save();return store;
 }
 
 export function findAgent(state, id = state.agents[0].id) {

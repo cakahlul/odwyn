@@ -27,3 +27,9 @@ Agents run sequentially within a workspace. Room workflows support configured st
 ## Shared settings
 
 Settings includes Appearance, AI provider, Preferences, Workspaces, Sharing, Knowledge and Tutorials. Sharing links saved appearance, preferences or provider defaults across workspaces. Provider sharing includes the API key, requires the owner password and preserves agent overrides. Account sign-ins remain separate.
+
+## Audit log
+
+Tools → Audit log shows task activity across agents, with agent and creation-time filters and paginated task/event history. Each task records status, configured provider/model, start/end timestamps and elapsed wall time, including pauses for owner input. Running durations update automatically. Audit history survives conversation and agent deletion within its workspace. Deleting the workspace deletes its audit database.
+
+Token counts come from Codex, Claude Code, Antigravity CLI, or compatible API responses when available. Cached/reasoning tokens are included in provider totals, not added twice. Unknown or incomplete data is labelled; old history can only include events retained before this feature. Charges are never estimated: currently OpenRouter's reported USD usage cost is recognized. Subscription CLIs, Claude SDK estimates and APIs without a recognized charge show “Cost unavailable.” This local history is not a tamper-proof billing ledger.

@@ -1,17 +1,20 @@
+import {usage, sumUsage} from './usage.js';
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { Codex } from './codex.js';
+import {AntigravityHeadless} from './antigravity.js';
 import { effortLevels } from './public/profile.js';
 import { textInput } from './security.js';
 
-export const providerModels = { codex: 'gpt-6.1-sol', claude: 'sonnet', openai: '' };
-export const providerNames = { codex: 'Codex', claude: 'Claude Code', openai: 'OpenAI-compatible API' };
+export const providerModels = { codex: 'gpt-6.1-sol', claude: 'sonnet', antigravity:'default', openai: '' };
+export const providerNames = { codex: 'Codex', claude: 'Claude Code', antigravity:'Antigravity CLI', openai: 'OpenAI-compatible API' };
 
 export function validateProvider(input, previous = {}) {
-  if (!Object.hasOwn(providerModels, input.type)) throw new Error('Choose Codex, Claude Code, or an OpenAI-compatible API.');
+  if(input.type==='gemini')input={...input,type:'antigravity',model:'default',effort:'default'};
+  if (!Object.hasOwn(providerModels, input.type)) throw new Error('Choose Codex, Claude Code, Antigravity CLI, or an OpenAI-compatible API.');
   const model = input.model ?? providerModels[input.type];
   if (typeof model !== 'string' || model.length > 200 || /[\x00-\x1f\x7f]/.test(model) || !model.trim()) throw new Error('Enter a model name (up to 200 characters).');
   const effort = input.effort ?? (input.type === previous.type && model.trim() === previous.model ? previous.effort : undefined) ?? 'default';
@@ -37,12 +40,13 @@ function codexLimits(data) {
   })));
 }
 
-// Adapt the two additional providers to the existing task/tool protocol.
+// Adapt additional providers to the existing task/tool protocol.
 export class AIProvider extends EventEmitter {
-  constructor({ config, home, workspace, isolated = false, codex, fetch = globalThis.fetch, query, claudeCommand = (process.env.ODWYN_CLAUDE_COMMAND ?? process.env.SIDEKICK_CLAUDE_COMMAND) || 'claude', claudeAuth }) {
+  constructor({ config, home, workspace, isolated = false, codex, fetch = globalThis.fetch, query, claudeCommand = (process.env.ODWYN_CLAUDE_COMMAND ?? process.env.SIDEKICK_CLAUDE_COMMAND) || 'claude', claudeAuth, antigravityCommand, antigravityConfigDirectory }) {
     super(); this.config = config; this.workspace = workspace; this.fetch = fetch; this.query = query; this.claudeCommand = claudeCommand; this.claudeAuth = claudeAuth;
     this.env = isolated ? {...process.env,CLAUDE_CONFIG_DIR:join(home,'claude'),ANTHROPIC_API_KEY:undefined,ANTHROPIC_AUTH_TOKEN:undefined,CLAUDE_CODE_OAUTH_TOKEN:undefined} : process.env;
     this.codex = codex || new Codex({ home, workspace, isolated, ...(isolated ? {mcpHome:home} : {}), model: config.model, effort:config.effort });
+    this.antigravity=new AntigravityHeadless({command:antigravityCommand,configDirectory:antigravityConfigDirectory});
     this.pending = new Map(); this.token = {}; this.thread = null; this.run = null;
     for (const event of ['notification', 'request', 'disconnect', 'protocolError']) this.codex.on(event, (...args) => {
       if (this.config.type !== 'codex') return;
@@ -77,6 +81,7 @@ export class AIProvider extends EventEmitter {
       } while (cursor);
       return models;
     }
+    if (config.type === 'antigravity') return [{id:'default',name:'Antigravity CLI default'}];
     if (config.type === 'claude') {
       const { query } = await import('@anthropic-ai/claude-agent-sdk');
       const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15_000);
@@ -136,6 +141,7 @@ export class AIProvider extends EventEmitter {
       return {};
     }
     if (method === 'account/read') {
+      if (this.config.type === 'antigravity') return this.antigravity.account();
       if (this.config.type === 'openai') return { account: { type: 'openai', planType: 'API' } };
       try {
         const status = this.claudeAuth ? await this.claudeAuth() : JSON.parse((await promisify(execFile)(this.claudeCommand, ['auth', 'status', '--json'], { cwd: this.workspace, env:this.env, timeout: 15_000, maxBuffer: 100_000 })).stdout);
@@ -161,6 +167,10 @@ export class AIProvider extends EventEmitter {
   }
 
   notify(run, method, params) { if (this.run === run) this.emit('notification', { method, params: { threadId: run.thread.id, turnId: run.id, ...params } }); }
+  taskUsage(run,report,add=false) {
+    run.usageReports=add?[...(run.usageReports||[]),report]:[report];
+    this.notify(run,'odwyn/taskUsage',{usage:sumUsage(run.usageReports)});
+  }
   message(run, id, text) { this.notify(run, 'item/completed', { item: { type: 'agentMessage', id, text } }); }
   invoke(run, name, args) {
     if (this.run !== run || run.controller.signal.aborted) return Promise.reject(new Error('Task stopped.'));
@@ -183,6 +193,7 @@ export class AIProvider extends EventEmitter {
     try {
       this.notify(run, 'turn/started', { turn: { id: run.id } });
       if (run.config.type === 'claude') await this.runClaude(run, params);
+      else if(run.config.type==='antigravity')await this.antigravity.run(this,run,params);
       else await this.runAPI(run, params);
       this.notify(run, 'turn/completed', { turn: { id: run.id, status: 'completed' } });
     } catch (error) {
@@ -201,7 +212,9 @@ export class AIProvider extends EventEmitter {
         body: JSON.stringify({ model: run.config.model, ...(run.config.effort && run.config.effort !== 'default' ? {reasoning_effort:run.config.effort} : {}), messages, tools, stream: false }),
       });
       if (!response.ok) throw new Error(`AI API returned HTTP ${response.status}. Check your base URL, model, API key, and quota.`);
-      const choice = (await response.json()).choices?.[0]; const message = choice?.message;
+      const data=await response.json();
+      this.taskUsage(run,data.usage?usage(data.usage,new URL(run.config.baseUrl).hostname==='openrouter.ai'?'openrouter':'openai'):null,true);
+      const choice = data.choices?.[0]; const message = choice?.message;
       if (!message || message.role !== 'assistant' || (!message.content && !message.tool_calls?.length)) throw new Error('AI API returned an empty or unsupported response.');
       messages.push({ role: 'assistant', content: message.content || null, ...(message.tool_calls?.length ? { tool_calls: message.tool_calls } : {}) });
       if (message.content) this.message(run, randomUUID(), typeof message.content === 'string' ? message.content : message.content.map(p => p.text || '').join(''));
@@ -273,6 +286,7 @@ export class AIProvider extends EventEmitter {
         }
         if (message.type === 'result') {
           resultSeen = true;
+          this.taskUsage(run,message.usage?usage(message.usage,'claude'):null);
           if (this.run === run && message.usage) this.updateUsage({lastRun:{inputTokens:message.usage.input_tokens+(message.usage.cache_read_input_tokens || 0)+(message.usage.cache_creation_input_tokens || 0),outputTokens:message.usage.output_tokens}});
           if (message.subtype !== 'success' || message.is_error) throw new Error(message.errors?.join('\n') || 'Claude Code failed. Check sign-in, model access, and quota.');
           if (!text && message.result) this.message(run, itemId, message.result);

@@ -26,7 +26,7 @@ Save work you repeat as a workflow. Schedule a routine for the next check. Your 
 
 ## Your workspace, your rules
 
-Run Odwyn on your computer or VPS. Connect Codex, Claude Code, or an OpenAI-compatible API. Choose when browser interactions and terminal commands need confirmation.
+Run Odwyn on your computer or VPS. Connect Codex, Claude Code, Antigravity CLI, or an OpenAI-compatible API. Choose when browser interactions and terminal commands need confirmation.
 
 Use the workspace picker at the top to switch homes, or its + button to create one. Each home has the same features and its own agents, chats, files, browser sessions and settings. Existing data stays in Default. Tasks and routines continue when you switch away. In Settings → Workspaces, create, rename, or permanently delete a home after confirmation. Stop its tasks before deleting it. The first workspace can be renamed but cannot be deleted.
 
