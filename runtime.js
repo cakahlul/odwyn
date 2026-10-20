@@ -482,6 +482,7 @@ export class Runtime {
         }));
         this.event(job,'Continuing','Saved progress; continuing within the remaining room execution budget.');return;
       }
+      if(params.turn.status==='completed'&&job.browserOperation&&!job.stopResult){this.finish(job,'interrupted','AI provider ended before the browser response arrived. Review browser activity, then resume with a fresh read.');return;}
       for (const item of params.turn.items || []) if (item.type === 'agentMessage' && item.text?.trim() && !this.conversation(job).messages.some(m => m.providerItemId === item.id && m.jobId===job.id && m.role==='assistant')) this.conversation(job).messages.push({ id:randomUUID(),providerItemId:item.id, agentId:job.agentId, role: 'assistant', text: item.text, at: new Date().toISOString(), jobId: job.id, phase: item.phase });
       const status=job.stopResult?.status || (params.turn.status === 'completed' ? 'completed' : params.turn.status === 'interrupted' ? 'interrupted' : 'failed'),error=job.stopResult?.error || params.turn.error?.message || (params.turn.status !== 'completed' && !job.stopResult ? job.error || 'Execution interrupted.' : null);
       if(status==='completed'&&job.workspaceDirty)void this.finishWithCheckpoint(job,status,error);else this.finish(job,status,error);
@@ -563,8 +564,8 @@ export class Runtime {
   }
 
   async executeRequest({ id, method, params, workflowAction = false }) {
-    const job = this.active; const child = this.codex.child;
-    const reply = result => { if (this.codex.child === child&&!job?.providerTurnEnded)this.codex.respond(id, result);if(job)delete job.answerAwaitingReply; };
+    const job = this.active; const provider=this.codex,child=provider.child;
+    const reply = result => { if (provider.child === child&&this.active===job&&!job?.providerTurnEnded)provider.respond(id, result);if(job)delete job.answerAwaitingReply; };
     if (!job || job.status === 'stopping' || job.finalizing || params?.threadId !== job.threadId || (params.turnId && job.turnId && params.turnId !== job.turnId)) {
       if (this.codex.child === child) this.codex.reject(id, 'No matching active Odwyn task.'); return;
     }
@@ -647,7 +648,13 @@ export class Runtime {
         }
         if (this.active !== job || job.status === 'stopping' || this.takeover) throw new Error('Browser control changed. Read a fresh snapshot after the owner resumes.');
         this.event(job, action.action === 'read' ? 'Reading page' : action.action.replaceAll('_', ' '), action.reason?.slice(0, 1000) || '');
-        result = await this.browser.action(action, () => this.active === job && job.status !== 'stopping' && !this.takeover);
+        job.browserOperation={action:action.action,startedAt:new Date().toISOString()};
+        try{
+          result=await this.browser.action(action,()=>this.active===job&&job.status!=='stopping'&&!this.takeover);
+          if(!result||typeof result!=='object')throw new Error('Browser returned no snapshot. Read the page again.');
+          this.event(job,'Browser action completed',`${action.action}: ${result.elements?.length||0} controls, ${result.text?.length||0} text characters${result.image?', screenshot included':''}`);
+        }catch(error){this.event(job,'Browser action failed',error.message);throw error;}
+        finally{delete job.browserOperation;}
       } else if(params.tool==='odwyn_room_read'){
         if(Object.keys(args).length)throw new Error('Room read takes no arguments.');
         result=roomWorkContext(this,job);

@@ -2067,3 +2067,15 @@ input[type=color]::-moz-color-swatch { border:0; border-radius:6px; }
   .avatar-presets button { gap:6px; padding:8px; }
   .avatar-feature-choices { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
+
+/* Reuse the same browser controls in a roomy, focus-trapped takeover dialog. */
+#browser-takeover-dialog{width:min(1440px,96vw);max-width:96vw;max-height:94dvh;padding:0;border-radius:20px;overflow:auto}
+#browser-takeover-dialog>.modal-top{position:sticky;top:0;z-index:2;margin:0;padding:16px 20px;background:var(--paper);border-bottom:1px solid var(--line);align-items:start}
+#browser-takeover-dialog h2{margin:0;font-size:21px}#browser-takeover-hint{margin:6px 0 0;color:var(--muted);font-size:12px}
+#browser-takeover-dialog #browser-content{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:12px;padding:16px}
+#browser-takeover-dialog .browser-address{grid-column:1/-1;padding:0}#browser-takeover-dialog .browser-control-row{grid-column:1/-1;margin:0;padding:0}
+#browser-takeover-dialog #browser-tabs{grid-column:1/-1;grid-row:3;max-width:100%}#browser-takeover-dialog #browser-navigate{grid-column:1/-1;grid-row:4;margin:0}
+#browser-takeover-dialog #browser-viewport{grid-column:1;grid-row:5/8;margin:0;min-height:0;align-self:start}#browser-takeover-dialog #takeover-controls{grid-column:2;grid-row:5;margin:0}
+#browser-takeover-dialog .panel-note{grid-column:2;grid-row:6;margin:0}#browser-takeover-dialog #browser-preview-status{grid-column:1;grid-row:8;margin:0;color:var(--muted);font-size:12px}
+#browser-preview-status:empty{display:none}#browser-preview-status{margin:10px 18px;color:var(--muted);font-size:12px}
+@media(max-width:760px){#browser-takeover-dialog{width:96vw;max-width:96vw;max-height:96dvh}#browser-takeover-dialog #browser-content{display:flex;flex-direction:column;padding:12px}#browser-takeover-dialog #browser-content>*{width:100%;box-sizing:border-box}#browser-takeover-dialog>.modal-top{padding:12px}#browser-takeover-dialog .panel-note{display:none}}

@@ -212,3 +212,21 @@ test('real browser references, form interactions, evidence, dialogs and network 
 
   } finally { await browser.close(); rmSync(directory,{recursive:true}); }
 },60_000);
+
+test('reads recover from navigation, explain visual-only pages, and replace crashed tabs', async () => {
+  const directory=mkdtempSync(join(tmpdir(),'odwyn-browser-recovery-'));
+  const browser=new Browser({directory});
+  try {
+    await browser.action({action:'read'});
+    await browser.context.route('https://visual.example.test/**',route=>route.fulfill({contentType:'text/html',body:'<canvas width="200" height="100"></canvas>'}));
+    await browser.page.goto('https://visual.example.test/');
+    const page=browser.page,evaluate=page.evaluate.bind(page);let evaluations=0;
+    page.evaluate=(...args)=>{if(!evaluations++)throw new Error('Execution context was destroyed, most likely because of a navigation');return evaluate(...args);};
+    const result=await browser.action({action:'read'});
+    expect(result.text).toContain('no readable text');expect(result.image).toBeTruthy();expect(evaluations).toBe(2);
+    const context=browser.context;
+    page.emit('crash');
+    const recovered=await browser.action({action:'read'});
+    expect(browser.context).toBe(context);expect(browser.page).not.toBe(page);expect(recovered.text).toContain('blank page');
+  }finally{await browser.close();rmSync(directory,{recursive:true,force:true});}
+},15_000);

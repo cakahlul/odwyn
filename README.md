@@ -1,42 +1,66 @@
 # Odwyn
 
-**Help with the oddly specific.**
+**Help with the oddly specific.** A self-hosted workspace for AI agents that research, browse, collaborate, and turn your goals into something useful.
 
-You’ve got twelve tabs open and still haven’t picked a hotel. There’s a price you want to check, a booking to sort out, and something you meant to do yesterday.
+[Get started](#get-started) · [Explore the workspace](docs/USAGE.md) · [Connect your AI provider](docs/SETUP.md#connect-a-provider) · [Development](docs/DEVELOPMENT.md)
 
-Give Odwyn a goal. Your agents can research, compare, discuss the options, and bring back a recommendation, draft, or file. Keep the conversation going as your plans change.
+![Odwyn: help with the oddly specific. An illustrated example shows agents researching and comparing options for a quiet weekend in Kyoto.](docs/images/odwyn-hero.svg)
 
-[Get started](docs/SETUP.md) · [See how to use it](docs/USAGE.md) · [Technical guides](#technical-guides)
+## Fewer loose ends. More finished plans.
 
-![How Odwyn works: give it a goal, let your agents research or discuss it using browser and terminal tools, then review the result and approve actions when required.](docs/images/how-odwyn-works.svg)
+Twelve tabs open. Three options left. Still no decision.
 
-## Make it yours
+Give Odwyn a goal and a little context. Your agents can research the options, discuss the tradeoffs, and bring back a recommendation, draft, or file. Ask a follow-up, change direction, or save the process for next time.
 
-Name your agents. Give them different jobs, personalities, and ways of replying. Put them in a room to compare evidence and work toward one shared recommendation, or switch agents inside an existing chat for another perspective.
-
-Save work you repeat as a workflow. Schedule a routine for the next check. Your chats, preferences, and results stay available when you return.
-
-**Oddy** in the top navigation opens the platform assistant from any screen, including Settings, to operate Odwyn in plain language. Oddy keeps its conversations across workspaces and inherits the Default workspace's AI provider and account. Choose an independent Oddy provider under **Settings → AI provider → Oddy**. Ask it to create a workspace or agent, set up workflows and rooms, run or stop jobs, schedule routines, or check progress. It works independently of busy workspace agents and shows a review and requires your approval before every write, including creating, updating, deleting and launching work. Rejecting applies nothing; approval is single use. Provider credentials remain in Settings. Oddy can investigate saved conversations, messages, complete job events, workflow runs, knowledge and user configuration across your workspaces. Reads are paginated and managed credentials are redacted; this does not grant other agents access. File history exposes metadata, not binary file contents. Open it with the **Oddy** button or **⌘/Ctrl Shift O**. Both chat composers send with Enter; Shift+Enter adds a new line. Oddy includes an attachment button (up to 20 files, 20 MB each) and receives the current workspace, page, dialog, settings section, and selected conversation/agent with each request. The context label shows the current page; passwords and unsaved form contents are not captured. Images and UTF-8 text use the existing attachment reader; binary document extraction remains unavailable in Oddy. The ? tutorial also includes **Ask Oddy**. Oddy’s conversation menu includes New chat, New room, chat history, and Clear this chat. New chat preserves previous conversations; clearing requires confirmation and removes only the selected Oddy conversation, keeping uploaded files. Long workspace/context labels are truncated in the header; hover to read the full label.
-
-| Give Odwyn a goal | Get something you can use |
+| Try a goal | Work toward a useful result |
 | --- | --- |
-| “Compare hotels near Shinjuku within my budget.” | A shortlist with sources and tradeoffs. |
-| “Have my agents review these options together.” | One shared recommendation and decisions left to you. |
-| Schedule a research workflow for Mondays. | A recurring task with saved results to review. |
+| “Find a quiet hotel near Shinjuku within my budget.” | A shortlist with sources and tradeoffs. |
+| “Have my agents review this launch plan together.” | A shared recommendation, open questions, and next steps. |
+| “Check these sources every Monday.” | A scheduled workflow with saved results to review. |
 
-## Your workspace, your rules
+## Make your own little team
 
-Run Odwyn on your computer or VPS. Connect Codex, Claude Code, Antigravity CLI, or an OpenAI-compatible API. Choose when browser interactions and terminal commands need confirmation.
+Give each agent a name, a role, a personality, and a provider. Add skills for repeatable work and knowledge for the context they need. Chat with one agent, or bring several into a room for a shared task.
 
-Use the workspace picker at the top to switch homes, or its + button to create one. Each home has the same features and its own agents, chats, files, browser sessions and settings. Existing data stays in Default. Tasks and routines continue when you switch away. In Settings → Workspaces, create, rename, or permanently delete a home after confirmation. Stop its tasks before deleting it. The first workspace can be renamed but cannot be deleted.
+![Six parts of Odwyn: customizable agents, browser takeover, collaborative rooms, skills and knowledge, workflows and routines, and activity logs.](docs/images/odwyn-features.svg)
 
-In Settings → Sharing, enable **Share to all workspaces** for saved appearance, preferences and memory, or AI provider defaults. Future changes from any home stay linked, including newly created homes. Turning sharing off leaves independent copies. Provider sharing includes the API key, requires your owner password, and preserves agent overrides; account sign-ins remain separate.
+- **Browse together.** Agents use a persistent Chromium session. Take over in a centered browser preview when you need to sign in or handle a page yourself, then hand control back.
+- **Keep useful work.** Search skills, knowledge, and workflow history. Reuse instructions, references, and processes across future tasks.
+- **See what happened.** The audit log shows task activity, elapsed time, and available token usage. Provider-reported charges and supported API-equivalent estimates are labelled separately.
+- **Ask Oddy.** The platform assistant helps manage agents, rooms, workflows, and workspaces in plain language. It asks for approval before making changes.
 
-Terminal commands run on the host in the workspace folder with the server user’s filesystem and network permissions. Browser work uses the workspace’s persistent Chromium session. [Set up your workspace](docs/SETUP.md).
+## From “could you…” to something you can use
 
-## Technical guides
+![How Odwyn works: give it a goal, let agents research and discuss using browser and terminal tools, then review the result and approve actions when required.](docs/images/how-odwyn-works.svg)
 
-- [Setup, providers, and deployment](docs/SETUP.md)
-- [Agents, rooms, and task confirmations](docs/USAGE.md)
-- [Workflows, skills, and routines](docs/WORKFLOWS.md)
-- [Development and verification](docs/DEVELOPMENT.md)
+Choose the interaction mode for each task. Review results, respond to questions, and approve actions when required. Keep separate workspaces for different projects, with their own agents, chats, files, and browser sessions.
+
+## Bring your AI provider
+
+Run Odwyn on your computer or VPS. Connect **Codex**, **Claude Code**, **Antigravity CLI**, or an **OpenAI-compatible API**. Set a workspace default or choose a different provider for an individual agent.
+
+CLI providers use their connected accounts and available limits; API endpoints follow the provider’s billing. [Provider setup and subscription details →](docs/SETUP.md#connect-a-provider)
+
+## Get started
+
+Install [Bun](https://bun.sh) and your chosen provider’s CLI, or have an OpenAI-compatible API endpoint ready. From the project directory:
+
+```sh
+bun install --frozen-lockfile
+bun run browser:install
+bun run setup
+bun start
+```
+
+Open **http://127.0.0.1:4317**, sign in with the credentials saved in `.env`, connect your provider, and create your first agent.
+
+Terminal commands run on the host with the server user’s permissions. Use a dedicated ordinary user for deployment. [Full setup, authentication, and VPS guide →](docs/SETUP.md)
+
+## Go a little deeper
+
+| Guide | What’s inside |
+| --- | --- |
+| [Setup](docs/SETUP.md) | Installation, providers, deployment, and backups. |
+| [Using Odwyn](docs/USAGE.md) | Agents, rooms, browser controls, Oddy, and audit logs. |
+| [Workflows and skills](docs/WORKFLOWS.md) | Reusable instructions, multi-step work, and scheduled routines. |
+| [Development](docs/DEVELOPMENT.md) | Architecture, local development, and verification. |

@@ -72,6 +72,10 @@
       <footer class="panel-footer"><span id="panel-footer-text">Browser actions appear in the Activity tab.</span></footer>
     </aside>
   </div>
+  <dialog id="browser-takeover-dialog" class="modal browser-takeover-dialog" aria-labelledby="browser-takeover-title" aria-describedby="browser-takeover-hint">
+    <header class="modal-top"><div><h2 id="browser-takeover-title">Browser takeover</h2><p id="browser-takeover-hint">You’re in control. Hand back when finished. Minimizing keeps the agent paused.</p></div><button type="button" id="browser-takeover-minimize" class="icon-button" aria-label="Minimize browser takeover"><span data-icon="minimize"></span></button></header>
+    <div id="browser-takeover-host"></div>
+  </dialog>
   <dialog id="room-header" class="modal room-details-dialog" aria-labelledby="room-heading">
     <form method="dialog" class="modal-top"><span class="eyebrow">Room details</span><button class="icon-button" aria-label="Close room details"><span data-icon="close"></span></button></form>
     <div class="room-identity"><span class="room-symbol" aria-hidden="true"><span data-icon="chat"></span></span><div><h2 id="room-heading"></h2><p id="room-participant-count" class="field-hint"></p></div></div>

@@ -11,7 +11,7 @@ export class Browser {
     this.directory = directory; this.onFile = onFile; this.findFile = findFile;
     this.executablePath = executablePath; this.headless = headless;
     this.context = null; this.page = null; this.proxy = null; this.tail = Promise.resolve(); this.owner = null; this.dialog = null; this.generation = 0;
-    this.openers = new WeakMap();
+    this.openers = new WeakMap(); this.crashed = new WeakSet();
   }
 
   serial(fn, timeout = 45_000) {
@@ -38,7 +38,10 @@ export class Browser {
   interrupt() { this.abort?.(new Error('Browser operation interrupted.')); return this.tail; }
 
   async start() {
-    if (this.context) return;
+    if (this.context) {
+      if(!this.page||this.page.isClosed()||this.crashed.has(this.page))this.page=this.context.pages().find(page=>!page.isClosed()&&!this.crashed.has(page))||await this.context.newPage();
+      return;
+    }
     mkdirSync(join(this.directory, 'browser'), { recursive: true, mode: 0o700 });
     mkdirSync(join(this.directory, 'files'), { recursive: true, mode: 0o700 });
     const generation = this.generation, proxy = await startProxy(this.proxyOptions);
@@ -78,6 +81,11 @@ export class Browser {
         this.onFile({ id, name, kind: 'download', jobId: owner, createdAt: new Date().toISOString() });
       } catch { /* Failed downloads are not reported as saved files. */ }
     });
+    page.on('crash',()=>{
+      this.crashed.add(page);
+      if(this.page===page){this.page=this.context?.pages().find(other=>other!==page&&!other.isClosed()&&!this.crashed.has(other))||null;this.dialog=null;this.last=null;}
+      void page.close().catch(()=>{});
+    });
     page.on('close', () => {
       if (this.page !== page) return;
       const opener = this.openers.get(page);
@@ -102,7 +110,7 @@ export class Browser {
     }
   }
 
-  async snapshot(includeImage = false) {
+  async snapshot(includeImage = false, retried = false) {
     const page = await this.readyPage();
     if (this.dialog) return { url: this.page.url(), text: `Browser dialog: ${this.dialog.message()}. Use dialog action to accept or dismiss.`, elements: [], tabs: [] };
     const context = this.context;
@@ -133,10 +141,20 @@ export class Browser {
       result.tabs = this.context.pages().map((p, index) => ({ index, url: p.url(), title: p === page ? result.title : this.last?.tabs?.find(tab => tab.url === p.url())?.title || '', active: p === page }));
       result.viewport = { width: 1280, height: 800 };
       this.last = result;
-      if (includeImage) result.image = (await page.screenshot({ type: 'jpeg', quality: 70 })).toString('base64');
+      const empty=!result.text.trim()&&!result.elements.length;
+      if(empty&&!result.loading)result.text=result.url==='about:blank'?'Browser is on a blank page. Navigate to the requested website.':'This page has no readable text or controls yet. Inspect the screenshot, or wait and read again.';
+      if(includeImage||(empty&&result.url!=='about:blank'&&!result.loading)){
+        try{result.image=(await page.screenshot({type:'jpeg',quality:70,timeout:5000})).toString('base64');}
+        catch(error){if(includeImage)throw error;result.previewError='Screenshot temporarily unavailable; wait and read again.';}
+      }
       return result;
     } catch (error) {
-      if (page.isClosed() && this.context === context && this.page && this.page !== page) return this.snapshot(includeImage);
+      if(!retried&&this.context===context){
+        if(page.isClosed()&&this.page&&this.page!==page)return this.snapshot(includeImage,true);
+        if(!page.isClosed()&&/Execution context was destroyed|Cannot find context with specified id|most likely because of a navigation/i.test(error.message)){
+          await page.waitForLoadState('domcontentloaded',{timeout:12000});return this.snapshot(includeImage,true);
+        }
+      }
       throw error;
     }
   }
@@ -211,13 +229,28 @@ export class Browser {
   }
 
   frame() {
-    return this.serial(async () => {
-      if (!this.context || !this.page || this.page.isClosed()) return null;
-      const page = await this.readyPage();
-      if (this.dialog) return { jobId: this.owner, url: this.page.url(), dialog: this.dialog.message(), tabs: [] };
-      return { jobId: this.owner, url: page.url(), loading: this.openers.has(page) && page.url() === 'about:blank', title: await page.title(), image: (await page.screenshot({ type: 'jpeg', quality: 65 })).toString('base64'), width: 1280, height: 800,
-        tabs: this.context.pages().map((page, index) => ({ index, url: page.url(), active: page === this.page })) };
-    });
+    if(this.framing)return this.framing;
+    const page=this.page,context=this.context,owner=this.owner,generation=this.generation;
+    if(!context||!page||page.isClosed()||this.crashed.has(page))return Promise.resolve(null);
+    const url=page.url(),viewport=page.viewportSize?.()||{width:1280,height:800};
+    const current=()=>this.context===context&&this.page===page&&this.owner===owner&&this.generation===generation&&!page.isClosed()&&page.url()===url;
+    const metadata=()=>({jobId:owner,url,loading:this.openers.has(page)&&url==='about:blank',title:this.last?.url===url?this.last.title||'':'',...viewport,tabs:context.pages().map((tab,index)=>({index,url:tab.url(),active:tab===page}))});
+    const dialog=()=>({...metadata(),dialog:this.dialog.message()});
+    const capture=async()=>{
+      if(this.dialog)return dialog();
+      try{
+        // Preview is observational: never queue it behind actions or reset a session on failure.
+        const image=await page.screenshot({type:'jpeg',quality:65,timeout:2500});
+        if(!current())return null;
+        const frame={...metadata(),image:image.toString('base64')};this.preview={page,context,owner,frame};return frame;
+      }catch{
+        if(!current())return null;
+        if(this.dialog)return dialog();
+        const cached=this.preview;
+        return {...(cached?.page===page&&cached.context===context&&cached.owner===owner&&cached.frame.url===url?cached.frame:{}),...metadata(),error:'Preview temporarily unavailable. Retrying…'};
+      }
+    };
+    this.framing=capture().finally(()=>{this.framing=null;});return this.framing;
   }
 
   reset() {

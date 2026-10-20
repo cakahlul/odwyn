@@ -636,3 +636,17 @@ test('multiple agents continue one chat with separate sessions and attributed re
     complete(pip,continued,'Continuing with saved corrections');
   } finally {runtime.close();store.close();rmSync(dir,{recursive:true});}
 });
+
+test('provider completion before a browser response interrupts the task instead of silently succeeding',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'odwyn-browser-result-')),store=openStore(dir),codex=new FakeCodex();
+ let release,entered;const started=new Promise(resolve=>{entered=resolve;});
+ const snapshot=new Promise(resolve=>{release=resolve;});
+ const runtime=new Runtime({store,codex,browser:{action:async()=>{entered();return snapshot;}},workspace:dir});
+ try{
+  await runtime.refreshAccount();const job=runtime.submit({prompt:'Read the current browser'});await runtime.drain();
+  const request=runtime.handleRequest({id:91,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_browser',arguments:{action:'read'}}});
+  await started;codex.emit('notification',{method:'turn/completed',params:{threadId:job.threadId,turn:{id:job.turnId,status:'completed'}}});
+  expect(job.status).toBe('interrupted');expect(job.error).toContain('browser response');
+  release({url:'https://example.com',text:'Read returned',elements:[]});await request;
+ }finally{release({url:'about:blank',text:'Finished',elements:[]});await runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="660" viewBox="0 0 1440 660" role="img" aria-labelledby="title desc">
+<title id="title">Odwyn. Help with the oddly specific.</title>
+<desc id="desc">A workspace for your AI agents. Give them a goal, let them research and collaborate, then review the result. Illustrated example: planning a quiet weekend in Kyoto.</desc>
+<rect width="1440" height="660" rx="28" fill="#f4f1ea"/>
+<svg x="72" y="58" width="90" height="90" viewBox="0 0 120 120">
+  <defs>
+    <linearGradient id="odwyn-edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.32"/>
+      <stop offset="0.5" stop-color="#000000" stop-opacity="0.03"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.16"/>
+    </linearGradient>
+    <radialGradient id="odwyn-light" cx="24%" cy="14%" r="88%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.48"/>
+      <stop offset="0.46" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.1"/>
+    </radialGradient>
+    <linearGradient id="odwyn-ceramic" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.06"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="62" cy="109" rx="32" ry="4" fill="#11151f" opacity="0.05"/>
+  <rect class="mark-edge" x="15" y="14" width="88" height="88" rx="28" fill="#d95836"/>
+  <rect x="15" y="14" width="88" height="88" rx="28" fill="url(#odwyn-edge)"/>
+  <rect class="mark-body" x="12" y="10" width="88" height="88" rx="28" fill="#f06a48"/>
+  <rect x="12" y="10" width="88" height="88" rx="28" fill="url(#odwyn-light)"/>
+  <path d="M24 44 C24 26 34 17 52 16" fill="none" stroke="#ffffff" stroke-opacity="0.45" stroke-width="2.2" stroke-linecap="round"/>
+  <rect x="25" y="28" width="64" height="54" rx="20" fill="#11151f" opacity="0.07" transform="translate(0.5 1.5)"/>
+  <rect class="mark-face" x="25" y="28" width="64" height="54" rx="20" fill="#ffffff"/>
+  <rect x="25" y="28" width="64" height="54" rx="20" fill="url(#odwyn-ceramic)"/>
+  <g class="mark-features" fill="none" stroke="#11151f" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M44 47v10M70 47v10" stroke-width="5.5"/>
+    <path d="M48 67q9 7 18 0" stroke-width="4"/>
+  </g>
+</svg>
+
+<g font-family="Arial, Helvetica, sans-serif" fill="#292b28">
+<text x="178" y="116" font-size="44" font-weight="700">odwyn<tspan fill="#d95836">.</tspan></text>
+<text x="76" y="241" font-size="62" font-weight="700">Help with the</text>
+<text x="76" y="315" font-size="62" font-weight="700">oddly specific.</text>
+<text x="78" y="380" font-size="25" fill="#66665e"><tspan x="78">Your agents. Your tools.</tspan><tspan x="78" dy="36">One place to get things done.</tspan></text>
+<rect x="78" y="482" width="240" height="50" rx="25" fill="#292b28"/>
+<text x="198" y="514" text-anchor="middle" font-size="19" fill="#fffefa">Self-hosted. Yours.</text>
+<text x="78" y="597" font-size="17" fill="#77746c">RESEARCH · COLLABORATE · REPEAT</text>
+<rect x="722" y="65" width="640" height="530" rx="24" fill="#fffefa" stroke="#d7d1c6"/>
+<circle cx="755" cy="98" r="5" fill="#ef6949"/><circle cx="774" cy="98" r="5" fill="#d8d2c7"/><circle cx="793" cy="98" r="5" fill="#d8d2c7"/>
+<text x="1325" y="104" text-anchor="end" font-size="15" fill="#77746c">AN EXAMPLE GOAL</text>
+<path d="M722 122h640" stroke="#e7e1d8"/>
+<rect x="752" y="148" width="580" height="104" rx="16" fill="#f0ede6"/>
+<text x="774" y="181" font-size="22" font-weight="700">Plan a quiet weekend in Kyoto.</text>
+<text x="774" y="215" font-size="20" fill="#66665e">Small hotels. Walkable streets. No packed itinerary.</text>
+<circle cx="775" cy="293" r="19" fill="#fbe1d6"/><text x="775" y="300" text-anchor="middle" font-size="19" fill="#a44229">1</text>
+<text x="810" y="289" font-size="21" font-weight="700">Research the options</text>
+<text x="810" y="318" font-size="18" fill="#66665e">Browse websites and gather sources.</text>
+<circle cx="775" cy="366" r="19" fill="#e6ebdf"/><text x="775" y="373" text-anchor="middle" font-size="19" fill="#526647">2</text>
+<text x="810" y="362" font-size="21" font-weight="700">Bring another perspective</text>
+<text x="810" y="391" font-size="18" fill="#66665e">Let a room of agents compare the tradeoffs.</text>
+<rect x="752" y="429" width="580" height="135" rx="16" fill="#e9eddf"/>
+<text x="775" y="464" font-size="21" font-weight="700">A plan you can use</text>
+<text x="775" y="499" font-size="19" fill="#526047">A shortlist, sources, and decisions left to you.</text>
+<text x="775" y="536" font-size="17" fill="#526047">Review it. Refine it. Keep the conversation going.</text>
+</g></svg>

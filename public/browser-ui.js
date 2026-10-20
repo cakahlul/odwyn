@@ -2,8 +2,9 @@ import {workspaceUrl, $, esc, icon, api, handleError } from './ui.js';
 
 let frame = null; let frameBusy = false; let getState; let emptyMarkup;
 const minimizedPreviews = new Set();
-let previewJobId = null;
+let previewJobId = null, takeoverActive = false, contentHome;
 export function setBrowserVisible(visible) {
+  if(visible&&getState?.()?.runtime.takeover){openTakeover();return;}
   document.body.classList.toggle('browser-closed', !visible);
   const toggle = $('#browser-toggle'), panel = $('#browser-panel');
   if (!visible && panel.contains(document.activeElement)) toggle.focus();
@@ -14,6 +15,22 @@ export function setBrowserVisible(visible) {
   if (visible) void refreshFrame();
 }
 
+function openTakeover(){
+  const modal=$('#browser-takeover-dialog');
+  $('#browser-takeover-host').append($('#browser-content'));
+  $('#browser-content').hidden=false;
+  document.body.classList.add('browser-closed');$('#browser-panel').inert=true;
+  $('#browser-toggle').setAttribute('aria-expanded','true');
+  $('#browser-toggle').setAttribute('aria-controls','browser-takeover-dialog');
+  if(!modal.open)modal.showModal();
+  void refreshFrame();
+}
+function minimizeTakeover(){
+  $('#browser-takeover-dialog').close();
+  $('#browser-toggle').setAttribute('aria-expanded','false');
+  $('#browser-toggle').focus();
+}
+
 function updateConversationFrame() {
   const preview = $('#conversation-browser');
   if (!preview) return;
@@ -22,18 +39,19 @@ function updateConversationFrame() {
   image.hidden = !current?.image || !!current?.loading;
   if (current?.image) image.src = `data:image/jpeg;base64,${current.image}`;
   else image.removeAttribute('src');
-  status.hidden = !!current?.image && !current?.loading;
-  status.textContent = current?.dialog ? `Website confirmation: ${current.dialog}. Open browser controls to respond.` : current?.loading ? 'Waiting for the popup website to open…' : 'Waiting for the browser preview…';
+  status.hidden = !!current?.image && !current?.loading && !current?.error;
+  status.textContent = current?.error|| (current?.dialog ? `Website confirmation: ${current.dialog}. Open browser controls to respond.` : current?.loading ? 'Waiting for the popup website to open…' : 'Waiting for the browser preview…');
   $('#conversation-browser-url').textContent = current?.loading ? 'Waiting for popup website…' : current?.url === 'about:blank' ? 'Ready for a website' : current?.url || '';
 }
 
 export async function refreshFrame() {
-  if (frameBusy || document.hidden || (document.body.classList.contains('browser-closed') && !$('#conversation-browser')?.open)) return;
+  if (frameBusy || document.hidden || (document.body.classList.contains('browser-closed') && !$('#conversation-browser')?.open && !$('#browser-takeover-dialog').open)) return;
   frameBusy = true;
   try {
     const response = await fetch(workspaceUrl('/api/browser/frame'), { signal: AbortSignal.timeout(50_000) });
     if (!response.ok) throw new Error('Browser preview unavailable');
     frame = await response.json();
+    $('#browser-preview-status').textContent=frame?.error||'';
     updateConversationFrame();
     if (!frame) {
       if ($('#browser-image') || $('.browser-dialog')) $('#browser-viewport').innerHTML = emptyMarkup;
@@ -45,7 +63,7 @@ export async function refreshFrame() {
       let image = $('#browser-image');
       if (!image) { current.innerHTML = '<img id="browser-image" alt="Live preview of the assistant browser. Take control to interact." draggable="false">'; image = $('#browser-image'); }
       image.src = `data:image/jpeg;base64,${frame.image}`;
-    }
+    } else if(frame.error&&$('#browser-image')){current.innerHTML='<p class="browser-empty">Waiting for a fresh browser preview…</p>';}
     $('#browser-url').textContent = frame.loading ? 'Waiting for popup website…' : frame.url === 'about:blank' ? 'Ready for a website' : frame.url;
     $('#browser-url').title = frame.url;
     const tabs = frame.tabs || [];
@@ -56,6 +74,8 @@ export async function refreshFrame() {
       if (select.innerHTML !== options) select.innerHTML = options;
     } else select?.remove();
   } catch {
+    if(frame)frame={...frame,error:'Preview unavailable. Retrying…'};
+    $('#browser-preview-status').textContent='Preview unavailable. Retrying…';
     const status = $('#conversation-browser-status');
     if (status) { status.hidden = false; status.textContent = 'Preview unavailable. Retrying…'; }
   } finally { frameBusy = false; }
@@ -97,7 +117,12 @@ export function updateBrowser(state) {
   $('#takeover-controls').hidden = !controlled; $('#browser-navigate').hidden = !controlled;
   $('#browser-viewport').classList.toggle('controlled', controlled);
   $('#panel-footer-text').textContent = controlled ? 'Finish your step, then hand the browser back.' : 'Browser actions appear in the Activity tab.';
-  if (controlled) setBrowserVisible(true);
+  if(controlled&&!takeoverActive)openTakeover();
+  else if(!controlled&&takeoverActive){
+    $('#browser-takeover-dialog').close();contentHome.after($('#browser-content'));
+    $('#browser-toggle').setAttribute('aria-controls','browser-panel');setBrowserVisible(true);
+  }
+  takeoverActive=controlled;
 }
 
 async function control(enabled = !getState()?.runtime.takeover) {
@@ -112,7 +137,12 @@ async function action(input) {
 export function setupBrowser(stateGetter) {
   getState = stateGetter;
   emptyMarkup = $('#browser-viewport').innerHTML;
+  contentHome=document.createComment('Browser content home');$('#browser-content').before(contentHome);
+  const status=document.createElement('p');status.id='browser-preview-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');$('#browser-viewport').after(status);
+  $('#browser-takeover-minimize').onclick=minimizeTakeover;
+  $('#browser-takeover-dialog').addEventListener('cancel',event=>{event.preventDefault();minimizeTakeover();});
   $('#browser-toggle').onclick = () => {
+    if(getState()?.runtime.takeover){openTakeover();return;}
     const visible = document.body.classList.contains('browser-closed');
     setBrowserVisible(visible);
     if (visible) $('#browser-close').focus();
@@ -145,11 +175,12 @@ export function setupBrowser(stateGetter) {
   $('#browser-viewport').onclick = event => {
     if (!getState()?.runtime.takeover) return;
     const dialog = event.target.closest('[data-dialog]'); if (dialog) { void action({ action:'dialog', choice:dialog.dataset.dialog }); return; }
+    if(frame?.error){handleError(new Error('Wait for a fresh browser preview before clicking.'));return;}
     if (event.target.id !== 'browser-image' || !frame?.width) return;
     const bounds = event.target.getBoundingClientRect();
     void action({ action:'click', x:(event.clientX - bounds.left) / bounds.width * frame.width, y:(event.clientY - bounds.top) / bounds.height * frame.height });
   };
-  $('#browser-panel').onchange = event => { if (event.target.id === 'browser-tabs' && getState()?.runtime.takeover) void action({ action:'tab', index:Number(event.target.value) }); };
+  $('#browser-content').onchange = event => { if (event.target.id === 'browser-tabs' && getState()?.runtime.takeover) void action({ action:'tab', index:Number(event.target.value) }); };
   setInterval(refreshFrame, 1600);
   addEventListener('resize',positionPreviewButton);
   const narrow = matchMedia('(max-width: 1100px)');
