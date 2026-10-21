@@ -27,3 +27,25 @@ test('terminal captures output and status, bounds execution, and stops descendan
     expect(() => run('true', 1000, controller.signal)).toThrow();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('timeout releases commands whose detached descendants retain output pipes', async () => {
+  const command = `"${process.execPath}" -e 'const {spawn}=require("node:child_process");spawn(process.execPath,["-e","setTimeout(()=>{},1500)"],{detached:true,stdio:["ignore",1,2]});setTimeout(()=>{},1500)'`;
+  const started = Date.now();
+  const result = await runCommand({command,timeoutMs:150},tmpdir(),new AbortController().signal);
+  expect(result.timedOut).toBe(true);
+  expect(Date.now()-started).toBeLessThan(1000);
+});
+
+test('shell exit and cancellation also release retained descendant pipes', async () => {
+  for (const cancel of [false,true]) {
+    const command = `"${process.execPath}" -e 'const {spawn}=require("node:child_process");spawn(process.execPath,["-e","setTimeout(()=>{},1500)"],{detached:true,stdio:["ignore",1,2]}).unref();${cancel ? 'setTimeout(()=>{},1500)' : ''}'`;
+    const controller=new AbortController(),started=Date.now();
+    const pending=runCommand({command,timeoutMs:3000},tmpdir(),controller.signal);
+    const timer=cancel?setTimeout(()=>controller.abort(),150):null;
+    try {
+      const result=await pending;
+      expect(result.cancelled).toBe(cancel);expect(result.timedOut).toBe(false);
+      expect(Date.now()-started).toBeLessThan(1000);
+    } finally {clearTimeout(timer);}
+  }
+});

@@ -109,6 +109,24 @@ test('owner approves and publishes a reviewed stage, passes its package, then ex
     await call('odwyn_room_next',{agentId:peer,reason:'Confirm the reviewed brief'});await finish();await call('odwyn_room_done',{proposalId,summary:'Confirmed the exact brief.'});await finish();
     assert.equal(source.discussion.status,'awaiting_owner');assert.equal(runtime.state.files.length,0);
     await page.goto(server.url.href+`#chat/${source.id}`);
+    await page.locator('.room-deliverables').waitFor();
+    assert.equal(await page.locator('.room-deliverables').evaluate(node=>node.open),false);
+    assert.equal(await page.locator('.room-deliverable').evaluate(node=>node.open),false);
+    await page.locator('.room-deliverables > summary').focus();await page.keyboard.press('Enter');
+    await page.locator('.room-deliverable > summary').click();
+    assert.equal(await page.locator('.room-deliverable-content h2').innerText(),'Research brief');
+    assert.equal(await page.locator('.room-deliverables > summary').evaluate(node=>getComputedStyle(node,'::after').display),'none');
+    source.title='Research review updated';runtime.changed();
+    await page.locator('#room-label').filter({hasText:'Research review updated'}).waitFor();
+    assert.equal(await page.locator('.room-deliverables').evaluate(node=>node.open),true);
+    assert.equal(await page.locator('.room-deliverable').evaluate(node=>node.open),true);
+    for(const width of [320,1440]){
+      await page.setViewportSize({width,height:960});
+      assert.equal(await page.locator('.room-work').evaluate(node=>node.scrollWidth<=node.clientWidth),true);
+      await page.locator('.room-deliverables > summary').click();
+      await page.screenshot({path:join(import.meta.dir,`../artifacts/room-deliverables-${width}.png`)});
+      await page.locator('.room-deliverables > summary').click();
+    }
     await page.getByRole('heading',{name:'Ready for your approval'}).waitFor();
     assert.equal(await page.locator('[aria-label="Published files"]').count(),0);
     await page.locator('form[data-room-owner] textarea').fill('Reviewed the brief. Proceed to editorial release.');

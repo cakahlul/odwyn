@@ -23,7 +23,7 @@ Terminal commands run directly on the host in the workspace folder. Keep the ser
 
 1. Choose workspace appearance, AI provider, model, reasoning effort, and shared preferences.
 2. Save with **Continue to first agent**, then create an agent. It inherits the workspace provider by default.
-3. Use **Settings → Knowledge** to create reference documents and assign them in Customize agent.
+3. Use **Tools → Knowledge** to create reference documents and assign them in Customize agent.
 
 ## Connect a provider
 

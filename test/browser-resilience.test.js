@@ -23,3 +23,11 @@ test('overlapping preview requests share one capture and discard frames from a r
  expect((await Promise.all(requests)).every(frame=>frame===null)).toBe(true);
  expect(captures).toBe(1);await browser.close();
 });
+test('unresponsive preview capture releases polling and allows a fresh capture',async()=>{
+ const {browser,page}=fixture();page.screenshot=()=>new Promise(()=>{});
+ const started=Date.now();const frame=await browser.frame();
+ expect(frame.error).toBeTruthy();expect(Date.now()-started).toBeLessThan(4000);
+ page.screenshot=async()=>Buffer.from('fresh');
+ expect((await browser.frame()).image).toBe(Buffer.from('fresh').toString('base64'));
+ await browser.close();
+},5000);

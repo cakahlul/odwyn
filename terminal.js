@@ -16,14 +16,18 @@ export function runCommand({ command, timeoutMs }, cwd, signal) {
     // ponytail: non-interactive POSIX shell; add a PTY only when interactive sessions are needed.
     const child = spawn('/bin/sh', ['-c', command], { cwd, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const output = { stdout: [], stderr: [] }, sizes = { stdout: 0, stderr: 0 };
-    let truncated = false, timedOut = false, cancelled = false;
+    let truncated = false, timedOut = false, cancelled = false, drainTimer;
     const kill = () => {
       if (!child.pid) return;
       try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
     };
-    const abort = () => { cancelled = true; kill(); };
-    const timer = setTimeout(() => { timedOut = true; kill(); }, timeoutMs);
-    const cleanup = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); };
+    const stop = () => {
+      kill();
+      child.stdout.destroy(); child.stderr.destroy();
+    };
+    const abort = () => { cancelled = true; stop(); };
+    const timer = setTimeout(() => { timedOut = true; stop(); }, timeoutMs);
+    const cleanup = () => { clearTimeout(timer); clearTimeout(drainTimer); signal.removeEventListener('abort', abort); };
     signal.addEventListener('abort', abort, { once: true });
     if (signal.aborted) abort();
     for (const name of ['stdout', 'stderr']) child[name].on('data', chunk => {
@@ -32,7 +36,11 @@ export function runCommand({ command, timeoutMs }, cwd, signal) {
       if (remaining > 0) { const part = chunk.subarray(0, remaining); output[name].push(part); sizes[name] += part.length; }
     });
     // Stop descendants too: detached/background commands must not survive a task.
-    child.once('exit', kill);
+    child.once('exit', () => {
+      kill();
+      // Escaped descendants can retain pipes after the shell exits.
+      drainTimer = setTimeout(() => { truncated = true; child.stdout.destroy(); child.stderr.destroy(); }, 250);
+    });
     child.once('error', error => { cleanup(); reject(error); });
     child.once('close', (exitCode, exitSignal) => {
       cleanup();

@@ -27,7 +27,7 @@ test('tutorials guide first visits, replay, persist, hide, reset and fit mobile'
   await page.locator('#agents-dialog .tutorial-replay').click();await card.waitFor();await skip();await page.getByRole('button',{name:'Close agents',exact:true}).click();
   await page.locator('#settings-open').click();await page.locator('[data-settings-section=tutorials]').click();expect(await page.locator('#tutorial-hide').isChecked()).toBe(true);
   await page.locator('#tutorial-reset').click();expect(await page.locator('#tutorial-settings-status').textContent()).toContain('reset');await expectHidden();
-  await page.locator('#tutorial-hide').uncheck();await page.locator('[data-settings-section=knowledge]').click();await card.waitFor();await skip();
+  await page.locator('#tutorial-hide').uncheck();await page.locator('[data-settings-section=sharing]').click();await card.waitFor();await skip();
   await page.getByRole('button',{name:'Close settings',exact:true}).click();await page.locator('#agents-open').click();await card.waitFor();await skip();
   await page.locator('.agent-menu summary').first().click();await page.locator('[data-agent-action=customize]').first().click();await card.waitFor();await skip();
   for(const width of [320,768,1440]){

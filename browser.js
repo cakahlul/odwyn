@@ -238,9 +238,13 @@ export class Browser {
     const dialog=()=>({...metadata(),dialog:this.dialog.message()});
     const capture=async()=>{
       if(this.dialog)return dialog();
+      let timer;
       try{
         // Preview is observational: never queue it behind actions or reset a session on failure.
-        const image=await page.screenshot({type:'jpeg',quality:65,timeout:2500});
+        const image=await Promise.race([
+          page.screenshot({type:'jpeg',quality:65,timeout:2500}),
+          new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Preview capture timed out.')),3000);}),
+        ]);
         if(!current())return null;
         const frame={...metadata(),image:image.toString('base64')};this.preview={page,context,owner,frame};return frame;
       }catch{
@@ -248,7 +252,7 @@ export class Browser {
         if(this.dialog)return dialog();
         const cached=this.preview;
         return {...(cached?.page===page&&cached.context===context&&cached.owner===owner&&cached.frame.url===url?cached.frame:{}),...metadata(),error:'Preview temporarily unavailable. Retrying…'};
-      }
+      }finally{clearTimeout(timer);}
     };
     this.framing=capture().finally(()=>{this.framing=null;});return this.framing;
   }

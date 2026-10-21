@@ -404,11 +404,16 @@ export function createApp(options = {}) {
         if (pathname === '/api/rooms' && req.method === 'POST') {
           const room = createRoom(store.state,await json(req)); runtime.changed(); return response(room,201);
         }
+        const deletionMatch=pathname.match(/^\/api\/conversations\/([a-f0-9-]{36})\/deletion$/);
+        if(deletionMatch&&req.method==='GET')return response(store.conversationDeletion(deletionMatch[1]));
         const conversationMatch = pathname.match(/^\/api\/conversations\/([a-f0-9-]{36})$/);
         if (conversationMatch && req.method === 'DELETE') {
           if (!store.state.conversations.some(c=>c.id===conversationMatch[1])) return response({error:'Conversation not found.'},404);
-          if (runtime.activeJobs().some(job=>job.conversationId===conversationMatch[1])) throw new Error('Stop this conversation’s tasks before deleting it.');
-          store.deleteConversation(conversationMatch[1]); runtime.changed(); return response({ok:true});
+          const plan=store.conversationDeletion(conversationMatch[1]);
+          if (runtime.activeJobs().some(job=>plan.conversationIds.includes(job.conversationId)||plan.workflowRunIds.includes(job.workflowRunId))) throw new Error('Stop all linked conversations’ tasks before deleting them.');
+          const confirmed=req.body?await json(req):{};
+          const deleted=store.deleteConversation(conversationMatch[1],Object.keys(confirmed).length?confirmed:undefined);
+          runtime.changed(); return response({ok:true,...deleted});
         }
         if (conversationMatch && req.method === 'PATCH') {
           const conversation = store.state.conversations.find(c=>c.id===conversationMatch[1]);

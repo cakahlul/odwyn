@@ -1172,12 +1172,12 @@ button.attachment-preview:hover { background:var(--paper); }
 }
 
 /* Keep save actions reachable while only the fields scroll. */
-:is(#settings-dialog,#schedule-dialog,#room-dialog,#workflow-run-dialog)[open] { display:flex; flex-direction:column; height:calc(100dvh - 50px); overflow:hidden; }
-:is(#settings-dialog,#schedule-dialog,#room-dialog,#workflow-run-dialog)>:is(.modal-top,h2,.modal-description) { flex-shrink:0; }
-:is(#preferences-form,#schedule-form,#room-form,#workflow-run-form) { display:flex; flex-direction:column; min-height:0; flex:1; }
+:is(#settings-dialog,#schedule-dialog,#room-dialog,#workflow-run-dialog,#knowledge-editor)[open] { display:flex; flex-direction:column; height:calc(100dvh - 50px); overflow:hidden; }
+:is(#settings-dialog,#schedule-dialog,#room-dialog,#workflow-run-dialog,#knowledge-editor)>:is(.modal-top,h2,.modal-description) { flex-shrink:0; }
+:is(#preferences-form,#schedule-form,#room-form,#workflow-run-form,#knowledge-form) { display:flex; flex-direction:column; min-height:0; flex:1; }
 .modal-fields { overflow-y:auto; min-height:0; padding:0 3px 16px; }
-:is(#preferences-form,#schedule-form,#room-form,#workflow-run-form)>.form-footer { flex-shrink:0; border-top:1px solid var(--line); padding-top:14px; margin-top:0; }
-:is(#preferences-form,#schedule-form,#room-form,#workflow-run-form)>.form-footer button { min-height:44px; }
+:is(#preferences-form,#schedule-form,#room-form,#workflow-run-form,#knowledge-form)>.form-footer { flex-shrink:0; border-top:1px solid var(--line); padding-top:14px; margin-top:0; }
+:is(#preferences-form,#schedule-form,#room-form,#workflow-run-form,#knowledge-form)>.form-footer button { min-height:44px; }
 .agent-skills { margin-top:24px; }
 .modal .agent-skill-option { display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
 .modal .agent-skill-option input { width:18px; height:18px; flex-shrink:0; margin:2px 0 0; accent-color:var(--orange-deep); }
@@ -1308,3 +1308,41 @@ button.attachment-preview:hover { background:var(--paper); }
 .modal :is(#agent-skill-options,#agent-knowledge-options) .agent-skill-option { margin:0; }
 
 .audit-page{max-width:1100px;margin:auto;padding:32px;overflow-wrap:anywhere}.audit-page>p,.audit-entry p{color:var(--muted,#65656b)}#audit-filters{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:24px 0}#audit-filters label{display:grid;gap:6px;flex:1;min-width:170px}#audit-filters input,#audit-filters select{width:100%;padding:10px;border:1px solid #bdbbb5;border-radius:8px;background:transparent;color:inherit}.audit-entry{padding:20px;border:1px solid #ccc9c1;border-radius:16px;margin:12px 0}.audit-entry>button{text-align:left;background:transparent;color:inherit;border:0;font:inherit;cursor:pointer}.audit-page nav{display:flex;align-items:center;justify-content:center;gap:16px;margin:20px 0}.audit-page nav button{padding:8px 16px}.audit-entry dl{display:grid;grid-template-columns:minmax(100px,1fr) 2fr;gap:8px}.audit-entry dd{margin:0}.audit-entry li{padding:8px 0}.audit-entry li p{white-space:pre-wrap}@media(max-width:600px){.audit-page{padding:16px}.audit-entry{padding:14px}}
+
+/* Room documents stay out of the conversation until opened. */
+#view .room-deliverables > summary,#view .room-deliverable > summary,#view .room-review-disclosure > summary { display:flex; align-items:center; gap:10px; min-height:44px; cursor:pointer; list-style:none; }
+.room-deliverables > summary::-webkit-details-marker,.room-deliverable > summary::-webkit-details-marker,.room-review-disclosure > summary::-webkit-details-marker { display:none; }
+.room-deliverables > summary:focus-visible,.room-deliverable > summary:focus-visible,.room-review-disclosure > summary:focus-visible { outline:2px solid currentColor; outline-offset:4px; border-radius:6px; }
+.deliverable-count { padding:1px 7px; border-radius:6px; background:var(--glass-rim); font-size:11px; }
+.disclosure-hint { margin-left:auto; color:var(--muted); font-size:11px; }
+.disclosure-chevron { display:flex; flex-shrink:0; margin-left:auto; }
+.disclosure-hint + .disclosure-chevron { margin-left:0; }
+.disclosure-chevron .icon { width:15px; height:15px; transform:rotate(-90deg); }
+[open] > summary > .disclosure-chevron .icon { transform:rotate(90deg); }
+.room-deliverable { margin:0; padding:0; border:0; border-top:1px solid var(--glass-rim); border-radius:0; }
+#view .room-deliverable > summary { padding:14px 0; gap:12px; }
+.deliverable-symbol { display:flex; flex-shrink:0; padding:8px; background:var(--glass-rim); border-radius:8px; }
+.deliverable-symbol .icon { width:18px; height:18px; }
+.deliverable-label { display:flex; flex:1; min-width:0; flex-direction:column; gap:2px; line-height:1.5; }
+.deliverable-label strong { font-size:13px; font-weight:600; }
+.deliverable-label small,.deliverable-status { color:var(--muted); font-size:11px; }
+.deliverable-status { flex-shrink:0; padding:2px 8px; border:1px solid var(--glass-rim); border-radius:6px; }
+.deliverable-status.is-approved { color:var(--green); }
+.room-deliverables-list { padding-top:8px; }
+.room-deliverable-content { margin-bottom:16px; padding:14px; border-radius:8px; background:var(--glass-rim); }
+.room-deliverable-content > details > summary { cursor:pointer; padding:6px 0; }
+.room-deliverable-content .message-text { max-height:420px; overflow:auto; font-size:13px; }
+.room-deliverable-content .message-text h2,.room-deliverable-content .message-text h3 { font-size:15px; }
+#view .room-review-disclosure { padding:10px 16px; }
+.room-review-content { padding:8px 0; border-top:1px solid var(--glass-rim); }
+#knowledge-form .modal-fields { display:grid; gap:14px; flex:1; }
+@media(max-width:480px) {
+ .disclosure-hint { display:none; }
+ #view .room-deliverable > summary { flex-wrap:wrap; gap:8px; }
+ .deliverable-symbol { display:none; }
+ .deliverable-label { flex-basis:calc(100% - 28px); }
+ .deliverable-status { order:3; }
+ .room-deliverable-content { padding:10px; }
+}
+
+#view details[data-room-disclosure] > summary::after { display:none; }

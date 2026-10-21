@@ -197,7 +197,8 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     await page.getByRole('link',{name:'answer.png',exact:true}).waitFor();
     expect(app.runtime.state.conversations.find(c=>c.id===ordinary.conversationId).title).toBe('Weekend notes');
     await page.locator('#page-title').click();
-    page.once('dialog',dialog=>dialog.dismiss()); await page.locator('#delete-conversation').click();
+    await Promise.all([page.waitForEvent('dialog').then(dialog=>dialog.dismiss()),page.locator('#delete-conversation').click()]);
+    await page.waitForFunction(()=>!document.querySelector('#delete-conversation').disabled);
     expect(app.runtime.state.conversations.some(c=>c.id===ordinary.conversationId)).toBe(true);
     page.once('dialog',dialog=>dialog.accept()); await page.locator('#delete-conversation').click();
     await page.locator('#rename-dialog').waitFor({state:'hidden'});
@@ -207,8 +208,14 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     expect(await page.locator(`#history [data-conversation="${ordinary.conversationId}"]`).count()).toBe(0);
     if(!await page.locator('#search-dialog').evaluate(node=>node.open)) await page.locator('#menu-button').click();
     await page.locator(`#room-list [data-conversation="${room.id}"]`).click(); await page.locator('#room-details-open').click();
-    page.once('dialog',dialog=>dialog.dismiss()); await page.locator('#delete-room').click();
+    const dependent=await request('/api/rooms',{title:'Dependent stage',memberIds:room.memberIds});
+    app.runtime.state.conversations.find(c=>c.id===dependent.id).handoff={sourceRoomId:room.id};app.runtime.changed();
+    let deletionPrompt='';
+    await Promise.all([page.waitForEvent('dialog').then(dialog=>{deletionPrompt=dialog.message();return dialog.dismiss();}),page.locator('#delete-room').click()]);
+    await page.waitForFunction(()=>!document.querySelector('#delete-room').disabled);
+    expect(deletionPrompt).toContain('Dependent stage');
     expect(app.runtime.state.conversations.some(c=>c.id===room.id)).toBe(true);
+    expect(app.runtime.state.conversations.some(c=>c.id===dependent.id)).toBe(true);
     page.once('dialog',dialog=>dialog.accept()); await page.locator('#delete-room').click();
     await page.locator('#room-header').waitFor({state:'hidden'});
     await page.getByRole('heading',{name:/^Message /,level:1}).waitFor();

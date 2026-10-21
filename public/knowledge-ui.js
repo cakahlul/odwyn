@@ -1,59 +1,50 @@
-import {$,esc,api,toast,handleError} from './ui.js';
+import {$,esc,icon,api,toast,handleError} from './ui.js';
+import {libraryList} from './workflows-ui.js';
 
-export function setupKnowledgeSettings(refresh){
- const panel=$('#settings-knowledge-controls');
- let documents=[],editing=null,busy=false;
- panel.innerHTML=`<h3 id="workspace-knowledge-title">Knowledge</h3><p class="field-hint">Reusable facts and guidance for your agents. Create a document, then assign it in Customize agent → Knowledge.</p><label>Knowledge document<select id="workspace-knowledge"></select></label><p id="workspace-knowledge-description" class="field-hint"></p><div class="access-buttons"><button type="button" class="secondary-button" id="knowledge-new">Create knowledge</button><button type="button" class="secondary-button" id="knowledge-edit">Edit</button><button type="button" class="secondary-button danger-button" id="knowledge-delete">Delete</button></div><div id="knowledge-editor" class="management-editor" hidden><h4 id="knowledge-editor-heading"></h4><label>Name<input id="knowledge-name" maxlength="200" autocomplete="off"></label><label>Summary (optional)<textarea id="knowledge-summary" rows="2" maxlength="500"></textarea></label><label>Content (text or Markdown)<textarea id="knowledge-content" rows="12" maxlength="20000" spellcheck="true" placeholder="Architecture, terminology, product rules, coding standards…"></textarea></label><p class="field-hint">Editing creates a new version for future tasks. Knowledge may be sent to the agent’s AI provider. Keep passwords and other secrets out.</p><div class="access-buttons"><button type="button" class="primary-button" id="knowledge-save">Save knowledge</button><button type="button" class="secondary-button" id="knowledge-cancel">Cancel</button></div></div><p id="knowledge-status" role="status" aria-live="polite"></p>`;
- const status=(message,tone='success')=>{$('#knowledge-status').textContent=message==='Working…'?message:'';if(message&&message!=='Working…')toast(message,tone);};
- const selected=()=>documents.find(row=>row.id===$('#workspace-knowledge').value);
- function availability(){
-  panel.querySelectorAll('button,input,select,textarea').forEach(node=>node.disabled=busy);
-  $('#knowledge-edit').disabled=$('#knowledge-delete').disabled=busy||!selected();
-  $('#knowledge-new').disabled=busy;
+export function renderKnowledge(state){
+ return `<section class="collection workflows library-page"><div class="collection-heading"><h1>Knowledge</h1><p>Reference documents for your agents. Assign them in Customize agent → Knowledge.</p></div><div class="collection-toolbar"><button class="primary-button" id="knowledge-new">New knowledge +</button><button class="secondary-button" id="knowledge-import">Import knowledge</button></div>${libraryList('knowledge','Saved knowledge',state.knowledge||[],doc=>`<article class="workflow-row"><div><h3>${esc(doc.name)}</h3><p>${esc(doc.summary||'Reference document')} · Version ${doc.version}</p></div><div class="workflow-actions"><button class="secondary-button" data-knowledge-edit="${esc(doc.id)}">Edit</button><button class="icon-button" data-knowledge-delete="${esc(doc.id)}" aria-label="Delete ${esc(doc.name)}">${icon('trash')}</button></div></article>`,'No knowledge yet. Create a document or import a text or Markdown file.')}</section>`;
+}
+
+export function setupKnowledge(getState,refresh){
+ let editing=null,busy=false;
+ document.body.insertAdjacentHTML('beforeend',`<dialog id="knowledge-editor" class="modal" aria-labelledby="knowledge-editor-heading"><div class="modal-top"><span class="eyebrow">KNOWLEDGE</span><button type="button" class="icon-button" id="knowledge-close" aria-label="Close knowledge editor">${icon('close')}</button></div><h2 id="knowledge-editor-heading">Create knowledge</h2><form id="knowledge-form"><div class="modal-fields"><label>Name<input id="knowledge-name" required maxlength="200" autocomplete="off"></label><label>Summary (optional)<textarea id="knowledge-summary" rows="2" maxlength="500"></textarea></label><label>Content (text or Markdown)<textarea id="knowledge-content" required rows="12" maxlength="20000" spellcheck="true" placeholder="Architecture, terminology, product rules, coding standards…"></textarea></label><p class="field-hint">Changes create a new version for future tasks. Assigned documents are shared with the agent’s AI provider.</p></div><div class="form-footer"><button type="button" class="secondary-button" id="knowledge-cancel">Cancel</button><button class="primary-button" id="knowledge-save">Save knowledge</button></div></form></dialog><input type="file" id="knowledge-import-file" accept=".md,.txt,.markdown,text/plain,text/markdown" hidden>`);
+ const dialog=$('#knowledge-editor');
+ function openEditor(doc=null){
+  editing=doc?.id?doc:null;
+  $('#knowledge-editor-heading').textContent=editing?'Edit knowledge':'Create knowledge';
+  $('#knowledge-name').value=doc?.name||'';$('#knowledge-summary').value=doc?.summary||'';$('#knowledge-content').value=doc?.content||'';
+  dialog.showModal();$('#knowledge-name').focus();
  }
- function describe(){
-  const row=selected();
-  $('#workspace-knowledge-description').textContent=row?`Version ${row.version}${row.summary?' · '+row.summary:''}`:'No knowledge yet. Create a document to assign it to agents.';
-  availability();
- }
- function reset(){editing=null;$('#knowledge-editor').hidden=true;for(const field of panel.querySelectorAll('#knowledge-editor input,#knowledge-editor textarea'))field.value='';}
- async function load(preferred){
-  documents=await api('/api/knowledge',null,'GET');
-  const previous=preferred||$('#workspace-knowledge').value;
-  $('#workspace-knowledge').innerHTML=documents.map(row=>`<option value="${esc(row.id)}">${esc(row.name)}</option>`).join('');
-  if(documents.some(row=>row.id===previous))$('#workspace-knowledge').value=previous;
-  describe();
- }
- const run=fn=>async()=>{
-  if(busy)return;busy=true;availability();status('Working…');
-  try{await fn();if($('#knowledge-status').textContent==='Working…')status('');}
-  catch(error){status('');handleError(error);}
-  finally{busy=false;availability();}
+ $('#knowledge-close').onclick=$('#knowledge-cancel').onclick=()=>dialog.close();
+ dialog.addEventListener('cancel',event=>{if(busy)event.preventDefault();});
+ $('#knowledge-form').onsubmit=async event=>{
+  event.preventDefault();if(busy)return;busy=true;
+  dialog.querySelectorAll('button').forEach(button=>button.disabled=true);
+  try{
+   const previous=editing;
+   const result=await api('/api/knowledge'+(previous?'/'+previous.id:''),{name:$('#knowledge-name').value.trim(),summary:$('#knowledge-summary').value.trim(),content:$('#knowledge-content').value,...(previous?{version:previous.version}:{})},previous?'PUT':'POST');
+   dialog.close();await refresh();toast(previous?result.version===previous.version?'Saved. No changes.':'Saved a new version.':'Knowledge created. Assign it in Customize agent.');
+  }catch(error){handleError(error);}
+  finally{busy=false;dialog.querySelectorAll('button').forEach(button=>button.disabled=false);}
  };
- function openEditor(row=null){
-  editing=row;$('#knowledge-editor').hidden=false;$('#knowledge-editor-heading').textContent=row?'Edit knowledge':'Create knowledge';
-  $('#knowledge-name').value=row?.name||'';$('#knowledge-summary').value=row?.summary||'';$('#knowledge-content').value=row?.content||'';
-  status('');availability();$('#knowledge-name').focus();
- }
- $('#workspace-knowledge').onchange=()=>{reset();describe();status('');};
- $('#knowledge-new').onclick=()=>openEditor();
- $('#knowledge-edit').onclick=()=>{if(selected())openEditor(selected());};
- $('#knowledge-cancel').onclick=()=>{reset();availability();status('');};
- $('#knowledge-save').onclick=run(async()=>{
-  const name=$('#knowledge-name').value.trim(),summary=$('#knowledge-summary').value.trim(),content=$('#knowledge-content').value;
-  if(!name)throw new Error('Enter a knowledge name.');
-  if(!content.trim())throw new Error('Enter knowledge content.');
-  const wasEditing=!!editing,previousVersion=editing?.version;
-  const result=await api('/api/knowledge'+(editing?'/'+editing.id:''),{name,summary,content,...(editing?{version:editing.version}:{})},editing?'PUT':'POST');
-  reset();await load(result.id);await refresh();status(wasEditing?result.version===previousVersion?'Saved. No changes.':'Saved a new version.':'Created. Assign this knowledge in Customize agent.',wasEditing&&result.version===previousVersion?'success':'warning');
+ $('#knowledge-import-file').onchange=async event=>{
+  try{
+   const file=event.target.files[0];if(!file)return;
+   if(!/\.(md|markdown|txt)$/i.test(file.name))throw Error('Choose a Markdown or text file.');
+   if(file.size>80000)throw Error('Choose a knowledge file under 80 KB.');
+   const content=await file.text();if(!content.trim()||content.length>20000)throw Error('Knowledge content must contain 1–20000 characters.');
+   openEditor({name:file.name.replace(/\.(md|markdown|txt)$/i,'').slice(0,200),content});
+  }catch(error){handleError(error);}finally{event.target.value='';}
+ };
+ document.addEventListener('click',async event=>{
+  const button=event.target.closest('button');if(!button||busy)return;
+  if(button.id==='knowledge-new')openEditor();
+  if(button.id==='knowledge-import')$('#knowledge-import-file').click();
+  const id=button.dataset.knowledgeEdit||button.dataset.knowledgeDelete,doc=getState()?.knowledge?.find(row=>row.id===id);if(!doc)return;
+  if(button.dataset.knowledgeEdit)openEditor(doc);
+  if(button.dataset.knowledgeDelete&&confirm(`Delete “${doc.name}”? Its agent assignments will be removed. Future tasks will no longer load it.`)){
+   busy=true;button.disabled=true;
+   try{await api('/api/knowledge/'+doc.id,{version:doc.version},'DELETE');await refresh();toast('Knowledge deleted.');}catch(error){handleError(error);}finally{busy=false;button.disabled=false;}
+  }
  });
- $('#knowledge-delete').onclick=run(async()=>{
-  const row=selected();if(!row)return;
-  if(!confirm(`Delete "${row.name}"? It will no longer load on future tasks. Its agent assignments will be removed.`)){status('Deletion cancelled.','warning');return;}
-  await api('/api/knowledge/'+row.id,{version:row.version},'DELETE');reset();await load();await refresh();status('Knowledge deleted.');
- });
- document.querySelector('[data-settings-section="knowledge"]').addEventListener('click',run(async()=>{reset();await load();}));
- $('#settings-dialog').addEventListener('close',reset);
- panel.addEventListener('keydown',event=>{if(event.key==='Enter'&&event.target.matches('input,select'))event.preventDefault();});
- availability();
 }

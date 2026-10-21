@@ -6,6 +6,8 @@ export const workspaceUrl = path => workspaceId === 'default' ? path : `${path}$
 export const storageKey = key => workspaceId === 'default' ? key : `${key}:${workspaceId}`;
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
 const paths = {
+  knowledge:'<path d="M12 5C9 3 5 3 2 4v15c3-1 7-1 10 1 3-2 7-2 10-1V4c-3-1-7-1-10 1Zm0 0v15"/><path d="M5 8h4m-4 4h4m6-4h4m-4 4h4"/>',
+  audit:'<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6m-6 5 1 1 2-2m2 1h2m-7 5h6"/>',
   more:'<circle cx="5.5" cy="12" r="1.25" fill="currentColor"/><circle cx="12" cy="12" r="1.25" fill="currentColor"/><circle cx="18.5" cy="12" r="1.25" fill="currentColor"/>',
   computer:'<rect x="3" y="4" width="18" height="13" rx="3"/><path d="M8 21h8m-4-4v4"/>',
   home: '<path d="m3 10 9-7 9 7v11h-6v-7H9v7H3V10Z"/>',

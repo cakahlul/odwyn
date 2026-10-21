@@ -2,7 +2,7 @@ import {renderAudit,setupAudit} from './audit-ui.js';
 import {setupChatComposer} from './chat-composer.js';
 import {setupOddy} from './oddy-ui.js';
 import {setupTutorials} from './tutorials.js';
-import {setupKnowledgeSettings} from './knowledge-ui.js';
+import {renderKnowledge,setupKnowledge} from './knowledge-ui.js';
 import {setupRoomWork} from './room-work-ui.js';
 import {setupWorkspaceHomes} from './workspace-homes.js';
 import {setupWorkspaceSettings} from './workspace-settings.js';
@@ -100,7 +100,7 @@ $('#preferred-currency').innerHTML = currencies.map(code=>`<option value="${code
 hydrateIcons(); setupBrowser(() => state);
 const visitTutorial=setupTutorials();
 setupWorkspaceSettings(refresh);
-setupKnowledgeSettings(refresh);
+setupKnowledge(() => state,refresh);
 setupCustomization(() => state, async (result, adding, onboarding) => { $('#provider-api-key').value = ''; signature = ''; await refresh(); if (adding) await switchAgent(result.id); if (onboarding && !workspace.globalProvider.configured) openSettings(); }, () => $('#provider-source').value === 'global' ? {inherit:true} : {...providerInput(),inherit:false});
 
 function selectState() {
@@ -454,7 +454,7 @@ function render() {
   $('#prompt').placeholder = conversation?.kind === 'room' ? 'Message the room, or @mention an agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#agent-workspace').classList.toggle('chat-start', view === 'chat' && !conversation);
-  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { home:'Home', audit:'Audit log', runs:'Task runs', routines:'Routines', files:'Files & results', workflows:'Workflows', skills:'Skills' }[view];
+  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { home:'Home', audit:'Audit log', runs:'Task runs', routines:'Routines', files:'Files & results', workflows:'Workflows', skills:'Skills', knowledge:'Knowledge' }[view];
   $('#agent-name').textContent = view === 'home' ? 'Odwyn' : state.customization?.name || defaults.name;
   $('#page-title').disabled = view !== 'chat' || !conversation;
   $('#page-title').title = conversation && view === 'chat' ? 'Rename conversation' : '';
@@ -466,7 +466,7 @@ function render() {
     return `<button class="history-item ${c.id === conversationId && view === 'chat' ? 'selected' : ''}" data-conversation="${esc(c.id)}"><span class="history-bullet ${job?.status === 'running' ? 'running' : ''}"></span><span>${esc(c.title)}</span>${job?.status === 'waiting' ? '<span class="needs-you-dot" title="Needs your input">!</span>' : ''}</button>`;
   }).join('') : '<p class="sidebar-empty">No conversations yet.</p>';
   $('#menu-button').classList.toggle('active',view === 'chat');
-  $('#tools-open').classList.toggle('active',['audit','routines','workflows','skills','files','runs'].includes(view));
+  $('#tools-open').classList.toggle('active',['audit','routines','workflows','skills','knowledge','files','runs'].includes(view));
   if ($('#search-dialog').open) search();
   if (!agentId && !['home','audit'].includes(view)) {
     $('#agent-workspace').classList.remove('chat-start'); $('#main').classList.remove('chat-start'); $('#composer-area').hidden = true;
@@ -476,14 +476,16 @@ function render() {
     updateBrowser(state); return;
   }
   $('#composer-area').hidden = view !== 'chat';
-  const nextSignature = view==='audit'?'audit':JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'home' ? [workspace.conversations,workspace.jobs,workspace.agents.map(agent=>[agent.id,!!agent.runtime?.account]),$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? [state.schedules,state.jobs] : ['workflows','skills'].includes(view) ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
+  const nextSignature = view==='audit'?'audit':JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'knowledge' ? state.knowledge : view === 'home' ? [workspace.conversations,workspace.jobs,workspace.agents.map(agent=>[agent.id,!!agent.runtime?.account]),$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? [state.schedules,state.jobs] : ['workflows','skills'].includes(view) ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
     const libraryFocus = document.activeElement?.dataset.librarySearch ? {key:document.activeElement.dataset.librarySearch,start:document.activeElement.selectionStart,end:document.activeElement.selectionEnd} : null;
     const homeFocus = view === 'home' && $('#view').contains(document.activeElement) ? document.activeElement.closest('[data-conversation],[data-agent]') : null;
+    const disclosures=[...$('#view').querySelectorAll('[data-room-disclosure]')].map(node=>({key:node.dataset.roomDisclosure,open:node.open,focused:node.querySelector('summary')===document.activeElement}));
     const pendingCards=[...document.querySelectorAll('#view .approval-card[data-request],#view form[data-room-owner]')].map(node=>({node,focus:node.contains(document.activeElement)?document.activeElement:null}));
-    $('#view').innerHTML = view === 'audit' ? renderAudit() : view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state,filter) : ['workflows','skills'].includes(view) ? renderWorkflows(state,view) : renderFiles(state);
+    $('#view').innerHTML = view === 'knowledge' ? renderKnowledge(state) : view === 'audit' ? renderAudit() : view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state,filter) : ['workflows','skills'].includes(view) ? renderWorkflows(state,view) : renderFiles(state);
+    for(const saved of disclosures){const node=$('#view').querySelector(`[data-room-disclosure="${CSS.escape(saved.key)}"]`);if(node){node.open=saved.open;if(saved.focused)node.querySelector('summary').focus({preventScroll:true});}}
     if (libraryFocus) { const input=$('#view').querySelector(`[data-library-search="${libraryFocus.key}"]`); input?.focus({preventScroll:true}); if(input && libraryFocus.start!==null)input.setSelectionRange(libraryFocus.start,libraryFocus.end); }
     if (homeFocus) { const key = homeFocus.dataset.conversation ? 'conversation' : 'agent'; $('#view').querySelector(`[data-${key}="${CSS.escape(homeFocus.dataset[key])}"]`)?.focus({preventScroll:true}); }
     for(const {node,focus} of pendingCards){const selector=node.dataset.request?`[data-request="${CSS.escape(node.dataset.request)}"]`:`form[data-room-owner="${CSS.escape(node.dataset.roomOwner)}"][data-proposal="${CSS.escape(node.dataset.proposal)}"]`;const next=$('#view').querySelector(selector);if(next){next.replaceWith(node);focus?.focus({preventScroll:true});}}
@@ -746,15 +748,22 @@ $('#page-title').onclick = openRename;
 $('#rename-room').onclick = openRename;
 async function deleteConversation(id) {
   const conversation=workspace.conversations.find(c=>c.id===id);
-  if (!conversation || busy || !confirm(`Delete “${conversation.title}” permanently? Its messages and task runs will be removed. Agents and saved files are kept.`)) return;
+  if (!conversation || busy) return;
   busy=true; $('#delete-conversation').disabled=$('#delete-room').disabled=true;
   try {
-    await api(`/api/conversations/${id}`,{},'DELETE');
-    for (const [key,draft] of drafts) if (draft.conversationId===id) drafts.delete(key);
-    sessionStorage.setItem(storageKey('odwyn-drafts'),JSON.stringify([...drafts])); roomRecipients.delete(id);
-    if (conversationId===id) { $('#prompt').value=''; $('#prompt').style.height=''; attachments=[]; renderAttachments(); }
+    const plan=await api(`/api/conversations/${id}/deletion`,undefined,'GET');
+    const linked=plan.conversations.filter(c=>c.id!==id);
+    const dependencies=linked.length?`\n\nLinked rooms and stages will also be deleted:\n${linked.map(c=>`• ${c.title}`).join('\n')}`:'';
+    const runs=plan.workflowRunIds.length?`\n${plan.workflowRunIds.length} associated workflow run(s) will also be deleted.`:'';
+    if(!confirm(`Delete “${conversation.title}” permanently?${dependencies}${runs}\n\nMessages and task runs will be removed. Agents, saved files and workflow templates are kept.`))return;
+    const deleted=await api(`/api/conversations/${id}`,{conversationIds:plan.conversationIds,workflowRunIds:plan.workflowRunIds},'DELETE');
+    const ids=new Set(deleted.conversationIds);
+    for (const [key,draft] of drafts) if (ids.has(draft.conversationId)) drafts.delete(key);
+    sessionStorage.setItem(storageKey('odwyn-drafts'),JSON.stringify([...drafts]));
+    for(const deletedId of ids)roomRecipients.delete(deletedId);
+    if (ids.has(conversationId)) { $('#prompt').value=''; $('#prompt').style.height=''; attachments=[]; renderAttachments(); }
     $('#rename-dialog').close(); $('#room-header').close();
-    await refresh(); navigate(); toast('Conversation deleted. Agents and files kept.');
+    await refresh(); navigate(); toast('Conversation and linked stages deleted. Agents and files kept.');
     $('#prompt').focus();
   } catch(error) { handleError(error); }
   finally { busy=false; render(); }
@@ -993,7 +1002,7 @@ setupOddy(()=>({view,conversationId:conversationId||'',agentId:agentId||''}));
 await refresh();
 if (state && agentId) { restoreDraft(); signature = ''; render(); }
 const initial = location.hash.slice(1).split('/');
-if (['home','chat','audit','runs','routines','files','workflows','skills'].includes(initial[0]) && (agentId || ['home','audit'].includes(initial[0]))) { view = initial[0]; conversationId = initial[0] === 'home' ? conversationId : initial[1] || null; signature = ''; render(); }
+if (['home','chat','audit','runs','routines','files','workflows','skills','knowledge'].includes(initial[0]) && (agentId || ['home','audit'].includes(initial[0]))) { view = initial[0]; conversationId = initial[0] === 'home' ? conversationId : initial[1] || null; signature = ''; render(); }
 if (!initial[0] && state) { view = 'home'; signature = ''; render(); }
 if (state && agentId && !state.customization) openSettings(true);
 else if (state && agentId && !workspace.globalProvider.configured) openSettings();

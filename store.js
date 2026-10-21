@@ -113,22 +113,47 @@ export function openStore(directory) {
       return { ...chunk, title: conversation?.title, role: message?.role, at: message?.at };
     });
   };
-  const deleteConversation = db.transaction(id => {
-    const conversation = state.conversations.find(c=>c.id===id);
-    if (!conversation) throw new Error('Conversation not found.');
-    if (state.jobs.some(j=>j.conversationId===id && ['queued','running','waiting','takeover','stopping'].includes(j.status))) throw new Error('Stop this conversation’s tasks before deleting it.');
-    if(conversation.handoff||state.conversations.some(room=>room.handoff?.sourceRoomId===id))throw new Error('Linked room history preserves handoff evidence and cannot be deleted.');
+  const conversationDeletion = id => {
+    if (!state.conversations.some(c=>c.id===id)) throw new Error('Conversation not found.');
+    const ids=new Set([id]), runIds=new Set();
+    let changed=true;
+    while(changed){
+      const size=ids.size+runIds.size;
+      for(const room of state.conversations){
+        if(ids.has(room.id)&&room.roomWorkflowRunId)runIds.add(room.roomWorkflowRunId);
+        if(room.handoff?.sourceRoomId&&(ids.has(room.id)||ids.has(room.handoff.sourceRoomId))){ids.add(room.id);ids.add(room.handoff.sourceRoomId);}
+        for(const handoff of room.handoffs||[])if(ids.has(room.id)||ids.has(handoff.roomId)){ids.add(room.id);if(handoff.roomId)ids.add(handoff.roomId);}
+        if(runIds.has(room.roomWorkflowRunId))ids.add(room.id);
+      }
+      for(const run of state.workflowRuns)if(runIds.has(run.id)||ids.has(run.conversationId)||(run.roomIds||[]).some(roomId=>ids.has(roomId))){
+        runIds.add(run.id);if(run.conversationId)ids.add(run.conversationId);
+        for(const roomId of run.roomIds||[])ids.add(roomId);
+      }
+      changed=size!==ids.size+runIds.size;
+    }
+    const conversations=state.conversations.filter(c=>ids.has(c.id)).map(({id,title})=>({id,title}));
+    return {conversations,conversationIds:conversations.map(c=>c.id),workflowRunIds:[...runIds]};
+  };
+  const deleteConversation = db.transaction((id, confirmed) => {
+    const plan=conversationDeletion(id), ids=new Set(plan.conversationIds), runIds=new Set(plan.workflowRunIds);
+    const matches=(expected,actual)=>Array.isArray(actual)&&expected.length===actual.length&&expected.every(id=>actual.includes(id));
+    if(confirmed&&(!matches(plan.conversationIds,confirmed.conversationIds)||!matches(plan.workflowRunIds,confirmed.workflowRunIds)))throw new Error('Deletion dependencies changed. Review and confirm again.');
+    if(!confirmed&&ids.size>1)throw new Error('Linked room history requires confirmation to delete all dependent rooms.');
+    if (state.jobs.some(j=>(ids.has(j.conversationId)||runIds.has(j.workflowRunId)) && ['queued','running','waiting','takeover','stopping'].includes(j.status))) throw new Error('Stop all linked conversations’ tasks before deleting them.');
     const conversations = state.conversations, jobs = state.jobs, workflowRuns = state.workflowRuns;
     try {
-      state.conversations = conversations.filter(c=>c.id!==id);
-      state.jobs = jobs.filter(j=>j.conversationId!==id);
-      state.workflowRuns = workflowRuns.filter(r=>r.conversationId!==id);
-      for (const message of conversation.messages) indexed.delete(message.id);
-      db.query('DELETE FROM chat_chunks WHERE conversationId = ?').run(id);
+      state.conversations = conversations.filter(c=>!ids.has(c.id));
+      state.jobs = jobs.filter(j=>!ids.has(j.conversationId)&&!runIds.has(j.workflowRunId));
+      state.workflowRuns = workflowRuns.filter(r=>!runIds.has(r.id));
+      for (const conversation of conversations.filter(c=>ids.has(c.id))) {
+        for (const message of conversation.messages) indexed.delete(message.id);
+        db.query('DELETE FROM chat_chunks WHERE conversationId = ?').run(conversation.id);
+      }
       save();
+      return plan;
     } catch(error) { state.conversations = conversations; state.jobs = jobs; state.workflowRuns = workflowRuns; throw error; }
   });
-  const store={directory,state,credentials,audit,save,search,deleteConversation,close:()=>db.close()};
+  const store={directory,state,credentials,audit,save,search,conversationDeletion,deleteConversation,close:()=>db.close()};
   store.knowledge=openKnowledge(db,store);save();return store;
 }
 

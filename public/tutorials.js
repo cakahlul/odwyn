@@ -7,11 +7,12 @@ const guides = {
  runs: ['Activity', [['#view','Follow your tasks','Review task status and open a run to inspect its result.']]],
  routines: ['Routines', [['#view','Scheduled work','Routines run tasks on a schedule. Review their agent and timing before enabling them.']]],
  workflows: ['Workflows', [['#view','Repeat a process','Workflows organize reusable steps. Review the steps and agent access before running one.']]],
+ knowledge: ['Knowledge', [['#view','Reference library','Create, import and search reference documents. Assign them to agents in Customize agent.']]],
  skills: ['Skills', [['#view','Reusable instructions','Create skills, search saved instructions, and review skill runs.']]],
  files: ['Files', [['#view','Task files','Find files produced by your agents. Open a file to inspect or download it.']]],
  'search-dialog': ['Conversations', [['#search-input','Find a conversation','Search your history, then select a conversation to continue it.']]],
  'agents-dialog': ['Agents', [['#agents-dialog h2','Your agents','Each agent has its own focus and AI provider.'],['#sidebar-agent-list','Manage an agent','Open an agent to chat. Use its menu to customize it or choose its AI provider.']]],
- 'tools-dialog': ['Tools', [['#tools-dialog h2','Tools for your work','Choose a tool to manage workflows, skills, routines, files or task activity.']]],
+ 'tools-dialog': ['Tools', [['#tools-dialog h2','Tools for your work','Choose a tool to manage workflows, skills, knowledge, routines, files or task activity.']]],
  'customize-dialog': ['Agent settings', [['#customize-title','Customize this agent','Set its focus, appearance, replies and AI provider.']]],
  'workspace-create-dialog': ['New workspace', [['#workspace-home-name','Name your workspace','A workspace has separate agents, conversations, files and browser sessions. Enter a name, then create it when ready.']]],
  'room-header': ['Room details', [['#room-heading','Your shared conversation','Review participants here. Open an agent to manage its settings.'],['#edit-room','Adjust collaboration','Change participants, roles and review requirements. ']]],
@@ -28,7 +29,6 @@ const settingsCopy = {
  preferences:'Set your name, language, reply length and context shared with your agents.',
  workspaces:'Workspaces keep agents, conversations and files separate. Choose the workspace you want to manage.',
  sharing:'Choose which settings are shared between workspaces. Review the scope before applying changes.',
- knowledge:'Save reference documents for agents. Select documents in agent settings.',
  tutorials:'Hide automatic tutorials for every menu, or reset visited menus. Manual replay stays available. Changes here are saved immediately in this browser for this workspace.'
 };
 

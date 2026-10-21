@@ -251,3 +251,26 @@ test('long focus, owner background and memory survive saves without truncation',
     }
   } finally { await app.close(); rmSync(directory,{recursive:true}); }
 });
+
+test('linked deletion requires the current dependency confirmation and refuses active dependent tasks',async()=>{
+ const directory=mkdtempSync(join(tmpdir(),'odwyn-delete-dependencies-'));
+ const codex=new EventEmitter();codex.request=async()=>({account:null});codex.stop=()=>{};
+ const app=createApp({directory,user:'owner',password:'test-password-long-enough',origin:'https://assistant.test',codex,browser:{close:async()=>{}}});
+ const headers={authorization:'Basic '+Buffer.from('owner:test-password-long-enough').toString('base64'),origin:'https://assistant.test','content-type':'application/json'};
+ const request=(path,method='GET',body)=>app.fetch(new Request('https://assistant.test'+path,{method,headers,...(body?{body:JSON.stringify(body)}:{})}));
+ try{
+  const first=createJob(app.runtime.state,{prompt:'First'}),next=createJob(app.runtime.state,{prompt:'Next'});
+  first.status=next.status='completed';
+  app.runtime.state.conversations.find(c=>c.id===next.conversationId).handoff={sourceRoomId:first.conversationId};
+  const path=`/api/conversations/${first.conversationId}`;
+  const plan=await(await request(path+'/deletion')).json();expect(plan.conversationIds).toHaveLength(2);
+  expect((await request(path,'DELETE')).status).toBe(400);
+  next.status='running';expect((await request(path,'DELETE',plan)).status).toBe(400);next.status='completed';
+  const third=createJob(app.runtime.state,{prompt:'Third'});third.status='completed';
+  app.runtime.state.conversations.find(c=>c.id===third.conversationId).handoff={sourceRoomId:next.conversationId};
+  expect((await request(path,'DELETE',plan)).status).toBe(400);
+  const updated=await(await request(path+'/deletion')).json();
+  expect((await request(path,'DELETE',updated)).status).toBe(200);
+  expect(app.runtime.state.conversations).toHaveLength(0);expect(app.runtime.state.jobs).toHaveLength(0);
+ }finally{await app.close();rmSync(directory,{recursive:true,force:true});}
+});
