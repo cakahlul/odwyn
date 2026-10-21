@@ -8,7 +8,7 @@ import {setupWorkspaceHomes} from './workspace-homes.js';
 import {setupWorkspaceSettings} from './workspace-settings.js';
 import { renderWorkflows, setupWorkflows } from './workflows-ui.js';
 import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date, workspaceUrl, workspaceId, storageKey } from './ui.js';
-import { renderHome, renderAgentRoster, renderChat, insertMessages, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, recentConversations } from './views.js';
+import { renderHome, renderAgentRoster, renderChat, insertMessages, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, conversationHistory } from './views.js';
 import { setupBrowser, updateBrowser } from './browser-ui.js';
 import { setupCustomization, applyProfile, openCustomization, fillWorkspaceAppearance, readWorkspaceAppearance } from './customize.js';
 import { defaults, agentColor, choices, ownerPreferenceKeys, avatarSvg, currencies, effortLevels } from './profile.js';
@@ -460,11 +460,6 @@ function render() {
   $('#page-title').title = conversation && view === 'chat' ? 'Rename conversation' : '';
   $('#page-title').setAttribute('aria-label',conversation && view === 'chat' ? `Rename conversation: ${conversation.title}` : $('#page-title').textContent);
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active',button.dataset.view === view));
-  const chats = recentConversations(state).filter(c=>c.kind !== 'room');
-  $('#history').innerHTML = chats.length ? chats.map(c => {
-    const job = state.jobs.find(job => job.conversationId === c.id);
-    return `<button class="history-item ${c.id === conversationId && view === 'chat' ? 'selected' : ''}" data-conversation="${esc(c.id)}"><span class="history-bullet ${job?.status === 'running' ? 'running' : ''}"></span><span>${esc(c.title)}</span>${job?.status === 'waiting' ? '<span class="needs-you-dot" title="Needs your input">!</span>' : ''}</button>`;
-  }).join('') : '<p class="sidebar-empty">No conversations yet.</p>';
   $('#menu-button').classList.toggle('active',view === 'chat');
   $('#tools-open').classList.toggle('active',['audit','routines','workflows','skills','knowledge','files','runs'].includes(view));
   if ($('#search-dialog').open) search();
@@ -722,13 +717,30 @@ $('#provider-type').onchange = () => {
   void loadProviderModels();
 };
 const providerInput = () => ({type:$('#provider-type').value,model:$('#provider-model').value,effort:$('#provider-effort').value,baseUrl:$('#provider-base-url').value,apiKey:$('#provider-api-key').value});
+let historyAgentId = null;
+function openAgentHistory(id) {
+  historyAgentId = id;
+  $('#search-input').value = '';
+  setNavigation(true);
+  search();
+}
 function search() {
   const query = $('#search-input').value.trim().toLowerCase();
+  const agent = workspace.agents.find(a=>a.id === historyAgentId);
+  $('#library-title').textContent = agent ? `${agent.customization?.name || defaults.name} conversations` : 'Conversations';
+  const conversations = conversationHistory(workspace,historyAgentId,query);
+  const currentId = historyAgentId === agentId ? conversationId : drafts.get(historyAgentId)?.conversationId;
+  const history = query ? conversationHistory(workspace,historyAgentId) : conversations;
+  const latest = history.find(c=>c.id === currentId) || history[0];
+  $('#agent-history-latest').hidden = !agent || !latest;
+  $('#agent-history-latest').dataset.conversation = latest?.id || '';
+  $('#rooms-group').hidden = !!agent;
   $('.library-browse').hidden = !!query;
   $('#search-results').hidden = !query;
-  if (!query) return;
-  const found = state?.conversations.filter(c => c.title.toLowerCase().includes(query) || c.messages.some(m => m.text.toLowerCase().includes(query))) || [];
-  $('#search-results').innerHTML = found.length ? found.map(c => `<button class="search-result" data-conversation="${esc(c.id)}">${icon('chat')}<span>${esc(c.title)}</span>${icon('arrow-up-right')}</button>`).join('') : '<p class="search-empty">No conversations found. Start a fresh one.</p>';
+  const rows = conversations.map(c => `<button class="search-result" data-conversation="${esc(c.id)}">${icon('chat')}<span><strong>${esc(c.title)}</strong><small>${esc(date(c.activityAt))}${c.id === currentId ? ' · Current conversation' : ''}</small></span>${icon('arrow-up-right')}</button>`).join('');
+  const content = rows || '<p class="search-empty">No conversations found.</p>';
+  if (query) $('#search-results').innerHTML = content;
+  else $('#history').innerHTML = content;
 }
 
 $('#new-chat').onclick = () => navigate();
@@ -828,7 +840,7 @@ $('#interaction-mode').onchange = async () => {
 };
 $('#settings-open').onclick = () => openSettings();
 $('#schedule-open').onclick = () => openSchedule();
-$('#menu-button').onclick = $('#search-open').onclick = () => { setNavigation(true); $('#menu-button').setAttribute('aria-expanded','true'); };
+$('#menu-button').onclick = $('#search-open').onclick = () => { historyAgentId = null; setNavigation(true); search(); $('#menu-button').setAttribute('aria-expanded','true'); };
 for (const id of ['agents','tools']) $('#'+id+'-open').onclick = () => { setNavigation(false); $('#'+id+'-dialog').showModal(); $('#'+id+'-open').setAttribute('aria-expanded','true'); };
 $('#search-input').oninput = search;
 $('#image-preview-image').onload = () => { $('#image-preview-status').textContent = ''; };
@@ -946,12 +958,12 @@ document.addEventListener('click', event => {
     return;
   }
   if (target.dataset.roomAgent) { $('#room-header').close(); const room = currentRoom(); void switchAgent(target.dataset.roomAgent,{sharedChat:room.id,keepDraft:true}).then(()=>openAgentProvider()); return; }
-  if (target.dataset.selectAgent) { setNavigation(false); void switchAgent(target.dataset.selectAgent).then(()=>{ navigate('chat',conversationId); }); return; }
+  if (target.dataset.selectAgent) { openAgentHistory(target.dataset.selectAgent); return; }
   if (target.dataset.closeAgent) { closeAgent(target.dataset.closeAgent); return; }
   if (target.dataset.agent) {
     if (busy || switching) return;
-    const latest = target.matches('.roster-item') && !drafts.has(target.dataset.agent) ? recentConversations(workspace).find(c=>c.kind !== 'room' && c.agentId === target.dataset.agent) : null;
-    void switchAgent(target.dataset.agent).then(()=>{ if (latest) navigate('chat',latest.id); else navigate('chat',conversationId); });
+    if (target.matches('.roster-item')) openAgentHistory(target.dataset.agent);
+    else void switchAgent(target.dataset.agent).then(()=>navigate('chat',conversationId));
     return;
   }
   if (target.hasAttribute('data-mascot-toggle')) {
@@ -963,7 +975,12 @@ document.addEventListener('click', event => {
   if (target.hasAttribute('data-home-search')) { $('#search-open').click(); return; }
   if (target.dataset.view) { event.preventDefault(); navigate(target.dataset.view); }
   if (target.dataset.conversation) { $('#search-dialog').close(); navigate('chat',target.dataset.conversation); }
-  if (target.hasAttribute('data-new-chat')) { setNavigation(false); navigate(); }
+  if (target.hasAttribute('data-new-chat')) {
+    const id = $('#search-dialog').open && historyAgentId;
+    setNavigation(false);
+    if (id && id !== agentId) void switchAgent(id).then(()=>navigate());
+    else navigate();
+  }
   if (target.dataset.prompt) { $('#prompt').value = target.dataset.prompt; $('#prompt').focus(); $('#prompt').dispatchEvent(new Event('input')); }
   if (target.hasAttribute('data-schedule-open')) openSchedule();
   if (target.hasAttribute('data-upload')) $('#file-input').click();

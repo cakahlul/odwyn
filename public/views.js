@@ -18,6 +18,11 @@ export function recentConversations(state) {
   return state.conversations.map(c=>({...c,activityAt:new Date(activity.get(c.id)).toISOString()})).sort((a,b)=>b.activityAt.localeCompare(a.activityAt));
 }
 
+export function conversationHistory(state, agentId = null, query = '') {
+  const term = query.trim().toLowerCase();
+  return recentConversations(state).filter(c => (!agentId || c.kind !== 'room' && c.agentId === agentId) && (!term || c.title.toLowerCase().includes(term) || c.messages.some(m=>m.text?.toLowerCase().includes(term))));
+}
+
 export function renderAgentRoster(state, selectedId = null) {
   const conversations = recentConversations(state);
   return state.agents.map(agent => {
@@ -28,7 +33,7 @@ export function renderAgentRoster(state, selectedId = null) {
     const status = needs ? 'Needs you' : job ? 'Working' : agent.runtime?.account ? 'Available' : 'Connect provider';
     const message = conversation?.messages.findLast(m=>m.text?.trim());
     const preview = job?.pending?.title || (job && job.events?.at(-1)?.detail) || message?.text || profile.specialization || 'Start a conversation';
-    return `<button class="home-agent roster-item" data-agent="${esc(agent.id)}" data-status="${needs ? 'waiting' : job ? 'running' : 'idle'}" aria-pressed="${agent.id === selectedId}"><span class="roster-avatar">${avatarSvg(profile,'home-agent-avatar')}</span><span class="roster-copy"><span class="roster-title"><strong>${esc(profile.name)}</strong><small class="home-agent-status">${status}</small></span><span class="roster-preview">${esc(preview.slice(0,140))}</span></span></button>`;
+    return `<button class="home-agent roster-item" data-agent="${esc(agent.id)}" data-status="${needs ? 'waiting' : job ? 'running' : 'idle'}" aria-label="${esc(profile.name)} conversations" title="${esc(profile.name)} conversations" aria-haspopup="dialog" aria-pressed="${agent.id === selectedId}"><span class="roster-avatar">${avatarSvg(profile,'home-agent-avatar')}</span><span class="roster-copy"><span class="roster-title"><strong>${esc(profile.name)}</strong><small class="home-agent-status">${status}</small></span><span class="roster-preview">${esc(preview.slice(0,140))}</span></span></button>`;
   }).join('');
 }
 

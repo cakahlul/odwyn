@@ -310,7 +310,7 @@ body.mascot-paused .home-agent-avatar { animation-play-state:paused; }
 
 :root.sidebar-collapsed .agent-rail { padding-inline:8px; }
 :root.sidebar-collapsed .rail-heading { flex-direction:column; padding:0; }
-:root.sidebar-collapsed .agent-rail :is(.brand-word,#workspace-current-name,.workspace-chevron,.rail-search span,.rail-search kbd,.roster-heading,.roster-copy,.rail-bottom) { display:none; }
+:root.sidebar-collapsed .agent-rail :is(.brand-word,#workspace-current-name,.workspace-chevron,.rail-search span:not([data-icon]),.rail-search kbd,.roster-heading,.roster-copy,.rail-bottom) { display:none; }
 :root.sidebar-collapsed .rail-heading .workspace-switcher { justify-content:center; padding:6px; width:40px; height:40px; min-height:40px; margin-inline:auto; }
 :root.sidebar-collapsed .rail-search { justify-content:center; padding:10px; }
 :root.sidebar-collapsed .agent-rail .roster-item { justify-content:center; padding:10px 0; }
@@ -657,6 +657,17 @@ body.mascot-paused .home-agent-avatar { animation-play-state:paused; }
 :root.sidebar-collapsed #workspace-navigation { flex-direction:column; grid-row:2 / 4; align-self:end; margin:0 8px 12px; }
 :root.sidebar-collapsed .dock-item { width:48px; }
 :root.sidebar-collapsed .agent-rail { grid-row:1 / 4; padding-bottom:320px; }
+/* Compact rail: consistent targets, visible search, labels on hover. */
+:root.sidebar-collapsed .rail-search { min-height:40px; border:0; border-radius:10px; background:transparent; box-shadow:none; }
+:root.sidebar-collapsed .agent-rail .roster-item { min-height:52px; padding:5px; border-radius:12px; box-shadow:none; }
+:root.sidebar-collapsed #workspace-navigation { padding:6px; gap:4px; border:0; border-radius:14px; background:transparent; box-shadow:none; overflow:visible; }
+:root.sidebar-collapsed .dock-item { position:relative; width:48px; min-height:44px; padding:7px; border-radius:10px; }
+:root[data-navigation].sidebar-collapsed .dock-tooltip { position:absolute; left:calc(100% + 12px); top:50%; width:max-content; max-width:none; padding:6px 10px; border-radius:6px; background:var(--surface); color:var(--ink); font-size:12px; transform:translateY(-50%); opacity:0; visibility:hidden; pointer-events:none; }
+:root[data-navigation].sidebar-collapsed .dock-item:is(:hover,:focus-visible) .dock-tooltip { opacity:1; visibility:visible; }
+.search-result span { min-width:0; text-align:left; }
+.search-result strong,.search-result small { display:block; }
+.search-result small { margin-top:4px; color:var(--muted); font-size:12px; }
+#agent-history-latest { margin-bottom:18px; }
 :root[data-navigation=dock] #workspace-navigation {
   grid-column:2;
   grid-row:3;
