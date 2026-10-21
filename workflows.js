@@ -1,3 +1,5 @@
+import {mkdirSync,mkdtempSync,writeFileSync} from 'node:fs';
+import {join,dirname} from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { textInput } from './security.js';
@@ -11,11 +13,37 @@ const key = value => {
   return value;
 };
 const optionalText = (value, max=20000) => value == null || value === '' ? '' : textInput(value,max);
-export function validateSkill(input) {
-  return {id:input.id || randomUUID(),name:textInput(input.name,80),command:key(input.command),description:optionalText(input.description,500),instructions:textInput(input.instructions),updatedAt:new Date().toISOString()};
+export function validateSkillFiles(files = []) {
+  if (!Array.isArray(files) || files.length > 100) throw Error('Choose up to 100 skill resource files.');
+  let size = 0;
+  const paths = new Set();
+  return files.map(file=>{
+    const path = file?.path, content = file?.content;
+    if (typeof path !== 'string' || path.length > 240 || path.split('/').some(part=>!part || part==='.' || part==='..') || /[\\\x00-\x1f:]/.test(path) || path.toLowerCase()==='skill.md' || path.toLowerCase().startsWith('skill.md/') || [...paths].some(existing=>existing===path.toLowerCase() || existing.startsWith(path.toLowerCase()+'/') || path.toLowerCase().startsWith(existing+'/'))) throw Error('Invalid or duplicate skill resource path.');
+    if (typeof content !== 'string' || Buffer.from(content,'base64').toString('base64')!==content) throw Error('Invalid skill resource content.');
+    paths.add(path.toLowerCase()); size += Buffer.from(content,'base64').length;
+    if (size > 5*1024*1024) throw Error('Skill resources must total at most 5 MB.');
+    return {path,content};
+  });
 }
-export function importSkill(source) {
-  // ponytail: imports SKILL.md instructions only; add folder imports for bundled scripts and resources.
+export function skillInstructions(skill, workspace) {
+  if (!skill.files?.length) return skill.instructions;
+  const files = validateSkillFiles(skill.files);
+  mkdirSync(workspace,{recursive:true});
+  const directory = mkdtempSync(join(workspace,'.skill-'));
+  writeFileSync(join(directory,'SKILL.md'),skill.instructions);
+  for (const file of files) {
+    const path = join(directory,file.path);
+    mkdirSync(dirname(path),{recursive:true});
+    writeFileSync(path,Buffer.from(file.content,'base64'));
+  }
+  return `${skill.instructions}\n\nSkill folder: ${directory}\nResolve skill-relative paths from this folder. Bundled files:\n${files.map(file=>file.path).join('\n')}`;
+}
+export function validateSkill(input) {
+  const files = validateSkillFiles(input.files);
+  return {id:input.id || randomUUID(),name:textInput(input.name,80),command:key(input.command),description:optionalText(input.description,500),instructions:textInput(input.instructions),...(files.length ? {files} : {}),updatedAt:new Date().toISOString()};
+}
+export function importSkill(source, files) {
   if (typeof source !== 'string' || Buffer.byteLength(source,'utf8') > 30000) throw new Error('Choose a SKILL.md file under 30 KB.');
   const match = source.replace(/^\uFEFF/,'').match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)([\s\S]*)$/);
   if (!match) throw new Error('SKILL.md needs YAML frontmatter between --- lines and Markdown instructions.');
@@ -24,7 +52,7 @@ export function importSkill(source) {
   catch { throw new Error('Skill frontmatter contains invalid YAML.'); }
   if (!metadata || typeof metadata.name !== 'string' || !metadata.name.trim()) throw new Error('Skill frontmatter needs a name.');
   const command = metadata.command ?? metadata.name.toLowerCase().replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,60);
-  return validateSkill({name:metadata.name,command,description:metadata.description,instructions:match[2]});
+  return validateSkill({name:metadata.name,command,description:metadata.description,instructions:match[2],files});
 }
 export function validateWorkflow(input,state) {
   const command = key(input.command), id = input.id || randomUUID();

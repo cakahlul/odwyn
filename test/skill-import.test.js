@@ -1,7 +1,7 @@
 import {newPageWithoutTutorials} from '../tests/browser-page.js';
 import { test, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
@@ -20,7 +20,7 @@ test('Import skill previews SKILL.md, handles command collisions, saves a new sk
   app.runtime.state.agents[0].provider.configured = true;
   const existing = validateSkill({name:'Old review',command:'review-code',instructions:'Original instructions.'});
   app.runtime.state.skills.push(existing); await app.runtime.refreshAccount(); app.runtime.changed();
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({channel:process.env.ODWYN_TEST_BROWSER_CHANNEL});
   try {
     const page = await newPageWithoutTutorials(browser,{httpCredentials:{username:'owner',password:'test-password-long-enough'}});
     await page.goto(server.url.href+'#chat'); await page.locator('.welcome').waitFor();
@@ -46,9 +46,24 @@ test('Import skill previews SKILL.md, handles command collisions, saves a new sk
     expect(app.runtime.state.skills.find(skill=>skill.command==='imported-review').instructions).toBe(body);
     await page.reload(); await page.locator('#tools-open').click();await page.locator('[data-view=skills]').click();
     await page.getByRole('heading',{name:'Review Code',exact:true}).waitFor();
+    const folder=join(directory,'folder-review');mkdirSync(join(folder,'references'),{recursive:true});
+    writeFileSync(join(folder,'SKILL.md'),'---\nname: folder-review\n---\nRead references/check.md.');
+    writeFileSync(join(folder,'references/check.md'),'Check permissions.');
+    const folderChooser=page.waitForEvent('filechooser');
+    await page.getByRole('button',{name:'Import folder',exact:true}).click();
+    await (await folderChooser).setFiles(folder);
+    await page.locator('#skill-editor[open]').waitFor();
+    expect(await page.locator('#skill-resources').textContent()).toContain('references/check.md');
+    await page.getByRole('button',{name:'Save skill',exact:true}).click();
+    await page.locator('#skill-editor').waitFor({state:'hidden'});
+    expect(app.runtime.state.skills.find(skill=>skill.command==='folder-review').files).toEqual([{path:'references/check.md',content:Buffer.from('Check permissions.').toString('base64')}]);
+    await page.reload();await page.locator('#tools-open').click();await page.locator('[data-view=skills]').click();
+    await page.locator('[data-skill-edit="'+app.runtime.state.skills.find(skill=>skill.command==='folder-review').id+'"]').click();
+    expect(await page.locator('#skill-resources').textContent()).toContain('references/check.md');
+    await page.getByRole('button',{name:'Save skill',exact:true}).click();await page.locator('#skill-editor').waitFor({state:'hidden'});
     await page.locator('#skill-import-file').setInputFiles({name:'SKILL.md',mimeType:'text/markdown',buffer:Buffer.from('No frontmatter')});
     await page.locator('#toast').filter({hasText:'needs YAML frontmatter'}).waitFor();
-    expect(app.runtime.state.skills).toHaveLength(2);
+    expect(app.runtime.state.skills).toHaveLength(3);
     await page.locator('#skill-import-file').setInputFiles({name:'SKILL.md',mimeType:'text/markdown',buffer:Buffer.alloc(30001,120)});
     await page.locator('#toast').filter({hasText:'under 30 KB'}).waitFor();
   } finally {await browser.close(); server.stop(true); await app.close(); rmSync(directory,{recursive:true,force:true});}

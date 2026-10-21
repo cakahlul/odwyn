@@ -379,15 +379,16 @@ export function createApp(options = {}) {
           // ponytail: a JSON state row suits one owner; use indexed tables when history gets large.
           return response({ revision: runtime.revision, ...store.state, agents:store.state.agents.map(agent => ({ ...agent, provider:publicProvider(agent.provider), runtime:{ ...runtime.accounts.get(agent.id), login:logins.get(agent.id) || null } })), globalProvider:publicProvider(store.state.globalProvider), globalRuntime:{...runtime.accounts.get(globalConnection().id),login:logins.get(globalConnection().id) || null}, provider: publicProvider(store.state.provider), runtime: { account: runtime.account, connectionError: runtime.connectionError, model: store.state.provider.model, activeJobId: runtime.activeJobs()[0]?.id || null, activeJobIds:runtime.activeJobs().map(job=>job.id), takeover: runtime.takeover, browserOpen: !!browser.context, rateLimits: runtime.rateLimits || null, login:logins.get(store.state.agents[0].id) || null } });
         }
-        // JSON escaping expands file contents; importSkill enforces the 30 KB source limit.
-        if (pathname === '/api/skills/import' && req.method === 'POST') return response(importSkill((await json(req,200_000)).source));
+        // Allow base64 resources; importSkill enforces source and decoded resource limits.
+        if (pathname === '/api/skills/import' && req.method === 'POST') { const input=await json(req,7_200_000); return response(importSkill(input.source,input.files)); }
         const definitionMatch = pathname.match(/^\/api\/(workflows|skills)(?:\/([a-f0-9-]{36}))?(?:\/(run))?$/);
         if (definitionMatch) {
           const [,collection,id,action]=definitionMatch, items=store.state[collection], existing=items.find(item=>item.id===id);
           if (id && !existing) return response({error:'Definition not found.'},404);
           if (collection==='workflows' && id && action==='run' && req.method==='POST') return response(runtime.launchWorkflow(existing,await json(req)),201);
           if (!action && (req.method==='POST' && !id || req.method==='PUT' && id)) {
-            const input={...await json(req),id:id || randomUUID()};
+            const input={...await json(req,collection==='skills' ? 7_200_000 : 30_000),id:id || randomUUID()};
+            if(collection==='skills' && existing && input.files===undefined)input.files=existing.files;
             const item=collection==='workflows' ? validateWorkflow(input,store.state):validateSkill(input);
             if (collection==='skills' && items.some(s=>s.id!==id && s.name.trim().toLowerCase()===item.name.toLowerCase())) throw new Error('Skill name already exists.');
             if (collection==='skills' && (items.some(s=>s.id!==id && s.command===item.command) || store.state.workflows.some(w=>w.command===item.command))) throw new Error('Command already exists.');

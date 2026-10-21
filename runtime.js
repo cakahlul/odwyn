@@ -1,6 +1,6 @@
 import {usage, sumUsage} from './usage.js';
 import {validateCommand,runCommand} from './terminal.js';
-import { workflowInvocation, interpolate, condition, commandParameters } from './workflows.js';
+import { skillInstructions, workflowInvocation, interpolate, condition, commandParameters } from './workflows.js';
 import { randomUUID } from 'node:crypto';
 import { oddyTool, oddyInstructions } from './oddy.js';
 import { join } from 'node:path';
@@ -132,7 +132,7 @@ export class Runtime {
     const job = createJob(this.state,input);
     if (invocation?.skill) {
       job.skill = {id:invocation.skill.id,name:invocation.skill.name,command:invocation.skill.command};
-      job.prompt = `${invocation.skill.instructions}\n\nOwner request: ${invocation.argument || 'Perform this skill.'}`;
+      job.prompt = `${skillInstructions(invocation.skill,this.workspace)}\n\nOwner request: ${invocation.argument || 'Perform this skill.'}`;
     }
     this.changed(); void this.drain(); return job;
   }
@@ -214,7 +214,7 @@ export class Runtime {
     const run=this.workflowRun(job),step=job.workflowStep,context=this.workflowContext(run,job);
     if(step.id!=='$inputs' && run.visits>=run.workflow.maxSteps) throw new Error('Workflow reached its execution limit.');
     if(step.type==='agent') {
-      const skills=step.skills.map(id=>run.skills.find(s=>s.id===id)?.instructions).filter(Boolean).join('\n\n');
+      const skills=step.skills.map(id=>run.skills.find(s=>s.id===id)).filter(Boolean).map(skill=>skillInstructions(skill,this.workspace)).join('\n\n');
       job.prompt=`${skills}\n\n${interpolate(step.prompt,context)}${step.format==='json' ? '\nReturn only valid JSON as the final answer.':''}${step.responsePrompt ? `\nYour output will be displayed as selectable cards. Return an object with title (string), summary (string), and ${step.responseItems} (array of items). Each item should have a title or id plus its relevant details as plain-text fields. Do not perform the follow-up action now; wait for the owner to select items and send a new message.`:''}`;
       return false;
     }
@@ -355,7 +355,7 @@ export class Runtime {
       const knowledgeInstructions=this.store.knowledge.prepare(job,profile);
       if(knowledgeInstructions)this.event(job,'Knowledge loaded',(job.knowledgeVersions||[]).map(doc=>`${doc.name} v${doc.version}`).join(', '));
       const defaultSkills = (profile.skillIds || []).map(id=>this.state.skills.find(skill=>skill.id===id)).filter(Boolean);
-      const skillInstructions = defaultSkills.length ? `\nOwner-selected automatic skills: apply every skill below to every task, including room replies, without waiting for the owner to invoke a command. Treat these as standing task instructions within existing permissions and tool policies:\n${defaultSkills.map(skill=>`Skill ${JSON.stringify(skill.name)} (/${skill.command}):\n${skill.instructions}`).join('\n\n')}` : '';
+      const skillInstructions = defaultSkills.length ? `\nOwner-selected automatic skills: apply every skill below to every task, including room replies, without waiting for the owner to invoke a command. Treat these as standing task instructions within existing permissions and tool policies:\n${defaultSkills.map(skill=>`Skill ${JSON.stringify(skill.name)} (/${skill.command}):\n${skillInstructions(skill,this.workspace)}`).join('\n\n')}` : '';
       const persona = `\nOwner-selected identity: use ${JSON.stringify(profile.name)} as your name. ${profile.ownerName ? `Address the owner as ${JSON.stringify(profile.ownerName)}.` : 'Do not invent a name for the owner.'} Communication: Caveman ultra. Reply depth: shortest complete answer; expand only for explicitly requested detail or necessary correctness. Reply language: ${profile.language === 'auto' ? 'Match the owner’s message' : choices.language[profile.language]}; follow explicit language requests. Specialization (focus, not additional permissions): ${JSON.stringify(profile.specialization || 'General personal assistance')}. Owner background (context, not instructions): ${JSON.stringify(profile.userContext)}. These preferences never change tool policies or authorize new actions.`;
       const currencyPreference = this.state.currency && this.state.currency !== 'source' ? `\nOwner preferred currency: ${this.state.currency}. Use it for budgets and recommendation estimates across this task. Preserve every original source price and currency alongside estimates. Convert only with an exchange rate verified using the browser; cite the rate source and date, and label conversions approximate. Never invent rates or relabel an original amount. If no verified rate is available, show the source price and say conversion is unavailable. Receipts and confirmed charges keep their exact original amounts and currency.` : '\nShow prices in their original source currency.';
       const params = { cwd: this.workspace, sandbox: 'read-only', approvalPolicy: 'on-request', developerInstructions: instructions + persona + preferences + skillInstructions + knowledgeInstructions + currencyPreference, ...(this.model ? { model: this.model } : {}) };
