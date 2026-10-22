@@ -20,7 +20,7 @@ Workflow settings hold launch inputs and the execution limit. Connecting back to
 | Output | Displays mapped text or JSON in chat. |
 | Room stage | Runs a configured room goal with participants, deliverables, reviewers, and optional owner approval. |
 
-Workflow steps use their selected tools and the task’s interaction mode. Native MCP tools are available only when the step enables MCP.
+Workflow steps use their selected tools and the task’s interaction mode. Native Codex MCP tools are available only when the step enables MCP. Enable **Connections** to call workspace REST, GraphQL, gRPC or MCP connections through the shared connection tool; skills can reference saved connections by name.
 
 ## Run commands
 

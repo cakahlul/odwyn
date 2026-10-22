@@ -11,6 +11,9 @@ import { validateWorkflow, validateSkill, importSkill } from './workflows.js';
 import { validateProfile, defaults, profileTextLimit, ownerPreferenceKeys, currencies, validateAppearance } from './public/profile.js';
 import { fetchImage } from './proxy.js';
 import { imageMime } from './files.js';
+import {validateConnection,publicConnection,executeConnection,mcpOAuthProvider} from './connections.js';
+import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {SSEClientTransport} from '@modelcontextprotocol/sdk/client/sse.js';
 
 const root = import.meta.dir;
 const headers = {
@@ -52,6 +55,9 @@ export function createApp(options = {}) {
     },
   });
   runtime = new Runtime({store,codex,browser,workspace,workspaceId:options.workspaceId,model:store.state.provider.model});
+  const connectionLogins=new Map();
+  const connectionRedirect=origin+'/api/connections/oauth/callback'+(options.workspaceId?'?workspace='+encodeURIComponent(options.workspaceId):'');
+  runtime.connectionOptions=connection=>connection.oauth?{authProvider:mcpOAuthProvider(connection,connectionRedirect,()=>runtime.changed(),{state:randomUUID()})}:{};
   const logins = new Map();
   function watchLogin(agent, provider) {
     provider.on('notification', ({ method, params }) => {
@@ -364,6 +370,53 @@ export function createApp(options = {}) {
           const image = await fetchImage(url.searchParams.get('url'));
           return new Response(image.body, { headers:{ ...headers, 'content-type':image.type, 'cache-control':'private, max-age=3600' } });
         }
+        if(pathname==='/api/connections/oauth/callback'&&req.method==='GET'){
+          const state=url.searchParams.get('state'),pending=connectionLogins.get(state);
+          connectionLogins.delete(state);
+          if(!pending||pending.expires<Date.now())throw Error('MCP sign-in expired. Start again from Connections.');
+          const connection=store.state.connections.find(row=>row.id===pending.id);
+          if(!connection||!connection.enabled||connection.apiKey!==pending.credentials)throw Error('Connection changed. Start sign-in again.');
+          if(url.searchParams.get('error')||!url.searchParams.get('code'))throw Error('MCP sign-in was not completed.');
+          const provider=mcpOAuthProvider(connection,connectionRedirect,()=>runtime.changed(),pending);
+          const Transport=connection.transport==='sse'?SSEClientTransport:StreamableHTTPClientTransport;
+          const transport=new Transport(new URL(connection.url),{authProvider:provider,fetch:(url,init={})=>fetch(url,{...init,signal:AbortSignal.timeout(connection.timeoutMs)})});
+          try{await transport.finishAuth(url.searchParams.get('code'));}finally{await transport.close().catch(()=>{});}
+          return new Response(null,{status:303,headers:{...headers,location:'/'+(options.workspaceId?'?workspace='+encodeURIComponent(options.workspaceId):'')+'#connections'}});
+        }
+        const connectionMatch=pathname.match(/^\/api\/connections(?:\/([a-f0-9-]{36}))?(?:\/(test|authorize))?$/);
+        if(connectionMatch){
+          const [,id,action]=connectionMatch,existing=store.state.connections.find(row=>row.id===id);
+          if(id&&!existing)return response({error:'Connection not found.'},404);
+          if(req.method==='GET'&&!action)return response(id?publicConnection(existing):store.state.connections.map(publicConnection));
+          if(req.method==='POST'&&id&&action==='authorize'){
+            if(existing.type!=='mcp'||!existing.oauth||!existing.enabled)throw Error('Enable OAuth on a remote MCP connection first.');
+            for(const [state,pending] of connectionLogins)if(pending.expires<Date.now()||pending.id===id)connectionLogins.delete(state);
+            const pending={id,state:randomUUID(),expires:Date.now()+10*60_000};
+            const authProvider=mcpOAuthProvider(existing,connectionRedirect,()=>runtime.changed(),pending);
+            try{await executeConnection(existing,{}, {authProvider});return response({connected:true});}
+            catch(error){if(!pending.url)throw error;}
+            pending.credentials=existing.apiKey;connectionLogins.set(pending.state,pending);
+            return response({authorizationUrl:pending.url});
+          }
+          if(req.method==='POST'&&id&&action==='test'){
+            const input=await json(req,90000);
+            return response(store.credentials.sanitize(await executeConnection(existing,input,runtime.connectionOptions(existing))));
+          }
+          if(action)return response({error:'Method not allowed.'},405);
+          if(req.method==='POST'&&!id||req.method==='PUT'&&id||req.method==='DELETE'&&id){
+            if(runtime.activeJobs().length||runtime.executions.size)throw Error('Stop active tasks before changing connections.');
+            if(req.method==='DELETE')store.state.connections=store.state.connections.filter(row=>row.id!==id);
+            else{
+              if(!id&&store.state.connections.length>=100)throw Error('Use up to 100 connections per workspace.');
+              const connection=validateConnection(await json(req,90000),existing);
+              if(store.state.connections.some(row=>row.id!==id&&row.name.toLowerCase()===connection.name.toLowerCase()))throw Error('Connection name already exists.');
+              if(existing)store.state.connections[store.state.connections.indexOf(existing)]=connection;else store.state.connections.push(connection);
+              runtime.changed();return response(publicConnection(connection),id?200:201);
+            }
+            runtime.changed();return response({ok:true});
+          }
+          return response({error:'Method not allowed.'},405);
+        }
         if(pathname === '/api/knowledge'){
           if(req.method==='GET')return response(store.credentials.sanitize(store.state.knowledge));
           if(req.method==='POST'){const result=store.knowledge.create(await json(req,90000));runtime.changed();return response(result,201);}
@@ -377,7 +430,7 @@ export function createApp(options = {}) {
         if (pathname === '/api/state' && req.method === 'GET') {
           if (url.searchParams.get('revision') === String(runtime.revision)) return new Response(null, { status: 204, headers });
           // ponytail: a JSON state row suits one owner; use indexed tables when history gets large.
-          return response({ revision: runtime.revision, ...store.state, agents:store.state.agents.map(agent => ({ ...agent, provider:publicProvider(agent.provider), runtime:{ ...runtime.accounts.get(agent.id), login:logins.get(agent.id) || null } })), globalProvider:publicProvider(store.state.globalProvider), globalRuntime:{...runtime.accounts.get(globalConnection().id),login:logins.get(globalConnection().id) || null}, provider: publicProvider(store.state.provider), runtime: { account: runtime.account, connectionError: runtime.connectionError, model: store.state.provider.model, activeJobId: runtime.activeJobs()[0]?.id || null, activeJobIds:runtime.activeJobs().map(job=>job.id), takeover: runtime.takeover, browserOpen: !!browser.context, rateLimits: runtime.rateLimits || null, login:logins.get(store.state.agents[0].id) || null } });
+          return response({ revision: runtime.revision, ...store.state, connections:store.state.connections.map(publicConnection), agents:store.state.agents.map(agent => ({ ...agent, provider:publicProvider(agent.provider), runtime:{ ...runtime.accounts.get(agent.id), login:logins.get(agent.id) || null } })), globalProvider:publicProvider(store.state.globalProvider), globalRuntime:{...runtime.accounts.get(globalConnection().id),login:logins.get(globalConnection().id) || null}, provider: publicProvider(store.state.provider), runtime: { account: runtime.account, connectionError: runtime.connectionError, model: store.state.provider.model, activeJobId: runtime.activeJobs()[0]?.id || null, activeJobIds:runtime.activeJobs().map(job=>job.id), takeover: runtime.takeover, browserOpen: !!browser.context, rateLimits: runtime.rateLimits || null, login:logins.get(store.state.agents[0].id) || null } });
         }
         // Allow base64 resources; importSkill enforces source and decoded resource limits.
         if (pathname === '/api/skills/import' && req.method === 'POST') { const input=await json(req,7_200_000); return response(importSkill(input.source,input.files)); }
@@ -596,10 +649,10 @@ export function createApp(options = {}) {
         }
         if (pathname.startsWith('/api/')) return response({ error: 'Endpoint not found.' }, 404);
         if (!['GET','HEAD'].includes(req.method)) return response({ error: 'Method not allowed.' }, 405);
-        const files = { '/audit-ui.js':'audit-ui.js', '/': 'index.html', '/app.js': 'app.js', '/oddy-ui.js':'oddy-ui.js', '/chat-composer.js':'chat-composer.js', '/oddy.css':'oddy.css', '/workspace.css':'workspace.css', '/tutorials.js':'tutorials.js', '/knowledge-ui.js':'knowledge-ui.js', '/workspace-settings.js':'workspace-settings.js', '/workspace-homes.js':'workspace-homes.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/room-policy.js':'room-policy.js', '/room-work-ui.js':'room-work-ui.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/studio/home.svg':'icons/studio/home.svg', '/icons/studio/conversations.svg':'icons/studio/conversations.svg', '/icons/studio/tools.svg':'icons/studio/tools.svg', '/icons/studio/agents.svg':'icons/studio/agents.svg', '/icons/studio/settings.svg':'icons/studio/settings.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
+        const files = { '/connections-ui.js':'connections-ui.js', '/audit-ui.js':'audit-ui.js', '/': 'index.html', '/app.js': 'app.js', '/oddy-ui.js':'oddy-ui.js', '/chat-composer.js':'chat-composer.js', '/oddy.css':'oddy.css', '/workspace.css':'workspace.css', '/tutorials.js':'tutorials.js', '/knowledge-ui.js':'knowledge-ui.js', '/workspace-settings.js':'workspace-settings.js', '/workspace-homes.js':'workspace-homes.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/room-policy.js':'room-policy.js', '/room-work-ui.js':'room-work-ui.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/studio/home.svg':'icons/studio/home.svg', '/icons/studio/conversations.svg':'icons/studio/conversations.svg', '/icons/studio/tools.svg':'icons/studio/tools.svg', '/icons/studio/agents.svg':'icons/studio/agents.svg', '/icons/studio/settings.svg':'icons/studio/settings.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
         if (!files[pathname]) return response({ error: 'Not found.' }, 404);
         return new Response(Bun.file(join(root, 'public', files[pathname])), { headers });
-      } catch (error) { return response({ error: error.message || 'Something went wrong. Try again.' }, 400); }
+      } catch (error) { let message='Something went wrong. Try again.';try{message=store.credentials.redact(error.message||message);}catch{}return response({error:message},400); }
     },
     async close() { if(oddyApp)await oddyApp.close(); await workspaceWrites; for (const child of homes.values()) if (child !== app) await child.close(); clearInterval(accountTimer); await runtime.close(); for (const provider of runtime.providers.values()) provider.stop(); await browser.close(); store.close(); },
   };

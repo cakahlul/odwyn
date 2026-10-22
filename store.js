@@ -16,7 +16,7 @@ export function openStore(directory) {
   chmodSync(filename, 0o600);
   db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL)');
   const row = db.query('SELECT value FROM state WHERE id=1').get();
-  const state = { conversations: [], jobs: [], schedules: [], files: [], workflows: [], skills: [], knowledge: [], workflowRuns: [], preferences: '', currency:'source', customization: null, ...JSON.parse(row?.value || '{}') };
+  const state = { conversations: [], jobs: [], schedules: [], files: [], workflows: [], skills: [], connections: [], knowledge: [], workflowRuns: [], preferences: '', currency:'source', customization: null, ...JSON.parse(row?.value || '{}') };
   state.agents ||= [{ id: randomUUID(), customization: state.customization }];
   state.owner ||= Object.fromEntries(ownerPreferenceKeys.map(key=>[key,state.customization?.[key] ?? state.agents[0].customization?.[key] ?? defaults[key]]));
   state.appearance ||= {palette:state.customization?.palette || 'paper',motion:state.customization?.motion || 'system'};

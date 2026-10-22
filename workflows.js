@@ -64,7 +64,7 @@ export function validateWorkflow(input,state) {
     if (!stepTypes.includes(step.type)) throw new Error('Choose a supported step type.');
     if (step.agentId && !state.agents.some(a=>a.id===step.agentId)) throw new Error('Step agent not found.');
     if (!Array.isArray(step.skills || []) || (step.skills || []).length>30 || new Set(step.skills || []).size!==(step.skills || []).length || (step.skills || []).some(id=>!state.skills?.some(s=>s.id===id))) throw new Error('Step skill not found.');
-    if (!Array.isArray(step.tools || []) || new Set(step.tools || []).size!==(step.tools || []).length || (step.tools || []).some(t=>!['browser','terminal','search','ask','send_file','remember','schedule','mcp'].includes(t))) throw new Error('Choose supported tools.');
+    if (!Array.isArray(step.tools || []) || new Set(step.tools || []).size!==(step.tools || []).length || (step.tools || []).some(t=>!['browser','terminal','search','ask','send_file','remember','schedule','mcp','connection'].includes(t))) throw new Error('Choose supported tools.');
     const next = step.next === undefined ? input.steps[index+1]?.id || null : step.next;
     const retries = step.retries ?? 0;
     if (!Number.isInteger(retries) || retries<0 || retries>5) throw new Error('Retries must be between 0 and 5.');

@@ -18,11 +18,19 @@ export function openCredentials(db,directory){
       db.query('UPDATE provider_credentials SET credential=? WHERE id=?').run(encrypt(secret,row),row.id);
     }
   }
-  const providers=state=>[['workspace',state.provider],['global',state.globalProvider],...state.agents.map(a=>['agent/'+a.id,a.provider])].filter(([,config])=>config);
+  const secretsFor=row=>{
+    const decrypted=decrypt(row);if(!row.slot.startsWith('connection/'))return [decrypted];
+    const config=JSON.parse(decrypted),headers=Object.values(config.headers||{});
+    const auth=Object.entries(config.headers||{}).find(([name])=>name.toLowerCase()==='authorization')?.[1]||'';
+    const bearer=auth.match(/^Bearer (.+)$/i)?.[1],basic=auth.match(/^Basic (.+)$/i)?.[1];
+    const password=basic?Buffer.from(basic,'base64').toString().split(':').slice(1).join(':'):undefined;
+    return [...headers,...Object.values(config.env||{}),bearer,password,config.oauth?.tokens?.access_token,config.oauth?.tokens?.refresh_token,config.oauth?.client?.client_secret,config.oauth?.verifier].filter(value=>typeof value==='string'&&value);
+  };
+  const providers=state=>[['workspace',state.provider],['global',state.globalProvider],...state.agents.map(a=>['agent/'+a.id,a.provider]),...(state.connections||[]).map(c=>['connection/'+c.id,c])].filter(([,config])=>config);
   return {
     hydrateProviders(state){for(const [slot,config] of providers(state)){if(!config.credentialRef)continue;const row=db.query('SELECT * FROM provider_credentials WHERE id=? AND slot=? AND type=?').get(config.credentialRef,slot,config.type);if(!row)throw new Error('Provider credential reference unavailable.');config.apiKey=decrypt(row);delete config.credentialRef;}},
     serialize(state){const saved=JSON.parse(JSON.stringify(state));for(const [slot,config] of providers(saved)){if(!config.apiKey)continue;let row=db.query('SELECT * FROM provider_credentials WHERE slot=? AND type=?').all(slot,config.type).find(r=>decrypt(r)===config.apiKey);if(!row){row={id:randomUUID(),slot,type:config.type};row.credential=encrypt(config.apiKey,row);db.query('INSERT INTO provider_credentials VALUES(?,?,?,?)').run(row.id,slot,row.type,row.credential);}config.credentialRef=row.id;delete config.apiKey;}return JSON.stringify(saved);},
-    redact(text){let result=String(text);for(const row of db.query('SELECT * FROM provider_credentials').all()){const secret=decrypt(row);for(const variant of new Set([secret,JSON.stringify(secret).slice(1,-1),encodeURIComponent(secret),Buffer.from(secret).toString('base64')]))result=result.replaceAll(variant,'[REDACTED]');}return result;},
+    redact(text){let result=String(text);for(const row of db.query('SELECT * FROM provider_credentials').all()){for(const secret of secretsFor(row))for(const variant of new Set([secret,JSON.stringify(secret).slice(1,-1),encodeURIComponent(secret),Buffer.from(secret).toString('base64')]))result=result.replaceAll(variant,'[REDACTED]');}return result;},
     sanitize(value){if(typeof value==='string')return this.redact(value);if(Array.isArray(value))return value.map(v=>this.sanitize(v));if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[this.redact(k),this.sanitize(v)]));return value;},
     assertNoSecret(bytes){const text=bytes.toString('utf8');if(this.redact(text)!==text)throw new Error('Protected credential material cannot be exported.');},
   };

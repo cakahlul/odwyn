@@ -1,3 +1,4 @@
+import {renderConnections,setupConnections} from './connections-ui.js';
 import {renderAudit,setupAudit} from './audit-ui.js';
 import {setupChatComposer} from './chat-composer.js';
 import {setupOddy} from './oddy-ui.js';
@@ -454,14 +455,14 @@ function render() {
   $('#prompt').placeholder = conversation?.kind === 'room' ? 'Message the room, or @mention an agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);
   $('#agent-workspace').classList.toggle('chat-start', view === 'chat' && !conversation);
-  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { home:'Home', audit:'Audit log', runs:'Task runs', routines:'Routines', files:'Files & results', workflows:'Workflows', skills:'Skills', knowledge:'Knowledge' }[view];
+  $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { home:'Home', audit:'Audit log', runs:'Task runs', routines:'Routines', files:'Files & results', workflows:'Workflows', skills:'Skills', connections:'Connections', knowledge:'Knowledge' }[view];
   $('#agent-name').textContent = view === 'home' ? 'Odwyn' : state.customization?.name || defaults.name;
   $('#page-title').disabled = view !== 'chat' || !conversation;
   $('#page-title').title = conversation && view === 'chat' ? 'Rename conversation' : '';
   $('#page-title').setAttribute('aria-label',conversation && view === 'chat' ? `Rename conversation: ${conversation.title}` : $('#page-title').textContent);
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active',button.dataset.view === view));
   $('#menu-button').classList.toggle('active',view === 'chat');
-  $('#tools-open').classList.toggle('active',['audit','routines','workflows','skills','knowledge','files','runs'].includes(view));
+  $('#tools-open').classList.toggle('active',['audit','routines','workflows','skills','connections','knowledge','files','runs'].includes(view));
   if ($('#search-dialog').open) search();
   if (!agentId && !['home','audit'].includes(view)) {
     $('#agent-workspace').classList.remove('chat-start'); $('#main').classList.remove('chat-start'); $('#composer-area').hidden = true;
@@ -471,7 +472,7 @@ function render() {
     updateBrowser(state); return;
   }
   $('#composer-area').hidden = view !== 'chat';
-  const nextSignature = view==='audit'?'audit':JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'knowledge' ? state.knowledge : view === 'home' ? [workspace.conversations,workspace.jobs,workspace.agents.map(agent=>[agent.id,!!agent.runtime?.account]),$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? [state.schedules,state.jobs] : ['workflows','skills'].includes(view) ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
+  const nextSignature = view==='audit'?'audit':JSON.stringify({ view, conversationId, filter, customization:state.customization, owner:state.owner, mentions:[state.agents.map(a=>[a.id,a.customization]),state.skills,state.workflows.map(w=>w.command)], data: view === 'connections' ? state.connections : view === 'knowledge' ? state.knowledge : view === 'home' ? [workspace.conversations,workspace.jobs,workspace.agents.map(agent=>[agent.id,!!agent.runtime?.account]),$('#prompt').value,attachments] : view === 'chat' ? [conversation || state.conversations, state.jobs.filter(j => !conversation || j.conversationId === conversationId), !!state.runtime.account] : view === 'runs' ? state.jobs : view === 'routines' ? [state.schedules,state.jobs] : ['workflows','skills'].includes(view) ? [state.workflows,state.skills,state.workflowRuns,state.jobs] : state.files });
   if (signature !== nextSignature) {
     const nearBottom = $('#view').scrollHeight - $('#view').scrollTop - $('#view').clientHeight < 100;
     const previousScroll = $('#view').scrollTop;
@@ -479,7 +480,7 @@ function render() {
     const homeFocus = view === 'home' && $('#view').contains(document.activeElement) ? document.activeElement.closest('[data-conversation],[data-agent]') : null;
     const disclosures=[...$('#view').querySelectorAll('[data-room-disclosure]')].map(node=>({key:node.dataset.roomDisclosure,open:node.open,focused:node.querySelector('summary')===document.activeElement}));
     const pendingCards=[...document.querySelectorAll('#view .approval-card[data-request],#view form[data-room-owner]')].map(node=>({node,focus:node.contains(document.activeElement)?document.activeElement:null}));
-    $('#view').innerHTML = view === 'knowledge' ? renderKnowledge(state) : view === 'audit' ? renderAudit() : view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state,filter) : ['workflows','skills'].includes(view) ? renderWorkflows(state,view) : renderFiles(state);
+    $('#view').innerHTML = view === 'connections' ? renderConnections(state) : view === 'knowledge' ? renderKnowledge(state) : view === 'audit' ? renderAudit() : view === 'home' ? renderHome(workspace,{conversationId,hasDraft:!!$('#prompt').value.trim() || attachments.length > 0}) : view === 'chat' ? renderChat(state, conversationId) : view === 'runs' ? renderRuns(state,filter) : view === 'routines' ? renderRoutines(state,filter) : ['workflows','skills'].includes(view) ? renderWorkflows(state,view) : renderFiles(state);
     for(const saved of disclosures){const node=$('#view').querySelector(`[data-room-disclosure="${CSS.escape(saved.key)}"]`);if(node){node.open=saved.open;if(saved.focused)node.querySelector('summary').focus({preventScroll:true});}}
     if (libraryFocus) { const input=$('#view').querySelector(`[data-library-search="${libraryFocus.key}"]`); input?.focus({preventScroll:true}); if(input && libraryFocus.start!==null)input.setSelectionRange(libraryFocus.start,libraryFocus.end); }
     if (homeFocus) { const key = homeFocus.dataset.conversation ? 'conversation' : 'agent'; $('#view').querySelector(`[data-${key}="${CSS.escape(homeFocus.dataset[key])}"]`)?.focus({preventScroll:true}); }
@@ -1019,7 +1020,7 @@ setupOddy(()=>({view,conversationId:conversationId||'',agentId:agentId||''}));
 await refresh();
 if (state && agentId) { restoreDraft(); signature = ''; render(); }
 const initial = location.hash.slice(1).split('/');
-if (['home','chat','audit','runs','routines','files','workflows','skills','knowledge'].includes(initial[0]) && (agentId || ['home','audit'].includes(initial[0]))) { view = initial[0]; conversationId = initial[0] === 'home' ? conversationId : initial[1] || null; signature = ''; render(); }
+if (['home','chat','audit','runs','routines','files','workflows','skills','connections','knowledge'].includes(initial[0]) && (agentId || ['home','audit'].includes(initial[0]))) { view = initial[0]; conversationId = initial[0] === 'home' ? conversationId : initial[1] || null; signature = ''; render(); }
 if (!initial[0] && state) { view = 'home'; signature = ''; render(); }
 if (state && agentId && !state.customization) openSettings(true);
 else if (state && agentId && !workspace.globalProvider.configured) openSettings();
@@ -1032,6 +1033,7 @@ setInterval(() => { if (!document.hidden) {
   if(providerOddy&&$('#settings-dialog').open)void api('/api/oddy/provider').then(value=>{if(providerOddy){oddyProviderState=value;updateAccount();}}).catch(()=>{});
 } }, 1000);
 
+setupConnections(()=>workspace,refresh);
 setupWorkflows(()=>workspace,()=>agentId,job=>navigate('chat',job.conversationId),refresh,()=>{signature='';render();});
 
 setupAudit(()=>view);

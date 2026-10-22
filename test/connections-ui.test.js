@@ -1,0 +1,36 @@
+import {newPageWithoutTutorials} from '../tests/browser-page.js';
+import {test,expect} from 'bun:test';
+import {EventEmitter} from 'node:events';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {chromium} from 'playwright';
+import {createApp} from '../server.js';
+import {defaults} from '../public/profile.js';
+
+test('Connections creates, edits and tests requests through the browser at desktop and mobile widths',async()=>{
+ const directory=mkdtempSync(join(tmpdir(),'odwyn-connections-ui-')),password='test-password-long-enough',codex=Object.assign(new EventEmitter(),{request:async()=>({account:null}),stop(){}});let app;
+ const fixture=Bun.serve({hostname:'127.0.0.1',port:0,fetch:async request=>Response.json({method:request.method,body:await request.text()})});
+ const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
+ app=createApp({directory,user:'owner',password,origin:server.url.origin,providerOptions:{codex},browser:{close:async()=>{}}});
+ const agent=app.runtime.state.agents[0];app.runtime.state.globalProvider.configured=agent.provider.configured=true;app.runtime.state.customization=agent.customization={...defaults,name:'Connection tester'};app.runtime.changed();
+ const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password},viewport:{width:1100,height:800}}),page=await newPageWithoutTutorials(context),errors=[];
+ page.setDefaultTimeout(7000);page.on('pageerror',error=>errors.push(error.message));
+ try{
+  await page.goto(server.url.href);await page.locator('#tools-open').click();await page.locator('[data-view=connections]').click();await page.getByRole('heading',{name:'Connections',exact:true}).waitFor();
+  await page.locator('#connection-new').click();const form=page.locator('#connection-form');
+  await form.locator('[name=name]').fill('Create <ticket>');await form.locator('[name=url]').fill(fixture.url.href);await form.locator('[name=httpMethod]').selectOption('POST');await form.locator('[name=body]').fill('{"title":"{{inputs.title}}"}');
+  await form.locator('[name=auth]').selectOption('bearer');await form.locator('[name=token]').fill('ui-secret-token');await form.locator('.primary-button').click();await page.locator('#connection-editor').waitFor({state:'hidden'});
+  expect(app.runtime.state.connections).toHaveLength(1);expect(await page.locator('.workflow-row h3').textContent()).toBe('Create <ticket>');
+  await page.locator('[data-connection-edit]').click();expect(await form.locator('[name=token]').inputValue()).toBe('');expect(await form.locator('[name=headers]').inputValue()).toBe('');await form.locator('.primary-button').click();await page.locator('#connection-editor').waitFor({state:'hidden'});
+  await page.locator('[data-connection-test]').click();await page.locator('#connection-test-form [name=inputs]').fill('{"title":"Browser test"}');await page.locator('#connection-test-form .primary-button').click();await page.waitForFunction(()=>document.querySelector('#connection-result').textContent.includes('Browser test'));
+  expect(await page.locator('#connection-result').textContent()).toContain('200');await page.locator('[data-connection-test-close]').click();
+  await page.locator('#connection-new').click();await form.locator('[name=type]').selectOption('graphql');await form.locator('[name=name]').fill('Graph');await form.locator('[name=url]').fill(fixture.url.href);await form.locator('[name=query]').fill('query { tickets { id } }');await form.locator('.primary-button').click();await page.locator('#connection-editor').waitFor({state:'hidden'});
+  expect(app.runtime.state.connections).toHaveLength(2);
+  await page.locator('#connection-new').click();await form.locator('[name=type]').selectOption('mcp');await form.locator('[name=name]').fill('Atlassian');await form.locator('[name=url]').fill('https://mcp.atlassian.com/v2/mcp');await form.locator('[name=auth]').selectOption('oauth');
+  for(const width of [375,1100]){await page.setViewportSize({width,height:800});const bounds=await page.locator('#connection-editor').boundingBox();expect(bounds.width).toBeLessThanOrEqual(width);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:join(import.meta.dir,'../artifacts/connections-editor-'+width+'.png')});}
+  await form.locator('.primary-button').click();await page.locator('#connection-editor').waitFor({state:'hidden'});expect(await page.locator('[data-connection-authorize]').count()).toBe(1);await page.screenshot({path:join(import.meta.dir,'../artifacts/connections-list.png')});
+  await page.locator('[data-library-search=connections]').fill('graphql');expect(await page.locator('.workflow-row').count()).toBe(1);expect(await page.locator('.workflow-row h3').textContent()).toBe('Graph');
+  expect(errors).toEqual([]);
+ }finally{await browser.close();await app.close();server.stop(true);fixture.stop(true);rmSync(directory,{recursive:true,force:true});}
+},30000);
