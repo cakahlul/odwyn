@@ -83,6 +83,12 @@ test('connection API hides secrets, persists settings and rejects cross-origin w
   const saved=await request('/api/connections','POST',{name:'Tickets',type:'rest',url:'https://example.com',token:'secret-example-token'});
   expect(saved.status).toBe(201);const connection=await saved.json();expect(connection.apiKey).toBeUndefined();
   const state=await(await request('/api/state')).text();expect(state).not.toContain('secret-example-token');
+  const edit=await request('/api/connections/'+connection.id+'/headers');expect(edit.status).toBe(200);
+  expect(await edit.json()).toEqual({Authorization:'Bearer secret-example-token'});
+  expect(edit.headers.get('cache-control')).toBe('no-store');
+  expect(await(await request('/api/connections/'+connection.id)).text()).not.toContain('secret-example-token');
+  expect((await app.fetch(new Request(origin+'/api/connections/'+connection.id+'/headers'))).status).toBe(401);
+  expect((await app.fetch(new Request(origin+'/api/connections/'+connection.id+'/headers',{headers:{authorization:'Basic '+btoa('owner:test-password-long-enough'),'sec-fetch-site':'cross-site'}}))).status).toBe(403);
   expect((await request('/api/connections/'+connection.id,'PUT',{...connection,name:'Renamed'})).status).toBe(200);
   expect(JSON.parse(app.runtime.state.connections[0].apiKey).headers.Authorization).toBe('Bearer secret-example-token');
   expect((await app.fetch(new Request(origin+'/api/connections',{method:'POST',headers:{authorization:'Basic '+btoa('owner:test-password-long-enough'),origin:'https://evil.test'},body:'{}'}))).status).toBe(403);

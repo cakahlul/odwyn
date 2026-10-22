@@ -11,7 +11,7 @@ import { validateWorkflow, validateSkill, importSkill } from './workflows.js';
 import { validateProfile, defaults, profileTextLimit, ownerPreferenceKeys, currencies, validateAppearance } from './public/profile.js';
 import { fetchImage } from './proxy.js';
 import { imageMime } from './files.js';
-import {validateConnection,publicConnection,executeConnection,mcpOAuthProvider} from './connections.js';
+import {validateConnection,publicConnection,connectionSecrets,executeConnection,mcpOAuthProvider} from './connections.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {SSEClientTransport} from '@modelcontextprotocol/sdk/client/sse.js';
 
@@ -397,10 +397,14 @@ export function createApp(options = {}) {
           await finishConnectionLogin(url);
           return new Response(null,{status:303,headers:{...headers,location:origin+'/'+(options.workspaceId?'?workspace='+encodeURIComponent(options.workspaceId):'')+'#connections'}});
         }
-        const connectionMatch=pathname.match(/^\/api\/connections(?:\/([a-f0-9-]{36}))?(?:\/(test|authorize))?$/);
+        const connectionMatch=pathname.match(/^\/api\/connections(?:\/([a-f0-9-]{36}))?(?:\/(test|authorize|headers))?$/);
         if(connectionMatch){
           const [,id,action]=connectionMatch,existing=store.state.connections.find(row=>row.id===id);
           if(id&&!existing)return response({error:'Connection not found.'},404);
+          if(req.method==='GET'&&id&&action==='headers'){
+            if(req.headers.get('sec-fetch-site')==='cross-site'||req.headers.has('origin')&&!allowedOrigin(req.headers.get('origin'),origin))return response({error:'Request origin rejected.'},403);
+            return response(connectionSecrets(existing).headers||{});
+          }
           if(req.method==='GET'&&!action)return response(id?publicConnection(existing):store.state.connections.map(publicConnection));
           if(req.method==='POST'&&id&&action==='authorize'){
             if(existing.type!=='mcp'||!existing.oauth||!existing.enabled)throw Error('Enable OAuth on a remote MCP connection first.');
