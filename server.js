@@ -61,6 +61,26 @@ export function createApp(options = {}) {
   const connectionLogins=new Map();
   const connectionRedirect=mcpOAuthOrigin.origin+'/api/connections/oauth/callback'+(options.workspaceId?'?workspace='+encodeURIComponent(options.workspaceId):'');
   runtime.connectionOptions=connection=>connection.oauth?{authProvider:mcpOAuthProvider(connection,connectionRedirect,()=>runtime.changed(),{state:randomUUID()})}:{};
+  async function finishConnectionLogin(url){
+    const state=url.searchParams.get('state'),pending=connectionLogins.get(state);
+    connectionLogins.delete(state);
+    if(!pending||pending.expires<Date.now())throw Error('MCP sign-in expired. Start again from Connections.');
+    const connection=store.state.connections.find(row=>row.id===pending.id);
+    if(!connection||!connection.enabled||connection.apiKey!==pending.credentials)throw Error('Connection changed. Start sign-in again.');
+    if(url.searchParams.get('error')||!url.searchParams.get('code'))throw Error('MCP sign-in was not completed.');
+    const provider=mcpOAuthProvider(connection,connectionRedirect,()=>runtime.changed(),pending);
+    const Transport=connection.transport==='sse'?SSEClientTransport:StreamableHTTPClientTransport;
+    const transport=new Transport(new URL(connection.url),{authProvider:provider,fetch:(url,init={})=>fetch(url,{...init,signal:AbortSignal.timeout(connection.timeoutMs)})});
+    try{await transport.finishAuth(url.searchParams.get('code'));}finally{await transport.close().catch(()=>{});}
+  }
+  browser.onOAuthCallback=async url=>{
+    const expected=new URL(connectionRedirect);
+    if(url.origin!==expected.origin||url.pathname!==expected.pathname||url.searchParams.get('workspace')!==expected.searchParams.get('workspace')||!connectionLogins.has(url.searchParams.get('state')))return null;
+    try{
+      await finishConnectionLogin(url);
+      return new Response('<h1>MCP connected</h1><p>Sign-in completed. You can return to Connections or continue your task.</p>',{headers:{...headers,'content-type':'text/html; charset=utf-8'}});
+    }catch{return new Response('MCP sign-in failed or expired. Start again from Connections.',{status:400,headers});}
+  };
   const logins = new Map();
   function watchLogin(agent, provider) {
     provider.on('notification', ({ method, params }) => {
@@ -374,16 +394,7 @@ export function createApp(options = {}) {
           return new Response(image.body, { headers:{ ...headers, 'content-type':image.type, 'cache-control':'private, max-age=3600' } });
         }
         if(pathname==='/api/connections/oauth/callback'&&req.method==='GET'){
-          const state=url.searchParams.get('state'),pending=connectionLogins.get(state);
-          connectionLogins.delete(state);
-          if(!pending||pending.expires<Date.now())throw Error('MCP sign-in expired. Start again from Connections.');
-          const connection=store.state.connections.find(row=>row.id===pending.id);
-          if(!connection||!connection.enabled||connection.apiKey!==pending.credentials)throw Error('Connection changed. Start sign-in again.');
-          if(url.searchParams.get('error')||!url.searchParams.get('code'))throw Error('MCP sign-in was not completed.');
-          const provider=mcpOAuthProvider(connection,connectionRedirect,()=>runtime.changed(),pending);
-          const Transport=connection.transport==='sse'?SSEClientTransport:StreamableHTTPClientTransport;
-          const transport=new Transport(new URL(connection.url),{authProvider:provider,fetch:(url,init={})=>fetch(url,{...init,signal:AbortSignal.timeout(connection.timeoutMs)})});
-          try{await transport.finishAuth(url.searchParams.get('code'));}finally{await transport.close().catch(()=>{});}
+          await finishConnectionLogin(url);
           return new Response(null,{status:303,headers:{...headers,location:origin+'/'+(options.workspaceId?'?workspace='+encodeURIComponent(options.workspaceId):'')+'#connections'}});
         }
         const connectionMatch=pathname.match(/^\/api\/connections(?:\/([a-f0-9-]{36}))?(?:\/(test|authorize))?$/);
@@ -393,13 +404,16 @@ export function createApp(options = {}) {
           if(req.method==='GET'&&!action)return response(id?publicConnection(existing):store.state.connections.map(publicConnection));
           if(req.method==='POST'&&id&&action==='authorize'){
             if(existing.type!=='mcp'||!existing.oauth||!existing.enabled)throw Error('Enable OAuth on a remote MCP connection first.');
+            if(runtime.activeJobs().length)throw Error('Stop the active task before opening MCP sign-in.');
             for(const [state,pending] of connectionLogins)if(pending.expires<Date.now()||pending.id===id)connectionLogins.delete(state);
             const pending={id,state:randomUUID(),expires:Date.now()+10*60_000};
             const authProvider=mcpOAuthProvider(existing,connectionRedirect,()=>runtime.changed(),pending);
             try{await executeConnection(existing,{}, {authProvider});return response({connected:true});}
             catch(error){if(!pending.url)throw error;}
             pending.credentials=existing.apiKey;connectionLogins.set(pending.state,pending);
-            return response({authorizationUrl:pending.url});
+            await browser.action({action:'navigate',url:pending.url},()=>!runtime.activeJobs().length);
+            runtime.changed();
+            return response({authorizationUrl:pending.url,browser:true});
           }
           if(req.method==='POST'&&id&&action==='test'){
             const input=await json(req,90000);

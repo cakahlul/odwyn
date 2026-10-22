@@ -230,3 +230,21 @@ test('reads recover from navigation, explain visual-only pages, and replace cras
     expect(browser.context).toBe(context);expect(browser.page).not.toBe(page);expect(recovered.text).toContain('blank page');
   }finally{await browser.close();rmSync(directory,{recursive:true,force:true});}
 },15_000);
+
+test('managed OAuth handles only approved top-level callbacks and keeps private requests blocked',async()=>{
+ const directory=mkdtempSync(join(tmpdir(),'odwyn-browser-oauth-'));let requests=0,callbacks=0;
+ const local=Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>{requests++;return new Response('private service');}});
+ const browser=new Browser({directory});
+ const callback=local.url.origin+'/api/connections/oauth/callback?state=active&code=test-code';
+ browser.onOAuthCallback=async url=>{
+  callbacks++;
+  return url.href===callback?new Response('<h1>MCP connected</h1>',{headers:{'content-type':'text/html'}}):null;
+ };
+ try{
+  await browser.action({action:'read'});
+  await browser.page.goto(callback);expect(await browser.page.textContent('body')).toContain('MCP connected');expect(callbacks).toBe(1);expect(requests).toBe(0);
+  await browser.page.goto(callback.replace('state=active','state=unknown')).catch(()=>{});expect(callbacks).toBe(2);expect(requests).toBe(0);
+  await browser.page.goto(local.url.origin+'/private').catch(()=>{});expect(callbacks).toBe(2);expect(requests).toBe(0);
+  await browser.page.setContent('<iframe src="'+callback+'"></iframe>');expect(callbacks).toBe(2);expect(requests).toBe(0);
+ }finally{await browser.close();local.stop(true);rmSync(directory,{recursive:true,force:true});}
+},15000);

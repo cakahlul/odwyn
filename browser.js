@@ -58,6 +58,14 @@ export class Browser {
       const context = await launching;
       if (generation !== this.generation) { await context.close(); throw new Error('Browser operation interrupted.'); }
       this.context = context;
+      await context.route('**/api/connections/oauth/callback?*',async route=>{
+        const request=route.request();
+        if(request.method()==='GET'&&request.isNavigationRequest()&&!request.frame().parentFrame()&&this.onOAuthCallback){
+          const response=await this.onOAuthCallback(new URL(request.url()));
+          if(response)return route.fulfill({status:response.status,headers:Object.fromEntries(response.headers),body:await response.text()});
+        }
+        return route.continue();
+      });
       await this.onContext?.(context);
       this.context.setDefaultTimeout(12_000);
       this.context.setDefaultNavigationTimeout(30_000);

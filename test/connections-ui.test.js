@@ -31,6 +31,11 @@ test('Connections creates, edits and tests requests through the browser at deskt
   await page.locator('#connection-new').click();await form.locator('[name=type]').selectOption('mcp');await form.locator('[name=name]').fill('Atlassian');await form.locator('[name=url]').fill('https://mcp.atlassian.com/v2/mcp');await form.locator('[name=auth]').selectOption('oauth');
   for(const width of [375,1100]){await page.setViewportSize({width,height:800});const bounds=await page.locator('#connection-editor').boundingBox();expect(bounds.width).toBeLessThanOrEqual(width);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:join(import.meta.dir,'../artifacts/connections-editor-'+width+'.png')});}
   await form.locator('.primary-button').click();await page.locator('#connection-editor').waitFor({state:'hidden'});expect(await page.locator('[data-connection-authorize]').count()).toBe(1);await page.screenshot({path:join(import.meta.dir,'../artifacts/connections-list.png')});
+  const odwynUrl=page.url();
+  await page.route('**/api/connections/*/authorize',route=>route.fulfill({json:{browser:true,authorizationUrl:'https://example.com/authorize'}}));
+  await page.locator('[data-connection-authorize]').click();await page.waitForFunction(()=>!document.body.classList.contains('browser-closed'));
+  expect(page.url()).toBe(odwynUrl);expect(await page.locator('#browser-panel').evaluate(node=>node.inert)).toBe(false);
+  await page.unroute('**/api/connections/*/authorize');await page.locator('#browser-close').click();
   await page.locator('[data-library-search=connections]').fill('graphql');expect(await page.locator('.workflow-row').count()).toBe(1);expect(await page.locator('.workflow-row h3').textContent()).toBe('Graph');
   await page.locator('[data-library-search=connections]').fill('');
   await page.locator('#connection-import').click();await page.locator('#connection-curl').fill('curl https://example.com -k');await page.locator('#connection-import-form .primary-button').click();

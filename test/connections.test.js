@@ -4,6 +4,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {validateConnection,publicConnection,executeConnection,mcpOAuthProvider} from '../connections.js';
 import {openStore} from '../store.js';
+import {Browser} from '../browser.js';
 
 test('connections validate destinations and keep credentials encrypted across restarts',()=>{
  const directory=mkdtempSync(join(tmpdir(),'odwyn-connections-'));let store=openStore(directory);
@@ -109,12 +110,12 @@ test('connection tool requires approval, redacts responses and respects workflow
  }finally{await runtime.close();store.close();server.stop(true);rmSync(directory,{recursive:true,force:true});}
 });
 
-for(const [callbackOrigin,workspaceId] of [[undefined,undefined],['http://127.0.0.1:4317',undefined],['http://127.0.0.1:4317','research']])test('MCP OAuth registers, validates state, exchanges a code and persists encrypted tokens: '+(callbackOrigin||'public callback')+(workspaceId?' workspace':''),async()=>{
- const sessions=[];let tokenRequests=0,registeredRedirect;
+for(const [callbackOrigin,workspaceId,managed] of [[undefined,undefined],['http://127.0.0.1:4317',undefined],['http://127.0.0.1:4317','research'],['http://127.0.0.1:4317','research',true]])test('MCP OAuth registers, validates state, exchanges a code and persists encrypted tokens: '+(callbackOrigin||'public callback')+(workspaceId?' workspace':'')+(managed?' managed browser':''),async()=>{
+ const sessions=[];let tokenRequests=0,registeredRedirect;const navigations=[];let browser={action:async input=>{navigations.push(input);},close:async()=>{}};
  const oauth=Bun.serve({port:0,fetch:async request=>{
   const base=`http://localhost:${oauth.port}`,url=new URL(request.url);
   if(url.pathname==='/.well-known/oauth-protected-resource/mcp')return Response.json({resource:base+'/mcp',authorization_servers:[base]});
-  if(url.pathname==='/.well-known/oauth-authorization-server')return Response.json({issuer:base,authorization_endpoint:base+'/authorize',token_endpoint:base+'/token',registration_endpoint:base+'/register',response_types_supported:['code'],grant_types_supported:['authorization_code','refresh_token'],code_challenge_methods_supported:['S256'],token_endpoint_auth_methods_supported:['none']});
+  if(url.pathname==='/.well-known/oauth-authorization-server')return Response.json({issuer:base,authorization_endpoint:'https://example.com/authorize',token_endpoint:base+'/token',registration_endpoint:base+'/register',response_types_supported:['code'],grant_types_supported:['authorization_code','refresh_token'],code_challenge_methods_supported:['S256'],token_endpoint_auth_methods_supported:['none']});
   if(url.pathname==='/register'){const input=await request.json();registeredRedirect=input.redirect_uris[0];return Response.json({...input,client_id:'odwyn-test-client'},{status:201});}
   if(url.pathname==='/token'){const data=new URLSearchParams(await request.text());if(data.get('code')!=='test-code'||!data.get('code_verifier'))return Response.json({error:'invalid_grant'},{status:400});tokenRequests++;return Response.json({access_token:'oauth-access-private',refresh_token:'oauth-refresh-private',token_type:'Bearer',expires_in:3600});}
   if(url.pathname==='/mcp'){
@@ -124,21 +125,35 @@ for(const [callbackOrigin,workspaceId] of [[undefined,undefined],['http://127.0.
   }
   return new Response(null,{status:404});
  }});
- const directory=mkdtempSync(join(tmpdir(),'odwyn-oauth-')),origin='https://odwyn.example.com',provider=new Provider(),options={directory,user:'owner',password:'test-password-long-enough',origin,mcpOAuthOrigin:callbackOrigin,workspaceId,codex:provider};let app=createApp(options);
+ const directory=mkdtempSync(join(tmpdir(),'odwyn-oauth-'));
+ if(managed)browser=new Browser({directory,onContext:async context=>{await context.route('https://example.com/authorize**',route=>{
+  const callback=new URL(registeredRedirect);callback.searchParams.set('state',new URL(route.request().url()).searchParams.get('state'));callback.searchParams.set('code','test-code');
+  return route.fulfill({contentType:'text/html',body:'<h1>Atlassian sign-in</h1><a href="'+String(callback).replaceAll('&','&amp;')+'">Approve</a>'});
+ });}});
+ const origin='https://odwyn.example.com',provider=new Provider(),options={directory,user:'owner',password:'test-password-long-enough',origin,mcpOAuthOrigin:callbackOrigin||origin,workspaceId,codex:provider,browser};let app=createApp(options);
  const request=(path,method='GET',body)=>app.fetch(new Request(origin+path,{method,headers:{authorization:'Basic '+btoa('owner:test-password-long-enough'),origin,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}));
  try{
   const connection=await(await request('/api/connections','POST',{name:'OAuth MCP',type:'mcp',url:`http://localhost:${oauth.port}/mcp`,oauth:true})).json();
-  const start=await request('/api/connections/'+connection.id+'/authorize','POST',{}),result=await start.json();expect(start.status).toBe(200);expect(result.authorizationUrl).toBeString();
+  app.runtime.active={id:'busy'};expect((await request('/api/connections/'+connection.id+'/authorize','POST',{})).status).toBe(400);expect(navigations).toHaveLength(0);app.runtime.active=null;
+  const start=await request('/api/connections/'+connection.id+'/authorize','POST',{}),result=await start.json();expect(start.status).toBe(200);expect(result.authorizationUrl).toBeString();expect(result.browser).toBe(true);if(!managed)expect(navigations).toEqual([{action:'navigate',url:result.authorizationUrl}]);
   expect(registeredRedirect).toBe((callbackOrigin||origin)+'/api/connections/oauth/callback'+(workspaceId?'?workspace='+workspaceId:''));const authorization=new URL(result.authorizationUrl);expect(authorization.searchParams.get('code_challenge_method')).toBe('S256');
   expect((await request('/api/connections/oauth/callback?state=wrong&code=test-code')).status).toBe(400);expect(tokenRequests).toBe(0);
   const callbackUrl=new URL(registeredRedirect);callbackUrl.searchParams.set('state',authorization.searchParams.get('state'));callbackUrl.searchParams.set('code','test-code');
-  const listener=Bun.serve({hostname:'127.0.0.1',port:0,fetch:app.fetch});let callback;
-  try{
-   const localCallback=new URL(callbackUrl);localCallback.host='127.0.0.1:'+listener.port;localCallback.protocol='http:';
-   expect((await fetch(localCallback,{redirect:'manual'})).status).toBe(401);
-   callback=await fetch(localCallback,{redirect:'manual',headers:{authorization:'Basic '+btoa('owner:test-password-long-enough')}});
-  }finally{listener.stop(true);}
-  expect(callback.status).toBe(303);expect(callback.headers.get('location')).toBe(origin+'/'+(workspaceId?'?workspace='+workspaceId:'')+'#connections');expect(tokenRequests).toBe(1);
+  for(const invalid of [String(callbackUrl).replace('/oauth/callback','/oauth/other'),String(callbackUrl).replace('state=','state=wrong'),String(callbackUrl).replace(new URL(registeredRedirect).host,'other.test'),String(callbackUrl).replace('workspace=research','workspace=other')].filter(value=>value!==String(callbackUrl)))expect(await browser.onOAuthCallback(new URL(invalid))).toBeNull();
+  if(managed){
+   expect(browser.page.url()).toBe(result.authorizationUrl);const screen=await browser.action({action:'read'});
+   const connected=await browser.action({action:'click',ref:screen.elements.find(element=>element.label==='Approve').ref});
+   expect(connected.text).toContain('MCP connected');expect(tokenRequests).toBe(1);
+   expect(await browser.onOAuthCallback(callbackUrl)).toBeNull();
+  }else{
+   const listener=Bun.serve({hostname:'127.0.0.1',port:0,fetch:app.fetch});let callback;
+   try{
+    const localCallback=new URL(callbackUrl);localCallback.host='127.0.0.1:'+listener.port;localCallback.protocol='http:';
+    expect((await fetch(localCallback,{redirect:'manual'})).status).toBe(401);
+    callback=await fetch(localCallback,{redirect:'manual',headers:{authorization:'Basic '+btoa('owner:test-password-long-enough')}});
+   }finally{listener.stop(true);}
+   expect(callback.status).toBe(303);expect(callback.headers.get('location')).toBe(origin+'/'+(workspaceId?'?workspace='+workspaceId:'')+'#connections');expect(tokenRequests).toBe(1);
+  }
   expect((await app.fetch(new Request(origin+'/api/connections/'+connection.id+'/authorize',{method:'POST',headers:{authorization:'Basic '+btoa('owner:test-password-long-enough'),origin:'http://127.0.0.1:4317'}}))).status).toBe(403);
   expect((await request('/api/connections/'+connection.id+'/test','POST',{})).status).toBe(200);
   expect(await(await request('/api/state')).text()).not.toContain('oauth-access-private');

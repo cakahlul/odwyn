@@ -1,3 +1,4 @@
+import {setBrowserVisible} from './browser-ui.js';
 import {importCurl} from './curl-import.js';
 import {$,esc,icon,api,toast,handleError} from './ui.js';
 import {libraryList} from './workflows-ui.js';
@@ -72,7 +73,7 @@ export function setupConnections(getState,refresh){
   if(button.dataset.connectionEdit){open(connection);return;}
   if(button.dataset.connectionTest){testing=connection;testForm.reset();testForm.elements.inputs.value=testForm.elements.arguments.value='{}';$('#connection-inputs').hidden=connection.type==='mcp';$('#connection-mcp-operation').hidden=connection.type!=='mcp';$('#connection-test-heading').textContent=connection.name;$('#connection-result').textContent='';testDialog.showModal();return;}
   try{
-   if(button.dataset.connectionAuthorize){busy=true;button.disabled=true;const result=await api('/api/connections/'+id+'/authorize',{});if(result.authorizationUrl)location.assign(result.authorizationUrl);else{await refresh();toast('MCP connected.');}}
+   if(button.dataset.connectionAuthorize){busy=true;button.disabled=true;const result=await api('/api/connections/'+id+'/authorize',{});if(result.browser){setBrowserVisible(true);toast('Sign-in opened in Odwyn browser. Ask your agent to continue, or take browser control.');}else{await refresh();toast('MCP connected.');}}
    if(button.dataset.connectionDelete&&confirm(`Delete “${connection.name}”? Skills and workflows using it will need another connection.`)){busy=true;await api('/api/connections/'+id,{},'DELETE');await refresh();toast('Connection deleted.');}
   }catch(error){handleError(error);}finally{busy=false;button.disabled=false;}
  });
