@@ -10,7 +10,8 @@ import {defaults} from '../public/profile.js';
 
 test('Connections creates, edits and tests requests through the browser at desktop and mobile widths',async()=>{
  const directory=mkdtempSync(join(tmpdir(),'odwyn-connections-ui-')),password='test-password-long-enough',codex=Object.assign(new EventEmitter(),{request:async()=>({account:null}),stop(){}});let app;
- const fixture=Bun.serve({hostname:'127.0.0.1',port:0,fetch:async request=>Response.json({method:request.method,body:await request.text()})});
+ let requestCount=0;
+ const fixture=Bun.serve({hostname:'127.0.0.1',port:0,fetch:async request=>{requestCount++;return Response.json({method:request.method,body:await request.text()});}});
  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
  app=createApp({directory,user:'owner',password,origin:server.url.origin,providerOptions:{codex},browser:{close:async()=>{}}});
  const agent=app.runtime.state.agents[0];app.runtime.state.globalProvider.configured=agent.provider.configured=true;app.runtime.state.customization=agent.customization={...defaults,name:'Connection tester'};app.runtime.changed();
@@ -31,6 +32,19 @@ test('Connections creates, edits and tests requests through the browser at deskt
   for(const width of [375,1100]){await page.setViewportSize({width,height:800});const bounds=await page.locator('#connection-editor').boundingBox();expect(bounds.width).toBeLessThanOrEqual(width);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:join(import.meta.dir,'../artifacts/connections-editor-'+width+'.png')});}
   await form.locator('.primary-button').click();await page.locator('#connection-editor').waitFor({state:'hidden'});expect(await page.locator('[data-connection-authorize]').count()).toBe(1);await page.screenshot({path:join(import.meta.dir,'../artifacts/connections-list.png')});
   await page.locator('[data-library-search=connections]').fill('graphql');expect(await page.locator('.workflow-row').count()).toBe(1);expect(await page.locator('.workflow-row h3').textContent()).toBe('Graph');
+  await page.locator('[data-library-search=connections]').fill('');
+  await page.locator('#connection-import').click();await page.locator('#connection-curl').fill('curl https://example.com -k');await page.locator('#connection-import-form .primary-button').click();
+  expect(await page.locator('#connection-import-error').textContent()).toContain('Unsupported cURL option');expect(app.runtime.state.connections).toHaveLength(3);
+  const beforeImport=requestCount;
+  await page.locator('#connection-curl').fill(`curl '${fixture.url.href}' -L -H 'Authorization: Bearer imported-secret' -H 'Content-Type: application/json' --data-raw '{"title":"Imported ticket"}'`);
+  await page.locator('#connection-import-form .primary-button').click();await page.locator('#connection-editor').waitFor({state:'visible'});
+  expect(await page.locator('#connection-curl').inputValue()).toBe('');expect(await form.locator('[name=httpMethod]').inputValue()).toBe('POST');expect(await form.locator('[name=headers]').inputValue()).toContain('imported-secret');
+  expect(await page.locator('#connection-import-warning').textContent()).toContain('Redirect following');expect(requestCount).toBe(beforeImport);expect(app.runtime.state.connections).toHaveLength(3);
+  await form.locator('[name=name]').fill('Imported request');await form.locator('.primary-button').click();await page.locator('#connection-editor').waitFor({state:'hidden'});
+  expect(app.runtime.state.connections).toHaveLength(4);expect(await form.locator('[name=headers]').inputValue()).toBe('');expect(requestCount).toBe(beforeImport);
+  const imported=app.runtime.state.connections.find(row=>row.name==='Imported request');expect(JSON.parse(imported.apiKey).headers.authorization).toBe('Bearer imported-secret');
+  await page.locator(`[data-connection-test="${imported.id}"]`).click();await page.locator('#connection-test-form .primary-button').click();await page.waitForFunction(()=>document.querySelector('#connection-result').textContent.includes('Imported ticket'));
+  expect(requestCount).toBe(beforeImport+1);await page.locator('[data-connection-test-close]').click();
   expect(errors).toEqual([]);
  }finally{await browser.close();await app.close();server.stop(true);fixture.stop(true);rmSync(directory,{recursive:true,force:true});}
 },30000);
