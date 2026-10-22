@@ -64,7 +64,15 @@ export function reviewArtifact(runtime,job,input){
 
 export function roomWorkContext(runtime,job){
   const room=runtime.conversation(job);if(room.kind!=='room')throw Error('This tool requires a room.');
-  return {requiredOutputs:room.governance?.outputs||[],ownerApproval:!!room.governance?.ownerApproval,artifacts:(room.artifacts||[]).map(({versions,...artifact})=>({...artifact,version:versions.at(-1)})),handoff:room.handoff?.package||null,proposal:room.discussion?.outcome};
+  const priorStages=[],seen=new Set([room.id]);let current=room;
+  while(room.roomWorkflowRunId&&current.handoff){
+    const source=runtime.state.conversations.find(item=>item.id===current.handoff.sourceRoomId&&item.roomWorkflowRunId===room.roomWorkflowRunId);
+    if(!source||seen.has(source.id))break;
+    seen.add(source.id);
+    if(current!==room)priorStages.unshift({roomId:source.id,title:source.title,proposalId:current.handoff.sourceProposalId,...current.handoff.package});
+    current=source;
+  }
+  return {requiredOutputs:room.governance?.outputs||[],ownerApproval:!!room.governance?.ownerApproval,artifacts:(room.artifacts||[]).map(({versions,...artifact})=>({...artifact,version:versions.at(-1)})),handoff:room.handoff?.package||null,priorStages,proposal:room.discussion?.outcome};
 }
 
 export function finalizeRoom(runtime,room,job){

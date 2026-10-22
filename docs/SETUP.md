@@ -82,6 +82,7 @@ See [.env.example](../.env.example) for the initial configuration. Settings save
 | --- | --- |
 | `ODWYN_USER`, `ODWYN_PASSWORD` | Owner Basic Auth. Password must be at least 16 characters. |
 | `PORT`, `ODWYN_ORIGIN` | Port defaults to `4317`; exact permitted origin for writes. |
+| `ODWYN_MCP_OAUTH_ORIGIN` | Optional MCP OAuth callback origin; defaults to `ODWYN_ORIGIN`. HTTP is allowed only for localhost/loopback. |
 | `ODWYN_DATA_DIR` | Persistent data directory; defaults to `data`. |
 | `ODWYN_CODEX_HOME` | Dedicated Codex sign-in and thread storage; defaults to `data/codex`. |
 | `ODWYN_PROVIDER`, `ODWYN_MODEL` | Initial provider and model. |

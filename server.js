@@ -28,6 +28,9 @@ export function createApp(options = {}) {
   const password = options.password || (process.env.ODWYN_PASSWORD ?? process.env.SIDEKICK_PASSWORD);
   if (!user || !password || password.length < 16) throw new Error('Set ODWYN_USER and an ODWYN_PASSWORD of at least 16 characters. Run bun run setup.');
   const origin = options.origin || (process.env.ODWYN_ORIGIN ?? process.env.SIDEKICK_ORIGIN) || `http://127.0.0.1:${process.env.PORT || 4317}`;
+  const callbackOrigin = options.mcpOAuthOrigin || process.env.ODWYN_MCP_OAUTH_ORIGIN;
+  const mcpOAuthOrigin = new URL(callbackOrigin || origin);
+  if (callbackOrigin && (mcpOAuthOrigin.username || mcpOAuthOrigin.password || mcpOAuthOrigin.pathname !== '/' || mcpOAuthOrigin.search || mcpOAuthOrigin.hash || !(mcpOAuthOrigin.protocol === 'https:' || mcpOAuthOrigin.protocol === 'http:' && ['localhost','127.0.0.1','[::1]'].includes(mcpOAuthOrigin.hostname)))) throw new Error('ODWYN_MCP_OAUTH_ORIGIN must be an HTTPS origin or HTTP localhost origin, without a path.');
   const store = openStore(directory);
   const workspace = join(directory, 'workspace');
   mkdirSync(workspace, { recursive: true, mode: 0o700 });
@@ -56,7 +59,7 @@ export function createApp(options = {}) {
   });
   runtime = new Runtime({store,codex,browser,workspace,workspaceId:options.workspaceId,model:store.state.provider.model});
   const connectionLogins=new Map();
-  const connectionRedirect=origin+'/api/connections/oauth/callback'+(options.workspaceId?'?workspace='+encodeURIComponent(options.workspaceId):'');
+  const connectionRedirect=mcpOAuthOrigin.origin+'/api/connections/oauth/callback'+(options.workspaceId?'?workspace='+encodeURIComponent(options.workspaceId):'');
   runtime.connectionOptions=connection=>connection.oauth?{authProvider:mcpOAuthProvider(connection,connectionRedirect,()=>runtime.changed(),{state:randomUUID()})}:{};
   const logins = new Map();
   function watchLogin(agent, provider) {
@@ -381,7 +384,7 @@ export function createApp(options = {}) {
           const Transport=connection.transport==='sse'?SSEClientTransport:StreamableHTTPClientTransport;
           const transport=new Transport(new URL(connection.url),{authProvider:provider,fetch:(url,init={})=>fetch(url,{...init,signal:AbortSignal.timeout(connection.timeoutMs)})});
           try{await transport.finishAuth(url.searchParams.get('code'));}finally{await transport.close().catch(()=>{});}
-          return new Response(null,{status:303,headers:{...headers,location:'/'+(options.workspaceId?'?workspace='+encodeURIComponent(options.workspaceId):'')+'#connections'}});
+          return new Response(null,{status:303,headers:{...headers,location:origin+'/'+(options.workspaceId?'?workspace='+encodeURIComponent(options.workspaceId):'')+'#connections'}});
         }
         const connectionMatch=pathname.match(/^\/api\/connections(?:\/([a-f0-9-]{36}))?(?:\/(test|authorize))?$/);
         if(connectionMatch){

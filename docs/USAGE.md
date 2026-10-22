@@ -48,6 +48,16 @@ For REST, choose a method and JSON, raw text, URL-encoded form, or multipart for
 
 For Atlassian, choose **MCP server → Streamable HTTP**, enter `https://mcp.atlassian.com/v2/mcp`, choose **MCP OAuth sign-in**, save, then select **Sign in**. Your configured `ODWYN_ORIGIN` must be the browser-accessible Odwyn address. Your Atlassian administrator may need to allow that domain. See [Atlassian's setup guide](https://support.atlassian.com/atlassian-ai-gateway/docs/get-started-with-the-atlassian-remote-mcp-server/). Other MCP servers may use bearer/custom headers, legacy SSE, or a trusted local executable using stdio.
 
+To use a localhost MCP OAuth callback while keeping the public UI, set these separately and restart Odwyn:
+
+```dotenv
+ODWYN_ORIGIN=https://odwyn.example.com
+ODWYN_MCP_OAUTH_ORIGIN=http://127.0.0.1:4317
+```
+
+The callback uses Odwyn's existing listener, so its port must match `PORT` (default `4317`), or a local forwarded port. Sign in from your ordinary browser. If Odwyn runs on a remote host, first run `ssh -N -L 4317:127.0.0.1:4317 user@your-odwyn-host` on your browser computer and keep it running during sign-in. The localhost callback may prompt for your Odwyn username/password before returning you to the public UI. Changing the callback clears the previous OAuth client registration and tokens when its saved redirect URI differs; choose **Sign in** again. Atlassian [allows localhost callbacks by default](https://support.atlassian.com/security-and-access-policies/docs/available-atlassian-mcp-server-domains/), but administrators can remove that allowance. This does not change Codex's separate MCP credentials or the managed browser's private-address restrictions.
+
+
 Select **Test** to supply runtime inputs and inspect response status, headers, and data. For MCP, **Explore tools → Run** discovers tool names and argument schemas; enter a tool name and JSON arguments to execute it. Tests execute immediately and can change external data.
 
 In chat or rooms, ask “Use the Atlassian connection to summarize PROJ-123.” Skills can refer to connections by name. For an agent workflow step, enable **Connections** under **Allowed tools** and describe the saved request or MCP tool to call. Agents discover connections through `odwyn_connection`; calls follow the task's approval mode. Starting a local MCP process also requires approval unless **Always approve** is selected. Stop active tasks before editing or deleting connections.

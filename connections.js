@@ -139,6 +139,10 @@ export async function withMcp(connection,options,run){
 export function mcpOAuthProvider(connection,redirectUrl,save,pending){
  const secret=connectionSecrets(connection);secret.oauth||={};const oauth=secret.oauth;
  const persist=()=>{connection.apiKey=JSON.stringify(secret);save();};
+ if(oauth.client?.redirect_uris&&!oauth.client.redirect_uris.includes(redirectUrl)){
+  for(const field of ['client','tokens','verifier'])delete oauth[field];
+  persist();
+ }
  return {
   redirectUrl,clientMetadata:{client_name:'Odwyn',redirect_uris:[redirectUrl],grant_types:['authorization_code','refresh_token'],response_types:['code'],token_endpoint_auth_method:'none'},
   state:()=>pending.state,

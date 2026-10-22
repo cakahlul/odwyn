@@ -8,6 +8,7 @@ import {openStore,updateRoom,createRoom,recoverJobs} from '../store.js';
 import {Runtime} from '../runtime.js';
 import {validateWorkflow} from '../workflows.js';
 import {roomCompletion} from '../public/room-policy.js';
+import {roomWorkContext} from '../room-work.js';
 class Agent extends EventEmitter{child={};replies=[];calls=[];async request(method,params){this.calls.push({method,params});if(method==='account/read')return {account:{type:'chatgpt'}};if(method.startsWith('thread/'))return {thread:{id:params.threadId||randomUUID()}};return {turn:{id:randomUUID()}};}respond(id,reply){this.replies.push(reply);}reject(){}}
 
 for(const autoAdvance of [false,true])for(const names of [['Grooming','Planning','Execution','Testing','Release'],['Research','Editorial review']])test(`room workflow runs ${names.join(' → ')} with ${autoAdvance?'automatic':'explicit owner'} handoffs`,async()=>{
@@ -36,6 +37,13 @@ for(const autoAdvance of [false,true])for(const names of [['Grooming','Planning'
         expect(incoming).toMatchObject({id:previousArtifact.id,versionId:previousArtifact.versions.at(-1).id,text:`Reviewed ${names[i-1]} package`});
         const input=provider.calls.findLast(call=>call.method==='turn/start').params.input[0].text;
         expect(input).toContain(incoming.id);expect(input).toContain(incoming.versionId);expect(input).toContain(incoming.text);
+        expect(work.priorStages).toHaveLength(i-1);
+        if(i>1){
+          expect(work.priorStages[0].title).toBe('Build a reviewed result · '+names[0]);
+          expect(work.priorStages[0].artifacts[0].text).toBe(`Reviewed ${names[0]} package`);
+          expect(input).toContain(`Reviewed ${names[0]} package`);
+        }
+        expect(instructions).toContain('Continue established work rather than restart discovery');
       }
       // First turn routes to author; author drafts, designated reviewer signs exact bytes.
       await call('odwyn_room_next',{agentId:'peer',reason:'Prepare the required package'});runtime.finish(runtime.active,'completed');await runtime.drain();
@@ -111,4 +119,18 @@ test('room stage loops stop at their execution limit and old loop rooms cannot a
   const runtime={state:{workflowRuns:[run]}};completeRoomStage(runtime,first);expect(run.status).toBe('awaiting_handoff');attachRoomStage(runtime,first,second);expect(run.conversationId).toBe('second');
   first.discussion.outcome.id='outdated-new-proposal';completeRoomStage(runtime,first);expect(run.visits).toBe(1);expect(()=>attachRoomStage(runtime,first,{id:'wrong'})).toThrow('not awaiting');
   second.discussion={outcome:{id:'proposal-2'}};completeRoomStage(runtime,second);expect(run.visits).toBe(2);expect(run.status).toBe('limit_reached');expect(()=>attachRoomStage(runtime,second,{id:'third'})).toThrow('not awaiting');
+});
+
+
+test('stage context keeps selected handoff snapshots and stops at another run or a cycle',()=>{
+  const grooming={id:'grooming',kind:'room',title:'Grooming',roomWorkflowRunId:'run',artifacts:[{text:'Unselected private draft'}]};
+  const planning={id:'planning',kind:'room',roomWorkflowRunId:'run',handoff:{sourceRoomId:grooming.id,sourceProposalId:'approved',package:{result:'Scoped',artifacts:[{id:'map',versionId:'v1',text:'src/login.ts; test/login.test.ts'}]}}};
+  const execution={id:'execution',kind:'room',roomWorkflowRunId:'run',handoff:{sourceRoomId:planning.id,package:{result:'Implement',artifacts:[]}}};
+  const runtime={conversation:()=>execution,state:{conversations:[grooming,planning,execution]}};
+  const context=roomWorkContext(runtime,{});
+  expect(context.priorStages).toEqual([{roomId:'grooming',title:'Grooming',proposalId:'approved',...planning.handoff.package}]);
+  expect(JSON.stringify(context)).not.toContain('Unselected private draft');
+  grooming.roomWorkflowRunId='other';expect(roomWorkContext(runtime,{}).priorStages).toEqual([]);
+  grooming.roomWorkflowRunId='run';grooming.handoff={sourceRoomId:execution.id,package:{artifacts:[]}};
+  expect(roomWorkContext(runtime,{}).priorStages).toHaveLength(1);
 });

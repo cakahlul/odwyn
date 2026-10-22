@@ -2,7 +2,7 @@ import {test,expect} from 'bun:test';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {validateConnection,publicConnection,executeConnection} from '../connections.js';
+import {validateConnection,publicConnection,executeConnection,mcpOAuthProvider} from '../connections.js';
 import {openStore} from '../store.js';
 
 test('connections validate destinations and keep credentials encrypted across restarts',()=>{
@@ -109,7 +109,7 @@ test('connection tool requires approval, redacts responses and respects workflow
  }finally{await runtime.close();store.close();server.stop(true);rmSync(directory,{recursive:true,force:true});}
 });
 
-test('MCP OAuth registers, validates state, exchanges a code and persists encrypted tokens',async()=>{
+for(const [callbackOrigin,workspaceId] of [[undefined,undefined],['http://127.0.0.1:4317',undefined],['http://127.0.0.1:4317','research']])test('MCP OAuth registers, validates state, exchanges a code and persists encrypted tokens: '+(callbackOrigin||'public callback')+(workspaceId?' workspace':''),async()=>{
  const sessions=[];let tokenRequests=0,registeredRedirect;
  const oauth=Bun.serve({port:0,fetch:async request=>{
   const base=`http://localhost:${oauth.port}`,url=new URL(request.url);
@@ -124,14 +124,22 @@ test('MCP OAuth registers, validates state, exchanges a code and persists encryp
   }
   return new Response(null,{status:404});
  }});
- const directory=mkdtempSync(join(tmpdir(),'odwyn-oauth-')),origin='http://localhost:4317',provider=new Provider(),options={directory,user:'owner',password:'test-password-long-enough',origin,codex:provider};let app=createApp(options);
+ const directory=mkdtempSync(join(tmpdir(),'odwyn-oauth-')),origin='https://odwyn.example.com',provider=new Provider(),options={directory,user:'owner',password:'test-password-long-enough',origin,mcpOAuthOrigin:callbackOrigin,workspaceId,codex:provider};let app=createApp(options);
  const request=(path,method='GET',body)=>app.fetch(new Request(origin+path,{method,headers:{authorization:'Basic '+btoa('owner:test-password-long-enough'),origin,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}));
  try{
   const connection=await(await request('/api/connections','POST',{name:'OAuth MCP',type:'mcp',url:`http://localhost:${oauth.port}/mcp`,oauth:true})).json();
   const start=await request('/api/connections/'+connection.id+'/authorize','POST',{}),result=await start.json();expect(start.status).toBe(200);expect(result.authorizationUrl).toBeString();
-  expect(registeredRedirect).toBe(origin+'/api/connections/oauth/callback');const authorization=new URL(result.authorizationUrl);expect(authorization.searchParams.get('code_challenge_method')).toBe('S256');
+  expect(registeredRedirect).toBe((callbackOrigin||origin)+'/api/connections/oauth/callback'+(workspaceId?'?workspace='+workspaceId:''));const authorization=new URL(result.authorizationUrl);expect(authorization.searchParams.get('code_challenge_method')).toBe('S256');
   expect((await request('/api/connections/oauth/callback?state=wrong&code=test-code')).status).toBe(400);expect(tokenRequests).toBe(0);
-  const callback=await request('/api/connections/oauth/callback?state='+encodeURIComponent(authorization.searchParams.get('state'))+'&code=test-code');expect(callback.status).toBe(303);expect(tokenRequests).toBe(1);
+  const callbackUrl=new URL(registeredRedirect);callbackUrl.searchParams.set('state',authorization.searchParams.get('state'));callbackUrl.searchParams.set('code','test-code');
+  const listener=Bun.serve({hostname:'127.0.0.1',port:0,fetch:app.fetch});let callback;
+  try{
+   const localCallback=new URL(callbackUrl);localCallback.host='127.0.0.1:'+listener.port;localCallback.protocol='http:';
+   expect((await fetch(localCallback,{redirect:'manual'})).status).toBe(401);
+   callback=await fetch(localCallback,{redirect:'manual',headers:{authorization:'Basic '+btoa('owner:test-password-long-enough')}});
+  }finally{listener.stop(true);}
+  expect(callback.status).toBe(303);expect(callback.headers.get('location')).toBe(origin+'/'+(workspaceId?'?workspace='+workspaceId:'')+'#connections');expect(tokenRequests).toBe(1);
+  expect((await app.fetch(new Request(origin+'/api/connections/'+connection.id+'/authorize',{method:'POST',headers:{authorization:'Basic '+btoa('owner:test-password-long-enough'),origin:'http://127.0.0.1:4317'}}))).status).toBe(403);
   expect((await request('/api/connections/'+connection.id+'/test','POST',{})).status).toBe(200);
   expect(await(await request('/api/state')).text()).not.toContain('oauth-access-private');
   await app.close();app=createApp(options);
@@ -161,4 +169,18 @@ test('form bodies, blocked redirects, cancellation and credential redaction cove
   const slow=validateConnection({...redirect,url:`http://localhost:${server.port}/slow`}),controller=new AbortController(),pending=executeConnection(slow,{}, {signal:controller.signal});controller.abort();await expect(pending).rejects.toThrow();
   expect(()=>validateConnection({name:'Unsafe proto',type:'grpc',url:'localhost:123',proto:'import /* comment */ "/etc/secret.proto";',service:'Tickets',method:'Get'})).toThrow();
  }finally{server.stop(true);}
+});
+
+test('MCP OAuth re-registers when its callback origin changes',()=>{
+ const connection=validateConnection({name:'Atlassian',type:'mcp',url:'https://mcp.atlassian.com/v2/mcp',oauth:true});
+ let saves=0;const old=mcpOAuthProvider(connection,'https://odwyn.example.com/api/connections/oauth/callback',()=>saves++,{state:'old'});
+ old.saveClientInformation({client_id:'old-client',redirect_uris:[old.redirectUrl]});old.saveTokens({access_token:'old-token'});old.saveCodeVerifier('old-verifier');
+ const provider=mcpOAuthProvider(connection,'http://127.0.0.1:4317/api/connections/oauth/callback',()=>saves++,{state:'new'});
+ expect(provider.clientInformation()).toBeUndefined();expect(provider.tokens()).toBeUndefined();expect(provider.codeVerifier()).toBeUndefined();expect(saves).toBe(4);
+ provider.saveClientInformation({client_id:'new-client',redirect_uris:[provider.redirectUrl]});
+ expect(mcpOAuthProvider(connection,provider.redirectUrl,()=>saves++,{state:'same'}).clientInformation().client_id).toBe('new-client');expect(saves).toBe(5);
+});
+
+test('MCP OAuth callback configuration rejects unsafe origins',()=>{
+ for(const mcpOAuthOrigin of ['http://example.com','http://127.0.0.1.evil.test:4317','ftp://localhost','http://user:pass@localhost:4317','http://localhost:4317/path','http://localhost:4317/?query=1','http://localhost:4317/#fragment'])expect(()=>createApp({user:'owner',password:'test-password-long-enough',mcpOAuthOrigin})).toThrow('ODWYN_MCP_OAUTH_ORIGIN');
 });
