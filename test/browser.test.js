@@ -237,13 +237,17 @@ test('managed OAuth handles only approved top-level callbacks and keeps private 
  const browser=new Browser({directory});
  const callback=local.url.origin+'/api/connections/oauth/callback?state=active&code=test-code';
  browser.onOAuthCallback=async url=>{
+  if(url.href!==callback)return null;
   callbacks++;
-  return url.href===callback?new Response('<h1>MCP connected</h1>',{headers:{'content-type':'text/html'}}):null;
+  return new Response('<h1>MCP connected</h1>',{headers:{'content-type':'text/html'}});
  };
  try{
   await browser.action({action:'read'});
   await browser.page.goto(callback);expect(await browser.page.textContent('body')).toContain('MCP connected');expect(callbacks).toBe(1);expect(requests).toBe(0);
-  await browser.page.goto(callback.replace('state=active','state=unknown')).catch(()=>{});expect(callbacks).toBe(2);expect(requests).toBe(0);
+  await browser.context.route('https://oauth.example.test/approve',route=>route.fulfill({status:302,headers:{location:callback}}));
+  await browser.page.goto('https://oauth.example.test/approve');expect(await browser.page.textContent('body')).toContain('MCP connected');expect(callbacks).toBe(2);expect(requests).toBe(0);
+  await browser.context.route('https://oauth.example.test/invalid',route=>route.fulfill({status:302,headers:{location:callback.replace('state=active','state=unknown')}}));
+  await browser.page.goto('https://oauth.example.test/invalid').catch(()=>{});expect(await browser.page.textContent('body')).toContain('Destination blocked.');expect(callbacks).toBe(2);expect(requests).toBe(0);
   await browser.page.goto(local.url.origin+'/private').catch(()=>{});expect(callbacks).toBe(2);expect(requests).toBe(0);
   await browser.page.setContent('<iframe src="'+callback+'"></iframe>');expect(callbacks).toBe(2);expect(requests).toBe(0);
  }finally{await browser.close();local.stop(true);rmSync(directory,{recursive:true,force:true});}

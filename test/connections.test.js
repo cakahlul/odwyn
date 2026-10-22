@@ -126,9 +126,11 @@ for(const [callbackOrigin,workspaceId,managed] of [[undefined,undefined],['http:
   return new Response(null,{status:404});
  }});
  const directory=mkdtempSync(join(tmpdir(),'odwyn-oauth-'));
- if(managed)browser=new Browser({directory,onContext:async context=>{await context.route('https://example.com/authorize**',route=>{
+ if(managed)browser=new Browser({directory,onContext:async context=>{
+  await context.route('https://example.com/approve**',route=>route.fulfill({status:302,headers:{location:new URL(route.request().url()).searchParams.get('callback')}}));
+  await context.route('https://example.com/authorize**',route=>{
   const callback=new URL(registeredRedirect);callback.searchParams.set('state',new URL(route.request().url()).searchParams.get('state'));callback.searchParams.set('code','test-code');
-  return route.fulfill({contentType:'text/html',body:'<h1>Atlassian sign-in</h1><a href="'+String(callback).replaceAll('&','&amp;')+'">Approve</a>'});
+  return route.fulfill({contentType:'text/html',body:'<h1>Atlassian sign-in</h1><a href="'+'https://example.com/approve?callback='+encodeURIComponent(callback)+'">Approve</a>'});
  });}});
  const origin='https://odwyn.example.com',provider=new Provider(),options={directory,user:'owner',password:'test-password-long-enough',origin,mcpOAuthOrigin:callbackOrigin||origin,workspaceId,codex:provider,browser};let app=createApp(options);
  const request=(path,method='GET',body)=>app.fetch(new Request(origin+path,{method,headers:{authorization:'Basic '+btoa('owner:test-password-long-enough'),origin,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}));

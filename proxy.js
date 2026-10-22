@@ -40,11 +40,16 @@ export async function fetchImage(raw, resolve = resolvePublic) {
 }
 
 // Resolve once, connect to that IP. Browser DNS cannot rebind into the VPS network.
-export async function startProxy({resolve=resolvePublic,authorize=()=>true}={}) {
+export async function startProxy({resolve=resolvePublic,authorize=()=>true,onOAuthCallback=()=>null}={}) {
   const sockets = new Set();
   const server = http.createServer(async (req, res) => {
     try {
       if(!authorize(req.url,req.method))throw new Error('Proxy policy denied.');
+      // Redirected navigations skip Playwright routing, so handle validated callbacks here too.
+      if(req.method==='GET'&&req.headers['sec-fetch-mode']==='navigate'&&req.headers['sec-fetch-dest']==='document'){
+        const response=await onOAuthCallback(new URL(req.url));
+        if(response){res.writeHead(response.status,Object.fromEntries(response.headers));res.end(await response.text());return;}
+      }
       const { url, address, family } = await resolve(req.url);
       if (url.protocol !== 'http:') throw new Error('HTTPS requires CONNECT.');
       const headers = { ...req.headers, host: url.host };

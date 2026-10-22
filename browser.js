@@ -44,7 +44,7 @@ export class Browser {
     }
     mkdirSync(join(this.directory, 'browser'), { recursive: true, mode: 0o700 });
     mkdirSync(join(this.directory, 'files'), { recursive: true, mode: 0o700 });
-    const generation = this.generation, proxy = await startProxy(this.proxyOptions);
+    const generation = this.generation, proxy = await startProxy({...this.proxyOptions,onOAuthCallback:url=>this.onOAuthCallback?.(url)});
     if (generation !== this.generation) { proxy.close(); throw new Error('Browser operation interrupted.'); }
     this.proxy = proxy;
     try {
