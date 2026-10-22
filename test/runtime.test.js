@@ -81,6 +81,24 @@ test('workflow tool budgets continue once without restarting the discussion',asy
   }finally{await runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
 });
 
+test('selected automatic skills reach the provider without blocking task startup', async () => {
+  const dir=mkdtempSync(join(tmpdir(),'odwyn-automatic-skills-')),store=openStore(dir),codex=new FakeCodex();
+  const runtime=new Runtime({store,codex,browser:{},workspace:dir});
+  try {
+    const skill={id:randomUUID(),name:'Review',command:'review',instructions:'Check each changed caller.'};
+    store.state.skills.push(skill,{id:randomUUID(),name:'Unused',command:'unused',instructions:'UNSELECTED_SKILL'});
+    store.state.customization={...defaults,skillIds:[skill.id]};
+    await runtime.refreshAccount();
+    const job=runtime.submit({prompt:'Review this change'});await runtime.drain();
+    expect(job.error).toBeNull();
+    expect(job.status).toBe('running');
+    const instructions=codex.calls.find(call=>call.method==='thread/start').params.developerInstructions;
+    expect(instructions).toContain(skill.instructions);
+    expect(instructions).not.toContain('UNSELECTED_SKILL');
+    expect(codex.calls.some(call=>call.method==='turn/start')).toBe(true);
+  } finally {await runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+
 test('skill commands stay visible while the provider receives snapshotted instructions', async () => {
   const dir=mkdtempSync(join(tmpdir(),'odwyn-skill-chat-')),store=openStore(dir),codex=new FakeCodex();
   const runtime=new Runtime({store,codex,browser:{},workspace:dir});
