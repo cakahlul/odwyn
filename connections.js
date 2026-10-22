@@ -18,9 +18,15 @@ function stringMap(value={}){
  return {...value};
 }
 export function connectionSecrets(connection){return JSON.parse(connection.apiKey||'{}');}
+function decodeUrlInputs(url){
+ return url.replace(/%7B%7B(.*?)%7D%7D/gi,encoded=>{
+  try{const decoded=decodeURIComponent(encoded);return /^\{\{\s*inputs\.[\w.-]+\s*\}\}$/.test(decoded)?decoded:encoded;}
+  catch{return encoded;}
+ });
+}
 export function publicConnection(connection){
  const {apiKey,...result}=connection,secret=connectionSecrets(connection);
- const inputs=[...new Set([...JSON.stringify([connection.url,connection.body,connection.variables,secret.headers]).matchAll(/\{\{\s*inputs\.([\w-]+)/g)].map(match=>match[1]))];
+ const inputs=[...new Set([...JSON.stringify([decodeUrlInputs(connection.url),connection.body,connection.variables,secret.headers]).matchAll(/\{\{\s*inputs\.([\w-]+)/g)].map(match=>match[1]))];
  return {...result,inputs,hasCredentials:!!(Object.keys(secret.headers||{}).length||Object.keys(secret.env||{}).length||secret.oauth?.tokens),authenticated:!!secret.oauth?.tokens};
 }
 export function validateConnection(input,previous){
@@ -32,7 +38,7 @@ export function validateConnection(input,previous){
  if(type==='grpc'){
   if(!/^(?:[a-zA-Z0-9.-]+|\[[\da-fA-F:]+\]):\d{1,5}$/.test(url)||Number(url.split(':').at(-1))>65535||Number(url.split(':').at(-1))<1)throw Error('Use a gRPC host:port.');
  }else if(transport!=='stdio'){
-  const authority=url.match(/^https?:\/\/([^/?#]*)/i)?.[1];
+  const authority=decodeUrlInputs(url).match(/^https?:\/\/([^/?#]*)/i)?.[1];
   const parsed=new URL(url.replace(/\{\{\s*inputs\.[\w.-]+\s*\}\}/g,'placeholder'));
   if(!['http:','https:'].includes(parsed.protocol)||parsed.username||parsed.password||parsed.hash||!authority||authority.includes('{{')||url.includes('\\'))throw Error('Use an HTTP(S) URL without credentials, fragments or dynamic hosts.');
   if(type==='mcp'&&url.includes('{{'))throw Error('MCP server URLs cannot contain runtime inputs.');
@@ -69,7 +75,9 @@ export function validateConnection(input,previous){
 }
 function requestUrl(connection,inputs){
  // Encode each value so runtime data cannot change the saved server or inject query parameters.
- return connection.url.replace(/\{\{\s*inputs\.[\w.-]+\s*\}\}/g,template=>{
+ const url=decodeUrlInputs(connection.url);
+ if(/^https?:\/\/[^/?#]*\{\{/i.test(url))throw Error('Dynamic hosts are not allowed.');
+ return url.replace(/\{\{\s*inputs\.[\w.-]+\s*\}\}/g,template=>{
   const value=interpolate(template,{inputs});
   if(!['string','number','boolean'].includes(typeof value))throw Error('URL inputs must be scalar values.');
   return encodeURIComponent(value);

@@ -31,6 +31,18 @@ test('REST and GraphQL execute runtime inputs without allowing a new destination
   expect(JSON.parse((await executeConnection(graphql,{inputs:{id:'123'}})).data.body).variables).toEqual({id:'123'});
  }finally{server.stop(true);}
 });
+test('URL-encoded Loki placeholders are listed and substituted without decoding query delimiters',async()=>{
+ const server=Bun.serve({port:0,fetch:req=>Response.json(Object.fromEntries(new URL(req.url).searchParams))});
+ try{
+  const query='{app="{{inputs.app}}"} |= "error & failure"';
+  const connection=validateConnection({name:'Loki',type:'rest',url:`http://localhost:${server.port}/query_range?query=${encodeURIComponent(query)}&start=${encodeURIComponent('{{ inputs.unixStart }}')}&end=${encodeURIComponent('{{inputs.unixEnd}}')}`});
+  expect(publicConnection(connection).inputs).toEqual(['app','unixStart','unixEnd']);
+  const result=await executeConnection(connection,{inputs:{app:'amar-smbusers',unixStart:'1792675147',unixEnd:'1792675747'}});
+  expect(result.data).toEqual({query:'{app="amar-smbusers"} |= "error & failure"',start:'1792675147',end:'1792675747'});
+  expect(()=>validateConnection({name:'Bad',type:'rest',url:'https://%7B%7Binputs.host%7D%7D/'})).toThrow();
+  await expect(executeConnection({...connection,url:'http://%7B%7Binputs.host%7D%7D/'},{inputs:{host:'localhost'}})).rejects.toThrow('Dynamic hosts are not allowed.');
+ }finally{server.stop(true);}
+});
 test('gRPC rejects imports and streaming until supported',()=>{
  expect(()=>validateConnection({name:'RPC',type:'grpc',url:'localhost:50051',proto:'import "/etc/private.proto";'})).toThrow();
 });
