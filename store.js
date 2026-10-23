@@ -134,25 +134,36 @@ export function openStore(directory) {
     const conversations=state.conversations.filter(c=>ids.has(c.id)).map(({id,title})=>({id,title}));
     return {conversations,conversationIds:conversations.map(c=>c.id),workflowRunIds:[...runIds]};
   };
-  const deleteConversation = db.transaction((id, confirmed) => {
+  const deleteConversationState = db.transaction((id, confirmed) => {
     const plan=conversationDeletion(id), ids=new Set(plan.conversationIds), runIds=new Set(plan.workflowRunIds);
     const matches=(expected,actual)=>Array.isArray(actual)&&expected.length===actual.length&&expected.every(id=>actual.includes(id));
     if(confirmed&&(!matches(plan.conversationIds,confirmed.conversationIds)||!matches(plan.workflowRunIds,confirmed.workflowRunIds)))throw new Error('Deletion dependencies changed. Review and confirm again.');
     if(!confirmed&&ids.size>1)throw new Error('Linked room history requires confirmation to delete all dependent rooms.');
     if (state.jobs.some(j=>(ids.has(j.conversationId)||runIds.has(j.workflowRunId)) && ['queued','running','waiting','takeover','stopping'].includes(j.status))) throw new Error('Stop all linked conversations’ tasks before deleting them.');
-    const conversations = state.conversations, jobs = state.jobs, workflowRuns = state.workflowRuns;
+    const conversations = state.conversations, jobs = state.jobs, workflowRuns = state.workflowRuns, files = state.files;
     try {
       state.conversations = conversations.filter(c=>!ids.has(c.id));
       state.jobs = jobs.filter(j=>!ids.has(j.conversationId)&&!runIds.has(j.workflowRunId));
       state.workflowRuns = workflowRuns.filter(r=>!runIds.has(r.id));
+      const deletedJobs=new Set(jobs.filter(job=>ids.has(job.conversationId)||runIds.has(job.workflowRunId)).map(job=>job.id));
+      const deleted=JSON.stringify([conversations.filter(c=>ids.has(c.id)),jobs.filter(j=>deletedJobs.has(j.id)),workflowRuns.filter(r=>runIds.has(r.id))]);
+      const {files:ignored,...remaining}=state, references=JSON.stringify(remaining);
+      const removedFiles=files.filter(file=>(deletedJobs.has(file.jobId)||deleted.includes(file.id))&&!references.includes(file.id)&&!state.jobs.some(job=>job.id===file.jobId));
+      state.files=files.filter(file=>!removedFiles.includes(file));
       for (const conversation of conversations.filter(c=>ids.has(c.id))) {
         for (const message of conversation.messages) indexed.delete(message.id);
         db.query('DELETE FROM chat_chunks WHERE conversationId = ?').run(conversation.id);
       }
       save();
-      return plan;
-    } catch(error) { state.conversations = conversations; state.jobs = jobs; state.workflowRuns = workflowRuns; throw error; }
+      return {plan,removedFiles};
+    } catch(error) { state.conversations = conversations; state.jobs = jobs; state.workflowRuns = workflowRuns; state.files = files; throw error; }
   });
+  const deleteConversation=(...args)=>{
+    const {plan,removedFiles}=deleteConversationState(...args);
+    // Remove bytes only after SQLite commits; failed persistence must preserve attachments.
+    for(const file of removedFiles)if(/^[a-f0-9-]{36}$/.test(file.id))rmSync(join(directory,'files',file.id),{force:true});
+    return plan;
+  };
   const store={directory,state,credentials,audit,save,search,conversationDeletion,deleteConversation,close:()=>db.close()};
   store.knowledge=openKnowledge(db,store);save();return store;
 }
