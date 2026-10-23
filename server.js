@@ -291,6 +291,10 @@ export function createApp(options = {}) {
               const config=input.inherit?store.state.globalProvider:validateProvider(input.provider,oddyApp.settings('provider'));
               await oddyApp.applySettings('provider',config);
               assistant.state.oddyProviderOverride=!input.inherit;assistant.changed();
+            }else if(req.method==='POST'){
+              // Previously opened clients use an empty POST to read provider settings.
+              const input=await json(req);
+              if(!input||Array.isArray(input)||Object.keys(input).length)throw Error('Use PUT to change Oddy provider settings.');
             }else if(req.method!=='GET')return response({error:'Method not allowed.'},405);
             return response({inherit:!assistant.state.oddyProviderOverride,...oddyApp.providerState()});
           }

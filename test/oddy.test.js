@@ -169,6 +169,10 @@ test('Oddy operates across workspaces independently and binds deletion to an exp
     expect((await request('/api/oddy/answer','POST',{jobId:next.job.id,requestId:next.job.pending.id,decision:'allow'})).status).toBe(400);
     await request('/api/oddy/cancel','POST',{jobId:next.job.id});
     expect((await (await request('/api/oddy/provider')).json()).inherit).toBe(true);
+    const legacyRead=await request('/api/oddy/provider?workspace='+workspace.id,'POST',{});
+    expect(legacyRead.status).toBe(200);
+    expect((await legacyRead.json()).inherit).toBe(true);
+    expect((await request('/api/oddy/provider','POST',{inherit:false,provider:{type:'codex',model:'unexpected'}})).status).toBe(400);
     const configured=await request('/api/oddy/provider','PUT',{inherit:false,provider:{type:'openai',model:'local-test',baseUrl:'http://127.0.0.1:1/v1',apiKey:'oddy-test-key'}});
     expect(configured.status).toBe(200);expect(JSON.stringify(await configured.json())).not.toContain('oddy-test-key');
     const custom=await (await request('/api/oddy/provider')).json();expect(custom.inherit).toBe(false);expect(custom.provider.model).toBe('local-test');
