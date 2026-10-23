@@ -171,6 +171,7 @@ export function createApp(options = {}) {
             {id:'agents',agents:state.agents.map(agent=>({id:agent.id,profile:agent===state.agents[0]?state.customization:agent.customization}))},
             {id:'sharing',sharing:store.state.workspaceSharing},
           ];
+          else if(action.body.collection==='connections')records=state.connections.map(publicConnection);
           else if(action.body.collection==='oddyChats')records=oddyApp.runtime.state.conversations;
           else if(action.body.collection==='oddyJobs')records=oddyApp.runtime.state.jobs;
           else if(action.body.collection==='messages')records=state.conversations.flatMap(conversation=>conversation.messages.map(message=>({...message,conversationId:conversation.id,conversationTitle:conversation.title})));
@@ -193,14 +194,14 @@ export function createApp(options = {}) {
           historyCollections,
           workspace:store.state.workspaces.find(row=>row.id===action.workspaceId),
           agents:state.agents.map(agent=>({id:agent.id,profile:agent===state.agents[0]?state.customization:agent.customization,connected:!!target.runtime.accounts.get(agent.id)?.account})),
-          workflows:state.workflows,skills:state.skills,schedules:state.schedules,
+          workflows:state.workflows,skills:state.skills,schedules:state.schedules,connections:state.connections.map(publicConnection),
           rooms:state.conversations.filter(row=>row.kind==='room').map(({id,title,memberIds,governance,discussion})=>({id,title,memberIds,governance,status:discussion?.status})),
           jobs:state.jobs.slice(0,50).map(({id,agentId,conversationId,prompt,status,error,createdAt})=>({id,agentId,conversationId,prompt:prompt.slice(0,200),status,error,createdAt})),
         });
         const currentTarget=()=>{
           if(action.action.startsWith('create_'))return null;
           const kind=action.action.split('_').at(-1);
-          const rows={agent:state.agents,workflow:state.workflows,skill:state.skills,schedule:state.schedules,room:state.conversations,workspace:store.state.workspaces};
+          const rows={agent:state.agents,workflow:state.workflows,skill:state.skills,schedule:state.schedules,connection:state.connections.map(publicConnection),room:state.conversations,workspace:store.state.workspaces};
           if(kind==='job'){const row=state.jobs.find(row=>row.id===input.targetId);return row?{id:row.id,status:row.status}:null;}
           return rows[kind]?.find(row=>row.id===(kind==='workspace'?action.workspaceId:input.targetId))||null;
         };

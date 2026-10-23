@@ -22,6 +22,8 @@ async function until(check){for(let i=0;i<200;i++){const result=await check();if
 
 test('Oddy accepts fixed management operations, never arbitrary owner routes or credentials', () => {
   expect(()=>oddyAction({action:'create_agent',parameters:{name:'Engineer',role:'Senior Engineer'}})).toThrow('unsupported fields: role');
+  expect(oddyAction({action:'test_connection',targetId:'a07a8da7-9444-4fb6-bbf3-704e45d47b3b',parameters:{inputs:{query:'errors'}}})).toMatchObject({method:'POST',path:'/api/connections/a07a8da7-9444-4fb6-bbf3-704e45d47b3b/test'});
+  expect(oddyAction({action:'search_history',parameters:{collection:'connections'}}).body.collection).toBe('connections');
   expect(oddyTool.inputSchema.properties.parameters.properties.specialization.type).toBe('string');
   expect(oddyTool.inputSchema.properties.parameters.additionalProperties).toBe(false);
   expect(()=>oddyScreen({view:'chat',password:'secret'})).toThrow();
@@ -52,6 +54,7 @@ test('Oddy history is paginated, redacted before chunking and rejects arbitrary 
 test('Oddy operates across workspaces independently and binds deletion to an explicit owner decision', async()=>{
   const directory=mkdtempSync(join(tmpdir(),'odwyn-oddy-')),codex=new FakeCodex();
   const options={directory,user:'owner',password:'test-password-long-enough',origin:'https://assistant.test',providerOptions:{codex}};
+  const connectionServer=Bun.serve({port:0,fetch:request=>Response.json({query:new URL(request.url).searchParams.get('query')})});
   let app=createApp(options),callId=0;
   const headers={authorization:'Basic '+Buffer.from('owner:'+options.password).toString('base64'),origin:options.origin,'content-type':'application/json'};
   const request=(path,method='GET',body)=>app.fetch(new Request(options.origin+path,{method,headers,...(body?{body:JSON.stringify(body)}:{})}));
@@ -72,6 +75,7 @@ test('Oddy operates across workspaces independently and binds deletion to an exp
     expect((await app.fetch(new Request(options.origin+'/api/oddy',{headers:{authorization:'Bearer invalid'}}))).status).toBe(401);
     expect((await app.fetch(new Request(options.origin+'/api/oddy',{method:'POST',headers:{...headers,origin:'https://evil.test'},body:'{}'}))).status).toBe(403);
     const workspace=await (await request('/api/workspaces','POST',{name:'Research'})).json();
+    const connection=await (await request('/api/connections?workspace='+workspace.id,'POST',{name:'Logs',type:'rest',url:`http://localhost:${connectionServer.port}/?query={{inputs.query}}`,headers:{Authorization:'Bearer connection-private'}})).json();
     const form=new FormData();form.append('file',new File(['Owner supplied reference'], 'brief.txt'));
     const uploaded=await app.fetch(new Request(options.origin+'/api/oddy/files',{method:'POST',headers:{authorization:headers.authorization,origin:headers.origin},body:form}));
     expect(uploaded.status).toBe(201);const file=await uploaded.json();
@@ -96,6 +100,14 @@ test('Oddy operates across workspaces independently and binds deletion to an exp
     expect((await tool({action:'inspect_workspace'})).success).toBe(true);
     const inspection=await tool({action:'inspect_workspace'});
     expect(JSON.parse(inspection.contentItems[0].text).workspace.id).toBe(workspace.id);
+    expect(JSON.parse(inspection.contentItems[0].text).connections[0]).toMatchObject({id:connection.id,inputs:['query']});
+    expect(JSON.stringify(inspection)).not.toContain('connection-private');
+    const connectionHistory=await tool({action:'read_history',targetId:connection.id,parameters:{collection:'connections'}});
+    expect(JSON.stringify(connectionHistory)).not.toContain('connection-private');
+    expect(JSON.parse(JSON.parse(connectionHistory.contentItems[0].text).text).id).toBe(connection.id);
+    const connected=await tool({action:'test_connection',targetId:connection.id,parameters:{inputs:{query:'errors'}}});
+    expect(connected.success).toBe(true);
+    expect(JSON.parse(connected.contentItems[0].text)).toMatchObject({status:200,data:{query:'errors'}});
     expect((await (await request('/api/oddy?workspace='+workspace.id)).json()).messages[0].text).toBe('Help me run this platform');
     app.runtime.conversation(busy).messages.push({id:'private',role:'assistant',text:'PRIVATE_CONVERSATION_CONTENT',at:new Date().toISOString()});
     expect(JSON.stringify(await tool({action:'inspect_workspace',workspaceId:'default'}))).not.toContain('PRIVATE_CONVERSATION_CONTENT');
@@ -182,5 +194,5 @@ test('Oddy operates across workspaces independently and binds deletion to an exp
     await request('/api/oddy/provider','PUT',{inherit:true});
     expect((await read()).messages[0].text).toBe('Second Oddy chat');
     expect((await (await request('/api/workspaces')).json()).workspaces).toHaveLength(1);
-  }finally{await app.close();rmSync(directory,{recursive:true,force:true});}
+  }finally{connectionServer.stop(true);await app.close();rmSync(directory,{recursive:true,force:true});}
 });

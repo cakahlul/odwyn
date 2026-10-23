@@ -24,6 +24,7 @@ test('Oddy stays reachable in Settings and renders chat, questions and deletion 
   let state={connected:true,messages:[],job:null,conversations:[],conversationId:null},failNext=false;const chats=new Map();
   await page.route('**/api/oddy**',async route=>{
     if(new URL(route.request().url()).pathname==='/api/oddy/provider'){
+      if(!['GET','PUT'].includes(route.request().method())){await route.fulfill({status:405,json:{error:'Method not allowed.'}});return;}
       if(route.request().method()==='PUT'){const body=route.request().postDataJSON();oddyProvider={...oddyProvider,inherit:body.inherit,provider:body.provider};}
       await route.fulfill({json:oddyProvider});return;
     }

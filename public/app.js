@@ -565,7 +565,7 @@ const selectedProvider=()=>providerOddy?oddyProviderState.provider:providerGloba
 const selectedConnection=()=>providerOddy?oddyProviderState.runtime:providerGlobal?workspace.globalRuntime:state.runtime;
 async function providerApi(path,body,method){
   const result=await api(providerOddy?path.replace('/api/','/api/oddy/'):path,body,method);
-  if(providerOddy && !path.startsWith('/api/provider/models')){oddyProviderState=await api('/api/oddy/provider');updateAccount();}
+  if(providerOddy && !path.startsWith('/api/provider/models')){oddyProviderState=await api('/api/oddy/provider',undefined,'GET');updateAccount();}
   return result;
 }
 $('#settings-provider-target').onchange=async()=>{
@@ -573,7 +573,7 @@ $('#settings-provider-target').onchange=async()=>{
   const save=$('#preferences-form > .form-footer button.primary-button');save.disabled=true;
   $('#provider-editor').hidden=true;
   try{
-    if(oddy)oddyProviderState=await api('/api/oddy/provider');
+    if(oddy)oddyProviderState=await api('/api/oddy/provider',undefined,'GET');
     if(selection!==providerSelection)return;
     providerOddy=oddy;
     $('#oddy-provider-inherit-row').hidden=!oddy;
@@ -1030,7 +1030,7 @@ if(state && new URLSearchParams(location.search).get('settings')==='provider'){
 }
 setInterval(() => { if (!document.hidden) {
   void refresh();
-  if(providerOddy&&$('#settings-dialog').open)void api('/api/oddy/provider').then(value=>{if(providerOddy){oddyProviderState=value;updateAccount();}}).catch(()=>{});
+  if(providerOddy&&$('#settings-dialog').open)void api('/api/oddy/provider',undefined,'GET').then(value=>{if(providerOddy){oddyProviderState=value;updateAccount();}}).catch(()=>{});
 } }, 1000);
 
 setupConnections(()=>workspace,refresh);
