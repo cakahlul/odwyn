@@ -99,7 +99,7 @@ test('image picker and paste show removable previews; image-only sends persist i
     expect(await page.locator('#image-preview [download]').count()).toBe(0);
     await page.keyboard.press('Escape');expect(await page.locator('#image-preview').evaluate(dialog=>dialog.open)).toBe(false);
     expect(await photoPreview.evaluate(node=>document.activeElement===node)).toBe(true);
-    await photoPreview.click();await page.locator('[aria-label="Close image preview"]').click();
+    await photoPreview.click();await page.locator('[aria-label="Close file preview"]').click();
     const artifacts = join(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});
     for (const width of [320,768,1024,1440]) {
       await page.setViewportSize({width,height:900});
@@ -158,8 +158,8 @@ test('image picker and paste show removable previews; image-only sends persist i
     expect(await page.locator('.message-user [download]').count()).toBe(0);
     expect(await page.locator('.message-user .file-chip').allTextContents()).toEqual(['notes.txt','pasted.png']);
     const job = app.runtime.state.jobs[0];await wait(()=>job.status==='completed');
-    const agentFile = {id:crypto.randomUUID(),name:'agent-result.txt',kind:'generated',jobId:job.id,mimeType:'application/octet-stream',createdAt:new Date().toISOString()};
-    writeFileSync(join(directory,'files',agentFile.id),'Agent result');
+    const agentFile = {id:crypto.randomUUID(),name:'agent-result.md',kind:'generated',jobId:job.id,mimeType:'application/octet-stream',createdAt:new Date().toISOString()};
+    writeFileSync(join(directory,'files',agentFile.id),'# Agent result');
     app.runtime.state.files.push(agentFile);job.files.push(agentFile.id);
     app.runtime.conversation(job).messages.push({id:crypto.randomUUID(),role:'assistant',text:'Result attached.',agentId:job.agentId,jobId:job.id,at:agentFile.createdAt});app.runtime.changed();
     await page.reload();await page.locator('.message-user .answer-file img').waitFor();
@@ -174,11 +174,18 @@ test('image picker and paste show removable previews; image-only sends persist i
     await page.keyboard.press('Escape');await page.unroute('**/api/files/*/preview');
     await page.locator('.message-assistant .file-chip[download]').waitFor();
     expect(await page.locator('.message-user [download]').count()).toBe(0);
-    expect(await page.locator('.message-assistant .file-chip[download]').getAttribute('download')).toBe('agent-result.txt');
+    expect(await page.locator('.message-assistant .file-chip[download]').getAttribute('download')).toBe('agent-result.md');
     await page.locator("#tools-open").click();await page.locator('[data-view="files"]').first().click();
     await page.locator('.file-list').waitFor();
-    expect(await page.locator('a.file-row[download]').count()).toBe(1);
-    expect(await page.locator('a.file-row[download]').textContent()).toContain('agent-result.txt');
+    expect(await page.locator('.file-row [download]').count()).toBe(app.runtime.state.files.length);
+    await page.getByRole('button',{name:'View agent-result.md',exact:true}).click();
+    await page.locator('#file-preview-text h2').waitFor();
+    expect(await page.locator('#file-preview-text h2').textContent()).toBe('Agent result');
+    expect(await page.locator('#file-preview-text').isVisible()).toBe(true);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button',{name:'View notes.txt',exact:true}).click();
+    await page.waitForFunction(()=>document.querySelector('#file-preview-text').textContent==='Notes');
+    await page.keyboard.press('Escape');
     expect(inputs[0].find(p=>p.type==='image').url).toBe(imageUrl);expect(errors).toEqual([]);
   } finally {await browser.close();await app.close();await server.stop(true);rmSync(directory,{recursive:true,force:true});}
 },20_000);

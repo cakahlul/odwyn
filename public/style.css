@@ -1348,3 +1348,6 @@ button.attachment-preview:hover { background:var(--paper); }
 #view details[data-room-disclosure] > summary::after { display:none; }
 
 .connection-result{max-height:400px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:12px}.connection-result:empty{display:none}
+
+#file-preview-text { text-align:left; overflow:auto; max-height:calc(100dvh - 180px); overflow-wrap:anywhere; }
+#file-preview-text pre { white-space:pre-wrap; }

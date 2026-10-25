@@ -8,7 +8,7 @@ import {setupRoomWork} from './room-work-ui.js';
 import {setupWorkspaceHomes} from './workspace-homes.js';
 import {setupWorkspaceSettings} from './workspace-settings.js';
 import { renderWorkflows, setupWorkflows } from './workflows-ui.js';
-import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date, workspaceUrl, workspaceId, storageKey } from './ui.js';
+import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date, workspaceUrl, workspaceId, storageKey, richText } from './ui.js';
 import { renderHome, renderAgentRoster, renderChat, insertMessages, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, conversationHistory } from './views.js';
 import { setupBrowser, updateBrowser } from './browser-ui.js';
 import { setupCustomization, applyProfile, openCustomization, fillWorkspaceAppearance, readWorkspaceAppearance } from './customize.js';
@@ -844,8 +844,8 @@ $('#schedule-open').onclick = () => openSchedule();
 $('#menu-button').onclick = $('#search-open').onclick = () => { historyAgentId = null; setNavigation(true); search(); $('#menu-button').setAttribute('aria-expanded','true'); };
 for (const id of ['agents','tools']) $('#'+id+'-open').onclick = () => { setNavigation(false); $('#'+id+'-dialog').showModal(); $('#'+id+'-open').setAttribute('aria-expanded','true'); };
 $('#search-input').oninput = search;
-$('#image-preview-image').onload = () => { $('#image-preview-status').textContent = ''; };
-$('#image-preview-image').onerror = () => { $('#image-preview-image').hidden = true; $('#image-preview-status').textContent = 'Image preview unavailable.'; };
+$('#image-preview-image').onload = () => { if (!$('#image-preview-image').hidden) $('#image-preview-status').textContent = ''; };
+$('#image-preview-image').onerror = () => { if ($('#image-preview-image').hidden) return; $('#image-preview-image').hidden = true; $('#image-preview-status').textContent = 'Image preview unavailable.'; };
 $('#image-preview').onclick = event => { if (event.target === $('#image-preview')) $('#image-preview').close(); };
 $('#attach-button').onclick = () => $('#file-input').click();
 async function attachFiles(files) {
@@ -937,10 +937,41 @@ document.addEventListener('click', event => {
     const file = attachments.find(file=>file.id===target.dataset.previewFile) || state.files.find(file=>file.id===target.dataset.previewFile); if (!file) return;
     $('#image-preview-title').textContent = file.name;
     $('#image-preview-image').alt = `Preview of ${file.name}`;
+    $('#file-preview-text').replaceChildren();
+    $('#file-preview-text').hidden = true;
     $('#image-preview-image').hidden = false;
     $('#image-preview-status').textContent = 'Loading image…';
-    $('#image-preview-image').src = workspaceUrl(`/api/files/${encodeURIComponent(file.id)}/preview`);
-    $('#image-preview').showModal(); return;
+    $('#image-preview').showModal();
+    if (!file.mimeType?.startsWith('image/') && file.kind !== 'screenshot') {
+      $('#image-preview-image').removeAttribute('src');
+      $('#image-preview-image').hidden = true;
+      $('#image-preview-status').textContent = 'Loading file…';
+      const status = $('#image-preview-status');
+      const request = status.dataset.fileId = file.id;
+      void (async () => {
+        try {
+          if (!/\.(md|markdown|txt|csv|json|log|js|ts|css|html|xml|svg|yaml|yml)$/i.test(file.name)) throw new Error('Preview unavailable for this format. Use Download.');
+          if (file.size > 2 * 1024 * 1024) throw new Error('Preview limited to 2 MB. Use Download.');
+          const response = await fetch(workspaceUrl(`/api/files/${encodeURIComponent(file.id)}`));
+          if (!response.ok) throw new Error('File preview unavailable.');
+          const bytes = await response.arrayBuffer();
+          if (bytes.byteLength > 2 * 1024 * 1024) throw new Error('Preview limited to 2 MB. Use Download.');
+          const text = new TextDecoder('utf-8', {fatal:true}).decode(bytes);
+          if (text.includes('\0')) throw new Error('Binary preview unavailable. Use Download.');
+          if (status.dataset.fileId !== request || !$('#image-preview').open) return;
+          const content = $('#file-preview-text');
+          if (/\.(md|markdown)$/i.test(file.name)) content.append(richText(text,{cards:false}));
+          else { const pre = document.createElement('pre'); pre.textContent = text; content.append(pre); }
+          content.hidden = false; status.textContent = '';
+        } catch (error) {
+          if (status.dataset.fileId === request) status.textContent = error.message;
+        }
+      })();
+    } else {
+      $('#image-preview-status').dataset.fileId = file.id;
+      $('#image-preview-image').src = workspaceUrl(`/api/files/${encodeURIComponent(file.id)}/preview`);
+    }
+    return;
   }
   if (target.dataset.mentionCommand) { navigate(workspace.skills.some(s=>s.command===target.dataset.mentionCommand) ? 'skills' : 'workflows');return; }
   if (target.dataset.agentAction) {
