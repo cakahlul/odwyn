@@ -1154,7 +1154,7 @@ body.mascot-paused .home-agent-avatar { animation-play-state:paused; }
   padding:14px 18px 10px;
   box-shadow:0 1px 4px color-mix(in oklab,var(--shadow-ink) 8%,transparent);
 }
-.message-bubble .message-text { font-size:14.5px; line-height:1.75; }
+.message-bubble .message-text { font-size:14.5px; line-height:1.75; overflow-wrap:anywhere; }
 .message-meta strong { font-size:12.5px; font-weight:650; letter-spacing:-.01em; color:var(--ink); }
 .message-footer time { font-size:10px; }
 .message-owner {
@@ -1176,7 +1176,7 @@ body.mascot-paused .home-agent-avatar { animation-play-state:paused; }
 }
 .message-text code { font-family:var(--font-mono); font-size:.9em; }
 .message-text blockquote { border-left:2px solid var(--orange); background:none; }
-.message-text table { border-radius:10px; font-variant-numeric:tabular-nums; }
+.message-text table { border-radius:10px; font-variant-numeric:tabular-nums; overflow-wrap:normal; }
 
 /* Tactile Glass Buttons & Interactive Controls */
 .primary-button,.secondary-button {
@@ -1829,6 +1829,8 @@ input[type=color]::-moz-color-swatch { border:0; border-radius:6px; }
   box-shadow:none;
 }
 .library-search input { border:0; background:transparent; box-shadow:none; }
+#search-dialog .library-search { display:flex; }
+#search-input { width:auto; min-width:0; margin:0; padding:14px 0; border:0; border-radius:0; background:transparent; box-shadow:none; outline:none; }
 
 @media(max-width:760px) {
   .modal .profile-sidebar { padding:0 0 16px; border-right:0; border-bottom:1px solid var(--line); }

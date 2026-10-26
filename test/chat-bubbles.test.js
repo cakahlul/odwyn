@@ -24,7 +24,7 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
     {id:'private',agentId:first.id,title:'Weekend plans',createdAt:at,messages:[message('p1','user','Any ideas for Saturday? /pr-review-fe $pr-review-fe'),message('p2','assistant','Coffee, then the botanical garden. Want a quieter route?'),message('p3','user','Yes, somewhere away from the crowds.'),message('p4','assistant','Try the north entrance. It’s usually quieter before 10.')]},
     {id:'room',kind:'room',memberIds:[first.id,'rei','kai'],agentId:first.id,title:'Weekend group',createdAt:at,messages:[message('r1','user','@Oddy @Rei, thoughts on Saturday?'),message('r2','assistant','The garden sounds good. @Rei can check the route.'),message('r3','assistant','Found a quieter entrance. @"Kai Chen", coffee nearby?','rei'),message('r4','assistant','Yes — a café across the road opens at 8.','kai')]}
   ];app.runtime.changed();
-  const browser=await chromium.launch(),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}}),page=await newPageWithoutTutorials(context),errors=[];
+  const browser=await chromium.launch({channel:process.env.ODWYN_TEST_BROWSER_CHANNEL}),context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}}),page=await newPageWithoutTutorials(context),errors=[];
   page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(5000);
   const artifacts=resolve(import.meta.dir,'../artifacts');mkdirSync(artifacts,{recursive:true});
   try {
@@ -86,14 +86,15 @@ test('private and group bubbles identify senders, color safe mentions, and fit m
     await page.evaluate(async()=>{
       const {insertMessages}=await import('/views.js'),{defaults}=await import('/profile.js');
       document.querySelector('#messages').replaceChildren();
-      insertMessages({agents:[{id:'rei',customization:{...defaults,name:'Rei',bodyColor:'#668ad6'}}],skills:[{command:'review-code'}],jobs:[],conversations:[{id:'safe',kind:'room',memberIds:['rei'],messages:[{id:'safe-message',role:'assistant',agentId:'rei',at:new Date().toISOString(),text:'@rei @Unknown email@Rei `@Rei` [@Rei](https://example.com) /review-code $review-code /unknown `/review-code`\n\n```txt\n@Rei /review-code\n```\n\n<script>alert(1)</script>\n\n| Column | Detail |\n| --- | --- |\n| Wide table | '+ 'A'.repeat(250)+' |'}]}]},'safe');
+      insertMessages({agents:[{id:'rei',customization:{...defaults,name:'Rei',bodyColor:'#668ad6'}}],skills:[{command:'review-code'}],jobs:[],conversations:[{id:'safe',kind:'room',memberIds:['rei'],messages:[{id:'safe-message',role:'assistant',agentId:'rei',at:new Date().toISOString(),text:'https://example.com/?jql='+ 'project%20SLS%20'.repeat(40)+'\n\n@rei @Unknown email@Rei `@Rei` [@Rei](https://example.com) /review-code $review-code /unknown `/review-code`\n\n```txt\n@Rei /review-code\n```\n\n<script>alert(1)</script>\n\n| Column | Detail |\n| --- | --- |\n| Wide table | '+ 'A'.repeat(250)+' |'}]}]},'safe');
     });
-    expect(await page.locator('#messages .agent-mention').allTextContents()).toEqual(['@rei']);expect(await page.locator('#messages script').count()).toBe(0);expect(await page.locator('#messages a').getAttribute('href')).toBe('https://example.com');
+    expect(await page.locator('#messages .agent-mention').allTextContents()).toEqual(['@rei']);expect(await page.locator('#messages script').count()).toBe(0);expect(await page.locator('#messages a[href="https://example.com"]').count()).toBe(1);
     expect(await page.locator('#messages .skill-mention').allTextContents()).toEqual(['/review-code','$review-code']);
     for(const width of [320,768,1024,1440]){
       await page.setViewportSize({width,height:900});
       expect(await page.locator('#view').evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
       expect(await page.locator('.table-scroll').evaluate(node=>node.scrollWidth>node.clientWidth)).toBe(true);
+      expect(await page.locator('.message-text p').first().evaluate(node=>node.scrollWidth<=node.clientWidth)).toBe(true);
       expect(await page.locator('.message-bubble').evaluate(node=>node.getBoundingClientRect().right<=innerWidth)).toBe(true);
     }
     const contrasts=await page.evaluate(()=>{

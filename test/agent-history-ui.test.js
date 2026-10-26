@@ -24,6 +24,16 @@ test('agent history searches only that agent and opens current or latest activit
     await page.evaluate(()=>document.querySelectorAll('dialog[open]').forEach(d=>d.close()));
     await page.locator('#agent-roster [data-agent]').first().click();
     await page.locator('#search-dialog[open]').waitFor();
+    mkdirSync('artifacts',{recursive:true});
+    for(const width of [375,1440]){
+      await page.setViewportSize({width,height:960});
+      await page.locator('#search-input').focus();
+      expect(await page.locator('#search-input').evaluate(input=>{
+        const field=input.closest('label'),icon=field.querySelector('[data-icon]'),a=input.getBoundingClientRect(),b=icon.getBoundingClientRect(),style=getComputedStyle(input);
+        return Math.abs(a.y+a.height/2-b.y-b.height/2)<2 && field.scrollWidth<=field.clientWidth && style.borderTopWidth==='0px' && style.outlineStyle==='none' && getComputedStyle(field).outlineStyle!=='none';
+      })).toBe(true);
+      await page.screenshot({path:`artifacts/conversation-search-${width}.png`});
+    }
     expect(await page.locator('#history [data-conversation]').count()).toBe(2);
     expect(await page.locator('#agent-history-latest').getAttribute('data-conversation')).toBe('latest');
     await page.locator('#search-input').fill('needle');
