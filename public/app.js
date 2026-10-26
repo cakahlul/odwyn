@@ -870,13 +870,15 @@ $('#composer').onsubmit = async event => {
   event.preventDefault(); const prompt = $('#prompt').value.trim();
   if ((!prompt && !attachments.length) || busy || $('#send-button').disabled) return;
   busy = true; $('#send-button').disabled = true;
-  await perform(async () => {
+  $('#prompt').readOnly = true; $('#composer').setAttribute('aria-busy','true'); $('#composer-status').textContent = 'Sending…';
+  try { await perform(async () => {
     const room = currentRoom();
     const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt, attachments:attachments.map(file=>file.id), agentId:room ? $('#reply-agent').value : agentId, conversationId, interactionMode:$('#interaction-mode').value });
     $('#prompt').value = ''; $('#prompt').style.height = ''; attachments = []; $('#attachments').replaceChildren(); navigate('chat',room?.id || result.conversationId);
     if (room) { roomRecipients.delete(room.id); $('#reply-agent').value = 'all'; }
-  });
-  busy = false; render();
+  }); } finally {
+    busy = false; $('#prompt').readOnly = false; $('#composer').setAttribute('aria-busy','false'); $('#composer-status').textContent = ''; render();
+  }
 };
 $('#prompt').onkeydown = event => {
   if(event.isComposing||event.keyCode===229)return;
