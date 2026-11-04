@@ -10,7 +10,7 @@ import {setupWorkspaceSettings} from './workspace-settings.js';
 import { renderWorkflows, setupWorkflows } from './workflows-ui.js';
 import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date, workspaceUrl, workspaceId, storageKey, richText } from './ui.js';
 import { renderHome, renderAgentRoster, renderChat, insertMessages, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, conversationHistory } from './views.js';
-import { setupBrowser, updateBrowser } from './browser-ui.js';
+import { setupBrowser, updateBrowser, setBrowserVisible } from './browser-ui.js';
 import { setupCustomization, applyProfile, openCustomization, fillWorkspaceAppearance, readWorkspaceAppearance } from './customize.js';
 import { defaults, agentColor, choices, ownerPreferenceKeys, avatarSvg, currencies, effortLevels } from './profile.js';
 
@@ -91,7 +91,7 @@ const drafts = new Map(JSON.parse(sessionStorage.getItem(storageKey('odwyn-draft
 const closedAgents = new Set(JSON.parse(localStorage.getItem(storageKey('odwyn-closed-agents')) || '[]'));
 const bubblePositions = JSON.parse(localStorage.getItem(storageKey('odwyn-bubble-positions')) || '{}');
 let transitionAgentId = null, drag = null, suppressBubbleClick = null;
-let renamingConversationId = null;
+let renamingConversationId = null, pendingSend = null;
 let editingRoomId = null, saveRoomStage = null, roomListSignature = '', roomMembersSignature = '';
 const roomRecipients = new Map();
 const currentRoom = () => view === 'chat' && workspace?.conversations.find(c => c.id === conversationId && c.kind === 'room');
@@ -109,6 +109,15 @@ function selectState() {
   const agent = workspace.agents.find(a => a.id === agentId) || workspace.agents[0];
   const running = workspace.jobs.find(j => j.id === workspace.runtime.activeJobId);
   state = { ...workspace, agentId:agent.id, customization:agent.customization, provider:agent.provider, schedules:workspace.schedules.filter(s => (s.agentId || workspace.agents[0].id) === agent.id), runtime:{ ...workspace.runtime, ...agent.runtime, model:agent.provider.model, activeAgentName:workspace.agents.find(a => a.id === running?.agentId)?.customization?.name } };
+  if (pendingSend?.jobId && workspace.jobs.some(job=>job.id===pendingSend.jobId)) pendingSend = null;
+  if (pendingSend) {
+    const pending = pendingSend, existing = workspace.conversations.find(c=>c.id===pending.conversationId);
+    const conversation = existing || {id:pending.conversationId,agentId:pending.agentId,title:pending.text.slice(0,70) || 'New conversation',createdAt:pending.at,messages:[]};
+    const message = {id:pending.id,role:'user',agentId:pending.agentId,text:pending.text,attachments:pending.attachments,at:pending.at,jobId:pending.jobId || pending.id};
+    const job = pending.job ? {...pending.job,pendingSend:true} : {id:pending.id,agentId:pending.agentId,conversationId:pending.conversationId,prompt:pending.text,attachments:pending.attachments,interactionMode:pending.interactionMode,status:'sending',createdAt:pending.at,events:[],files:[],toolCount:0,pendingSend:true,optimistic:true};
+    state.conversations = [ ...workspace.conversations.filter(c=>c.id!==conversation.id), {...conversation,messages:[...conversation.messages,message]} ];
+    state.jobs = [job,...workspace.jobs];
+  }
 }
 
 function renderDock() {
@@ -376,7 +385,8 @@ function closeAgent(id) {
 
 function saveDraft() {
   if (!agentId) return;
-  drafts.set(agentId, { view, conversationId, filter, prompt:$('#prompt').value, height:$('#prompt').style.height, attachments, mode:$('#interaction-mode').value, scroll:$('#view').scrollTop, mainScroll:$('#agent-workspace').scrollTop, paused:document.body.classList.contains('mascot-paused') });
+  const pending = pendingSend && !pendingSend.jobId && pendingSend.ownerAgentId === agentId ? pendingSend : null;
+  drafts.set(agentId, { view, conversationId:pending ? pending.previousConversationId : conversationId, filter, prompt:pending ? pending.draftPrompt : $('#prompt').value, height:pending ? pending.draftHeight : $('#prompt').style.height, attachments, mode:$('#interaction-mode').value, scroll:$('#view').scrollTop, mainScroll:$('#agent-workspace').scrollTop, paused:document.body.classList.contains('mascot-paused') });
   sessionStorage.setItem(storageKey('odwyn-drafts'),JSON.stringify([...drafts]));
 }
 addEventListener('pagehide',saveDraft);
@@ -498,7 +508,7 @@ function render() {
 function updateComposerSend(){
   if(!state)return;
   const disabled=state.jobs.some(job=>job.conversationId===conversationId&&activeStatuses.includes(job.status)),room=currentRoom();
-  $('#send-button').disabled=busy||disabled&&!room||!$('#prompt').value.trim()&&!attachments.length;
+  $('#send-button').disabled=busy||!!pendingSend||disabled&&!room||!$('#prompt').value.trim()&&!attachments.length;
   $('#send-button').title=disabled?room?'Stop current discussion and send this direction':'Finish or stop the active run before a follow-up.':'Send message (Enter)';
 }
 
@@ -873,17 +883,24 @@ $('#file-input').onchange = async () => {
   $('#file-input').value = '';
 };
 $('#composer').onsubmit = async event => {
-  event.preventDefault(); const prompt = $('#prompt').value.trim();
+  event.preventDefault(); const draftPrompt = $('#prompt').value, draftHeight = $('#prompt').style.height, prompt = draftPrompt.trim();
   if ((!prompt && !attachments.length) || busy || $('#send-button').disabled) return;
+  const room = currentRoom(), previousConversationId = conversationId, interactionMode = $('#interaction-mode').value;
+  const recipient = room ? $('#reply-agent').value : agentId;
   busy = true; $('#send-button').disabled = true;
   $('#prompt').readOnly = true; $('#composer').setAttribute('aria-busy','true'); $('#composer-status').textContent = 'Sending…';
+  $('#prompt').value = ''; $('#prompt').style.height = '';
+  pendingSend = {ownerAgentId:agentId,previousConversationId,draftPrompt,draftHeight,id:crypto.randomUUID(),conversationId:conversationId || crypto.randomUUID(),agentId:recipient === 'all' ? agentId : recipient,text:prompt,attachments:attachments.map(file=>file.id),interactionMode,at:new Date().toISOString()};
+  conversationId = pendingSend.conversationId; selectState(); signature = ''; render();
+  $('#view').scrollTo({top:$('#view').scrollHeight,behavior:'instant'});
   try {
-    const room = currentRoom();
-    const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt, attachments:attachments.map(file=>file.id), agentId:room ? $('#reply-agent').value : agentId, conversationId, interactionMode:$('#interaction-mode').value });
-    $('#prompt').value = ''; $('#prompt').style.height = ''; attachments = []; $('#attachments').replaceChildren(); navigate('chat',room?.id || result.conversationId);
+    const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt, attachments:pendingSend.attachments, agentId:recipient, conversationId:previousConversationId, interactionMode });
+    const job = room ? result.jobs[0] : result;
+    pendingSend.job = job; pendingSend.jobId = job.id; pendingSend.conversationId = room?.id || job.conversationId; conversationId = pendingSend.conversationId;
+    $('#prompt').value = ''; $('#prompt').style.height = ''; attachments = []; $('#attachments').replaceChildren();
     if (room) { roomRecipients.delete(room.id); $('#reply-agent').value = 'all'; }
-    void refresh();
-  } catch (error) { handleError(error); } finally {
+    selectState(); navigate('chat',conversationId); void refresh();
+  } catch (error) { pendingSend = null; conversationId = previousConversationId; $('#prompt').value = draftPrompt; $('#prompt').style.height = draftHeight; selectState(); handleError(error); } finally {
     busy = false; $('#prompt').readOnly = false; $('#composer').setAttribute('aria-busy','false'); $('#composer-status').textContent = ''; render();
   }
 };
@@ -998,6 +1015,7 @@ document.addEventListener('click', event => {
     } else void switchAgent(id).then(() => { setNavigation(false); if (action === 'customize') openCustomization(); else openAgentProvider(); });
     return;
   }
+  if (target.hasAttribute('data-show-activity')) { setBrowserVisible(true,{activity:true}); $('#activity-tab').click(); $('#activity-tab').focus(); return; }
   if (target.dataset.roomAgent) { $('#room-header').close(); const room = currentRoom(); void switchAgent(target.dataset.roomAgent,{sharedChat:room.id,keepDraft:true}).then(()=>openAgentProvider()); return; }
   if (target.dataset.selectAgent) { openAgentHistory(target.dataset.selectAgent); return; }
   if (target.dataset.closeAgent) { closeAgent(target.dataset.closeAgent); return; }

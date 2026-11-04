@@ -38,6 +38,9 @@ test('browser takeover explains queued work, Open browser preserves control, Han
     await page.locator(`[data-conversation="${job.conversationId}"]`).first().click();
     await page.locator('.working-row small').filter({hasText:'Paused while you control the browser'}).waitFor();
     expect(job.status).toBe('queued');expect(app.runtime.takeover).toBe(true);
+    await page.getByRole('button',{name:'View progress'}).click();
+    await page.locator('#activity-content').waitFor({state:'visible'});
+    await page.locator('#browser-close').click();
     await page.locator('#browser-toggle').click();await page.locator('#browser-takeover-dialog[open]').waitFor();
     expect(await page.locator('#browser-takeover-dialog #takeover-button').count()).toBe(1);
     const bounds=await page.locator('#browser-takeover-dialog').boundingBox(),size=page.viewportSize();

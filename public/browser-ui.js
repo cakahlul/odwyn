@@ -3,8 +3,8 @@ import {workspaceUrl, $, esc, icon, api, handleError } from './ui.js';
 let frame = null; let frameBusy = false; let getState; let emptyMarkup;
 const minimizedPreviews = new Set();
 let previewJobId = null, takeoverActive = false, contentHome;
-export function setBrowserVisible(visible) {
-  if(visible&&getState?.()?.runtime.takeover){openTakeover();return;}
+export function setBrowserVisible(visible, {activity = false} = {}) {
+  if(visible&&!activity&&getState?.()?.runtime.takeover){openTakeover();return;}
   document.body.classList.toggle('browser-closed', !visible);
   const toggle = $('#browser-toggle'), panel = $('#browser-panel');
   if (!visible && panel.contains(document.activeElement)) toggle.focus();

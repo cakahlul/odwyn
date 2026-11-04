@@ -2092,3 +2092,12 @@ input[type=color]::-moz-color-swatch { border:0; border-radius:6px; }
 #browser-takeover-dialog .panel-note{grid-column:2;grid-row:6;margin:0}#browser-takeover-dialog #browser-preview-status{grid-column:1;grid-row:8;margin:0;color:var(--muted);font-size:12px}
 #browser-preview-status:empty{display:none}#browser-preview-status{margin:10px 18px;color:var(--muted);font-size:12px}
 @media(max-width:760px){#browser-takeover-dialog{width:96vw;max-width:96vw;max-height:96dvh}#browser-takeover-dialog #browser-content{display:flex;flex-direction:column;padding:12px}#browser-takeover-dialog #browser-content>*{width:100%;box-sizing:border-box}#browser-takeover-dialog>.modal-top{padding:12px}#browser-takeover-dialog .panel-note{display:none}}
+
+.working-row { flex-wrap:wrap; }
+.working-row>span { flex:1 1 120px; }
+.typing-dots { display:inline-flex; gap:3px; margin-left:5px; vertical-align:middle; }
+.typing-dots i { width:4px; height:4px; border-radius:50%; background:currentColor; animation:typing-dot 1.2s infinite ease-in-out; }
+.typing-dots i:nth-child(2) { animation-delay:.15s; }
+.typing-dots i:nth-child(3) { animation-delay:.3s; }
+@keyframes typing-dot { 0%,60%,100% { opacity:.35; transform:translateY(0); } 30% { opacity:1; transform:translateY(-3px); } }
+@media (prefers-reduced-motion:reduce) { .typing-dots i { animation:none; } }
