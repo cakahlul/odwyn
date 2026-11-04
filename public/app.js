@@ -502,16 +502,22 @@ function updateComposerSend(){
   $('#send-button').title=disabled?room?'Stop current discussion and send this direction':'Finish or stop the active run before a follow-up.':'Send message (Enter)';
 }
 
-async function refresh() {
-  try {
-    const response = await fetch(workspaceUrl(`/api/state${state ? `?revision=${state.revision}` : ''}`));
-    if (response.status === 204) return;
-    if (!response.ok) throw new Error('Connection lost. Reload to sign in.');
-    workspace = await response.json();
-    if (agentId === 'minimized') agentId = null;
-    else if (agentId !== null && !workspace.agents.some(a => a.id === agentId) || !state && agentId === null && localStorage.getItem(storageKey('odwyn-agent')) !== 'minimized') agentId = workspace.agents[0].id;
-    selectState(); render();
-  } catch (error) { $('#connection-label').textContent = 'Reconnecting…'; $('.connection').classList.remove('connected'); if (!state) handleError(error); }
+let refreshing = null;
+function refresh() {
+  if (refreshing) return refreshing;
+  refreshing = (async () => {
+    try {
+      const response = await fetch(workspaceUrl(`/api/state${state ? `?revision=${state.revision}` : ''}`), {signal:AbortSignal.timeout(10_000)});
+      if (response.status === 204) return;
+      if (!response.ok) throw new Error('Connection lost. Reload to sign in.');
+      workspace = await response.json();
+      if (agentId === 'minimized') agentId = null;
+      else if (agentId !== null && !workspace.agents.some(a => a.id === agentId) || !state && agentId === null && localStorage.getItem(storageKey('odwyn-agent')) !== 'minimized') agentId = workspace.agents[0].id;
+      selectState(); render();
+    } catch (error) { $('#connection-label').textContent = 'Reconnecting…'; $('.connection').classList.remove('connected'); if (!state) handleError(error); }
+    finally { refreshing = null; }
+  })();
+  return refreshing;
 }
 
 async function perform(fn) { try { await fn(); await refresh(); } catch (error) { handleError(error); } }
@@ -871,12 +877,13 @@ $('#composer').onsubmit = async event => {
   if ((!prompt && !attachments.length) || busy || $('#send-button').disabled) return;
   busy = true; $('#send-button').disabled = true;
   $('#prompt').readOnly = true; $('#composer').setAttribute('aria-busy','true'); $('#composer-status').textContent = 'Sending…';
-  try { await perform(async () => {
+  try {
     const room = currentRoom();
     const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt, attachments:attachments.map(file=>file.id), agentId:room ? $('#reply-agent').value : agentId, conversationId, interactionMode:$('#interaction-mode').value });
     $('#prompt').value = ''; $('#prompt').style.height = ''; attachments = []; $('#attachments').replaceChildren(); navigate('chat',room?.id || result.conversationId);
     if (room) { roomRecipients.delete(room.id); $('#reply-agent').value = 'all'; }
-  }); } finally {
+    void refresh();
+  } catch (error) { handleError(error); } finally {
     busy = false; $('#prompt').readOnly = false; $('#composer').setAttribute('aria-busy','false'); $('#composer-status').textContent = ''; render();
   }
 };
