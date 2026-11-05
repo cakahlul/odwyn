@@ -104,6 +104,10 @@ function pendingCard(job,index=0) {
   return `<section class="approval-card" data-request="${esc(pending.id)}" aria-label="Pending owner input"><div class="approval-heading"><span class="approval-icon">${icon(pending.type === 'question' ? 'chat' : 'shield')}</span><span class="eyebrow">OVER TO YOU</span></div><h2>${esc(pending.title)}</h2><p>${esc(pending.detail)}</p>${pending.url ? `<div class="approval-target">${icon('globe')}<span>${esc(pending.url)}</span></div>` : ''}${pending.target ? `<p class="approval-preview">Target: <strong>${esc(pending.target)}</strong>${pending.preview ? `<br>${pending.type === 'terminal' ? `Command: <code>${esc(pending.preview)}</code>` : `Text: ${esc(pending.preview)}`}` : ''}</p>` : ''}${pending.type === 'question' ? `<form class="answer-form" data-answer-job="${esc(job.id)}" data-request="${esc(pending.id)}">${pending.options ? `<fieldset class="workflow-review-options"><legend>Select items to approve</legend>${pending.options.map(o=>`<label><input type="checkbox" name="selected" value="${esc(o.id)}"><span>${esc(o.label)}</span></label>`).join('')}</fieldset>` : ''}<label class="sr-only" for="${esc(answerId)}">Your answer</label><textarea id="${esc(answerId)}" name="answer" ${pending.options ? '':'required'} rows="2" maxlength="8000" placeholder="${pending.options ? 'Add edits or instructions for the selected items…':'Add the missing detail, or take browser control…'}"></textarea><button class="primary-button">Continue${icon('arrow-up')}</button></form>` : `<div class="approval-actions"><button class="primary-button" data-decision="allow" data-job="${esc(job.id)}" data-request="${esc(pending.id)}">Allow action${icon('check')}</button><button class="secondary-button" data-decision="deny" data-job="${esc(job.id)}" data-request="${esc(pending.id)}">Decline</button>${!['payment','credential'].includes(pending.risk) ? `<button class="text-button" data-decision="allow-run" data-job="${esc(job.id)}" data-request="${esc(pending.id)}">Always approve · except payments</button>` : ''}</div>`}</section>`;
 }
 
+export function quoteMarkup(quote) {
+  return `<blockquote class="message-quote"><strong>${esc(quote.author)}</strong><p>${esc(quote.text)}</p></blockquote>`;
+}
+
 export function insertMessages(state, conversationId) {
   const container = $('#messages');
   if (!container) return;
@@ -128,12 +132,13 @@ export function insertMessages(state, conversationId) {
     const response=message.role==='assistant' && step?.responsePrompt && conversation.messages.findLast(m=>m.jobId===message.jobId && m.role==='assistant')===message ? {jobId:sourceJob.id,messageId:message.id,items:step.responseItems,label:step.responseLabel,title:step.name,sent:!!message.responseJobId,selected:message.responseSelected,notes:message.responseNotes,disabled:sourceJob.status!=='completed' || state.workflowRuns?.find(run=>run.id===sourceJob.workflowRunId)?.status!=='completed' || state.jobs.some(j=>j.conversationId===conversationId && activeStatuses.includes(j.status))} : null;
     const bubble = article.querySelector('.message-bubble'), content = richText(message.text, {cards:message.role === 'assistant',response});
     colorMentions(content,members,[...(state.skills || []),...(state.workflows || [])]);
+    if(message.replyTo)bubble.insertAdjacentHTML('beforeend',quoteMarkup(message.replyTo));
     bubble.append(content);
     if (files.length) {
       bubble.insertAdjacentHTML('beforeend',renderAttachments(state,files));
       article.querySelectorAll('.answer-file img').forEach(img=>img.addEventListener('error',()=>{ img.parentElement.hidden=true; },{once:true}));
     }
-    bubble.insertAdjacentHTML('beforeend',`<div class="message-footer"><time datetime="${esc(message.at)}">${esc(new Intl.DateTimeFormat(undefined, {hour:'numeric',minute:'2-digit'}).format(new Date(message.at)))}</time><button class="icon-button copy-message" data-copy="${esc(message.id)}" aria-label="Copy message">${icon('copy')}</button></div>`);
+    bubble.insertAdjacentHTML('beforeend',`<div class="message-footer"><time datetime="${esc(message.at)}">${esc(new Intl.DateTimeFormat(undefined, {hour:'numeric',minute:'2-digit'}).format(new Date(message.at)))}</time><button class="icon-button quote-message" ${sourceJob?.pendingSend ? 'disabled':''} data-quote="${esc(message.id)}" aria-label="Quote message" title="Quote message">${icon('chat')}</button><button class="icon-button copy-message" data-copy="${esc(message.id)}" aria-label="Copy message">${icon('copy')}</button></div>`);
     container.append(article);
   }
   container.classList.toggle('multiple-senders',authors.size > 1);

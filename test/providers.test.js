@@ -205,7 +205,7 @@ test('Claude SDK uses restricted tools, streams output, waits for owner input, a
     await runtime.refreshAccount(); const job = runtime.submit({ conversationId: conversation.id, prompt: 'Ask my preference', interactionMode:'allow' });
     await wait(() => job.status === 'waiting'); runtime.answer(job.id, { requestId: job.pending.id, answer: 'Morning' });
     await wait(() => job.status === 'completed');
-    expect(runtime.conversation(job).messages.filter(m => m.role === 'assistant').map(m => m.text)).toEqual(['Understood.']);
+    expect(runtime.conversation(job).messages.filter(m => m.role === 'assistant').map(m => m.text)).toEqual(['Your preference?','Understood.']);
     const usage=runtime.accounts.get(store.state.agents[0].id).usage;
     expect(usage.limits[0]).toMatchObject({name:'5-hour limit',usedPercent:80,status:'allowed_warning',resetsAt:1900000000});
     expect(usage.limits[1]).toMatchObject({name:'Weekly limit',usedPercent:null,status:'allowed'});

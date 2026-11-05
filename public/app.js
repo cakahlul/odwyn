@@ -9,7 +9,7 @@ import {setupWorkspaceHomes} from './workspace-homes.js';
 import {setupWorkspaceSettings} from './workspace-settings.js';
 import { renderWorkflows, setupWorkflows } from './workflows-ui.js';
 import { $, esc, icon, hydrateIcons, api, toast, handleError, activeStatuses, date, workspaceUrl, workspaceId, storageKey, richText } from './ui.js';
-import { renderHome, renderAgentRoster, renderChat, insertMessages, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, conversationHistory } from './views.js';
+import { renderHome, renderAgentRoster, renderChat, insertMessages, quoteMarkup, colorMentions, renderRuns, renderRoutines, renderFiles, renderActivity, conversationHistory } from './views.js';
 import { setupBrowser, updateBrowser, setBrowserVisible } from './browser-ui.js';
 import { setupCustomization, applyProfile, openCustomization, fillWorkspaceAppearance, readWorkspaceAppearance } from './customize.js';
 import { defaults, agentColor, choices, ownerPreferenceKeys, avatarSvg, currencies, effortLevels } from './profile.js';
@@ -94,6 +94,7 @@ let transitionAgentId = null, drag = null, suppressBubbleClick = null;
 let renamingConversationId = null, pendingSend = null;
 let editingRoomId = null, saveRoomStage = null, roomListSignature = '', roomMembersSignature = '';
 const roomRecipients = new Map();
+const quoteDrafts = new Map();
 const currentRoom = () => view === 'chat' && workspace?.conversations.find(c => c.id === conversationId && c.kind === 'room');
 const providers = { codex: ['Codex','gpt-6.1-sol'], claude: ['Claude Code','sonnet'], antigravity:['Antigravity CLI','default'], openai: ['OpenAI-compatible API',''] };
 const currencyNames = new Intl.DisplayNames(['en'],{type:'currency'});
@@ -113,7 +114,7 @@ function selectState() {
   if (pendingSend) {
     const pending = pendingSend, existing = workspace.conversations.find(c=>c.id===pending.conversationId);
     const conversation = existing || {id:pending.conversationId,agentId:pending.agentId,title:pending.text.slice(0,70) || 'New conversation',createdAt:pending.at,messages:[]};
-    const message = {id:pending.id,role:'user',agentId:pending.agentId,text:pending.text,attachments:pending.attachments,at:pending.at,jobId:pending.jobId || pending.id};
+    const message = {id:pending.id,role:'user',replyTo:pending.replyTo,agentId:pending.agentId,text:pending.text,attachments:pending.attachments,at:pending.at,jobId:pending.jobId || pending.id};
     const job = pending.job ? {...pending.job,pendingSend:true} : {id:pending.id,agentId:pending.agentId,conversationId:pending.conversationId,prompt:pending.text,attachments:pending.attachments,interactionMode:pending.interactionMode,status:'sending',createdAt:pending.at,events:[],files:[],toolCount:0,pendingSend:true,optimistic:true};
     state.conversations = [ ...workspace.conversations.filter(c=>c.id!==conversation.id), {...conversation,messages:[...conversation.messages,message]} ];
     state.jobs = [job,...workspace.jobs];
@@ -386,7 +387,7 @@ function closeAgent(id) {
 function saveDraft() {
   if (!agentId) return;
   const pending = pendingSend && !pendingSend.jobId && pendingSend.ownerAgentId === agentId ? pendingSend : null;
-  drafts.set(agentId, { view, conversationId:pending ? pending.previousConversationId : conversationId, filter, prompt:pending ? pending.draftPrompt : $('#prompt').value, height:pending ? pending.draftHeight : $('#prompt').style.height, attachments, mode:$('#interaction-mode').value, scroll:$('#view').scrollTop, mainScroll:$('#agent-workspace').scrollTop, paused:document.body.classList.contains('mascot-paused') });
+  drafts.set(agentId, { view, conversationId:pending ? pending.previousConversationId : conversationId, filter, replyTo:quoteDrafts.get(conversationId) || null, prompt:pending ? pending.draftPrompt : $('#prompt').value, height:pending ? pending.draftHeight : $('#prompt').style.height, attachments, mode:$('#interaction-mode').value, scroll:$('#view').scrollTop, mainScroll:$('#agent-workspace').scrollTop, paused:document.body.classList.contains('mascot-paused') });
   sessionStorage.setItem(storageKey('odwyn-drafts'),JSON.stringify([...drafts]));
 }
 addEventListener('pagehide',saveDraft);
@@ -395,6 +396,7 @@ addEventListener('workspace-deleted',event=>{if(event.detail===workspaceId)agent
 function restoreDraft() {
   const draft = drafts.get(agentId);
   view = draft?.view || 'chat'; conversationId = draft?.conversationId || null; filter = draft?.filter || 'all'; attachments = draft?.attachments || [];
+  if(draft?.replyTo)quoteDrafts.set(conversationId,draft.replyTo);
   $('#prompt').value = draft?.prompt || ''; $('#prompt').style.height = draft?.height || '';
   $('#interaction-mode').value = draft?.mode || 'confirm'; renderAttachments();
   document.body.classList.toggle('mascot-paused',!!draft?.paused);
@@ -437,8 +439,16 @@ function navigate(next = 'chat', id = null) {
   if (view === 'home') $('#view').scrollTop = 0;
 }
 
+function renderQuotePreview() {
+  const quote=quoteDrafts.get(conversationId),preview=$('#quoted-message');
+  preview.hidden=!quote;
+  const markup=quote ? `${quoteMarkup(quote)}<button type="button" class="icon-button" id="clear-message-quote" aria-label="Remove quote">${icon('close')}</button>` : '';
+  if(preview.innerHTML!==markup)preview.innerHTML=markup;
+}
+
 function render() {
   if (!state) return;
+  renderQuotePreview();
   visitTutorial(view);
   renderDock();
   const roster = renderAgentRoster(workspace,view === 'chat' ? agentId : null);
@@ -887,16 +897,18 @@ $('#composer').onsubmit = async event => {
   if ((!prompt && !attachments.length) || busy || $('#send-button').disabled) return;
   const room = currentRoom(), previousConversationId = conversationId, interactionMode = $('#interaction-mode').value;
   const recipient = room ? $('#reply-agent').value : agentId;
+  const replyTo=quoteDrafts.get(conversationId);
   busy = true; $('#send-button').disabled = true;
   $('#prompt').readOnly = true; $('#composer').setAttribute('aria-busy','true'); $('#composer-status').textContent = 'Sending…';
   $('#prompt').value = ''; $('#prompt').style.height = '';
-  pendingSend = {ownerAgentId:agentId,previousConversationId,draftPrompt,draftHeight,id:crypto.randomUUID(),conversationId:conversationId || crypto.randomUUID(),agentId:recipient === 'all' ? agentId : recipient,text:prompt,attachments:attachments.map(file=>file.id),interactionMode,at:new Date().toISOString()};
+  pendingSend = {ownerAgentId:agentId,previousConversationId,draftPrompt,draftHeight,replyTo,id:crypto.randomUUID(),conversationId:conversationId || crypto.randomUUID(),agentId:recipient === 'all' ? agentId : recipient,text:prompt,attachments:attachments.map(file=>file.id),interactionMode,at:new Date().toISOString()};
   conversationId = pendingSend.conversationId; selectState(); signature = ''; render();
   $('#view').scrollTo({top:$('#view').scrollHeight,behavior:'instant'});
   try {
-    const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt, attachments:pendingSend.attachments, agentId:recipient, conversationId:previousConversationId, interactionMode });
+    const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt, replyToMessageId:replyTo?.messageId, attachments:pendingSend.attachments, agentId:recipient, conversationId:previousConversationId, interactionMode });
     const job = room ? result.jobs[0] : result;
     pendingSend.job = job; pendingSend.jobId = job.id; pendingSend.conversationId = room?.id || job.conversationId; conversationId = pendingSend.conversationId;
+    quoteDrafts.delete(previousConversationId);
     $('#prompt').value = ''; $('#prompt').style.height = ''; attachments = []; $('#attachments').replaceChildren();
     if (room) { roomRecipients.delete(room.id); $('#reply-agent').value = 'all'; }
     selectState(); navigate('chat',conversationId); void refresh();
@@ -1044,6 +1056,12 @@ document.addEventListener('click', event => {
   if (target.hasAttribute('data-schedule-open')) openSchedule();
   if (target.hasAttribute('data-upload')) $('#file-input').click();
   if (target.dataset.filter) { filter = target.dataset.filter; signature = ''; render(); }
+  if(target.dataset.quote){
+    const message=state.conversations.find(c=>c.id===conversationId)?.messages.find(m=>m.id===target.dataset.quote);
+    if(message){quoteDrafts.set(conversationId,{messageId:message.id,role:message.role,text:message.text || '[Attachment]',author:target.closest('.message').querySelector('.message-meta strong').textContent});renderQuotePreview();$('#prompt').focus();saveDraft();}
+    return;
+  }
+  if(target.id==='clear-message-quote'){quoteDrafts.delete(conversationId);renderQuotePreview();$('#prompt').focus();saveDraft();return;}
   if (target.dataset.cancel) void perform(() => api(`/api/jobs/${target.dataset.cancel}/cancel`,{}));
   if (target.dataset.stopRoom) void perform(() => api(`/api/rooms/${target.dataset.stopRoom}/cancel`,{}));
   if (target.dataset.retry) void perform(() => api(`/api/jobs/${target.dataset.retry}/retry`,{}));

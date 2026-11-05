@@ -35,6 +35,7 @@
         <div id="attachments" class="attachments"></div>
         <button type="button" id="room-pass-next" class="secondary-button" hidden>Pass to next room</button>
         <form id="composer" class="composer">
+          <div id="quoted-message" class="quoted-message" role="status" aria-live="polite" hidden></div>
           <label class="sr-only" for="prompt">What would you like Odwyn to do?</label>
           <div class="prompt-editor"><div id="prompt-highlights" aria-hidden="true"></div><textarea id="prompt" rows="1" maxlength="20000" aria-describedby="composer-keyboard-hint" placeholder="Describe a task or ask a question…"></textarea></div>
           <div id="room-mentions" class="room-mentions" role="group" aria-label="Mention a room agent" hidden></div>

@@ -268,7 +268,18 @@ export function validateAttachments(state, ids = []) {
   return [...new Set(ids)];
 }
 
+export function messageQuote(state, conversationId, messageId) {
+  if(messageId===undefined || messageId===null)return null;
+  const conversation=state.conversations.find(c=>c.id===conversationId);
+  const message=typeof messageId==='string' && conversation?.messages.find(m=>m.id===messageId);
+  if(!message || !['user','assistant'].includes(message.role))throw new Error('Choose a message from this conversation to quote.');
+  const agent=state.agents.find(a=>a.id===(message.agentId || state.jobs.find(j=>j.id===message.jobId)?.agentId || conversation.agentId));
+  const author=message.role==='user' ? state.owner?.ownerName || 'You' : (agent?.id===state.agents[0].id ? state.customization?.name : agent?.customization?.name) || message.agentProfile?.name || defaults.name;
+  return {messageId:message.id,author,role:message.role,text:message.text || '[Attachment]'};
+}
+
 export function createJob(state, input, recordMessage = true) {
+  const replyTo=messageQuote(state,input.conversationId,input.replyToMessageId);
   const attachments = validateAttachments(state,input.attachments);
   const prompt = textInput(input.prompt || (attachments.length ? 'Describe the attached files.' : input.prompt));
   const interactionMode = input.interactionMode || 'confirm';
@@ -285,8 +296,9 @@ export function createJob(state, input, recordMessage = true) {
     state.conversations.unshift(conversation);
   }
   const job = { id: randomUUID(), agentId: agent.id, conversationId: conversation.id, prompt, attachments, interactionMode, status: 'queued', createdAt: now, events: [], toolCount: 0, files: [], scheduleId: input.scheduleId || null };
+  if(replyTo)job.replyTo=replyTo;
   conversation.lastAgentId = agent.id;
-  if (recordMessage) conversation.messages.push({ id: randomUUID(), agentId:agent.id, role: 'user', text: prompt, attachments, at: now, jobId: job.id });
+  if (recordMessage) conversation.messages.push({ id: randomUUID(), agentId:agent.id, role: 'user', text: prompt, attachments, ...(replyTo?{replyTo}:{}), at: now, jobId: job.id });
   state.jobs.unshift(job);
   return job;
 }
