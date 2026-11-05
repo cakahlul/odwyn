@@ -2,6 +2,7 @@ import {workspaceUrl, $, esc, icon, api, handleError } from './ui.js';
 
 let frame = null; let frameBusy = false; let getState; let emptyMarkup;
 const minimizedPreviews = new Set();
+let locationLoaded=false;
 let previewJobId = null, takeoverActive = false, contentHome;
 export function setBrowserVisible(visible, {activity = false} = {}) {
   if(visible&&!activity&&getState?.()?.runtime.takeover){openTakeover();return;}
@@ -112,6 +113,15 @@ export function updateBrowser(state) {
   updateConversationFrame();
   if (preview?.open && frame?.jobId !== preview.dataset.job) void refreshFrame();
   const controlled = state.runtime.takeover;
+  if(controlled&&!takeoverActive){
+    const location=state.browserLocation;
+    if(location || !locationLoaded){
+      $('#browser-latitude').value=location?.latitude ?? '';
+      $('#browser-longitude').value=location?.longitude ?? '';
+      $('#browser-remember-location').checked=!!location;
+      locationLoaded=true;
+    }
+  }
   $('#takeover-button').innerHTML = controlled ? `Hand back ${icon('play')}` : `Take control ${icon('cursor')}`;
   $('#control-state').textContent = controlled ? 'You’re in control' : state.runtime.activeJobId ? `${state.runtime.activeAgentName || state.customization?.name || 'Odwyn'} is working` : state.runtime.browserOpen ? 'Browser open' : 'Browser closed';
   $('#takeover-controls').hidden = !controlled; $('#browser-navigate').hidden = !controlled;
@@ -167,6 +177,21 @@ export function setupBrowser(stateGetter) {
   $('#browser-navigate').onsubmit = event => { event.preventDefault(); void action({ action:'navigate', url:$('#navigate-url').value }); };
   $('#browser-type').onsubmit = event => { event.preventDefault(); const text = $('#browser-text').value; $('#browser-text').value = ''; void action({ action:'type', text }); };
   $('#browser-back').onclick = () => action({ action:'back' });
+  async function saveLocation(clear=false){
+    const form=$('#browser-location'),status=$('#browser-location-status');
+    if(!clear&&!form.reportValidity())return;
+    const location=clear ? null : {latitude:$('#browser-latitude').valueAsNumber,longitude:$('#browser-longitude').valueAsNumber};
+    const remember=!clear&&$('#browser-remember-location').checked;
+    const buttons=[...form.querySelectorAll('button')];buttons.forEach(button=>button.disabled=true);
+    try{
+      await api('/api/browser/location',{location,remember});
+      if(clear){$('#browser-latitude').value='';$('#browser-longitude').value='';$('#browser-remember-location').checked=false;}
+      status.textContent=clear ? 'Location cleared.' : remember ? 'Location remembered for this workspace.' : 'Location applied to the current site.';
+    }catch(error){status.textContent=error.message;}
+    finally{buttons.forEach(button=>button.disabled=false);}
+  }
+  $('#browser-location').onsubmit=event=>{event.preventDefault();void saveLocation();};
+  $('#browser-clear-location').onclick=()=>saveLocation(true);
   $('#takeover-controls').onclick = event => {
     const key = event.target.closest('[data-key]'); const scroll = event.target.closest('[data-scroll]');
     if (key) void action({ action:'press', text:key.dataset.key });

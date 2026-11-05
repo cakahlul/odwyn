@@ -125,6 +125,7 @@ test('Stop interrupts browser work before waiting for provider acknowledgement',
     const request = codex.request.bind(codex);
     codex.request = (method, params) => method === 'turn/interrupt'
       ? new Promise(resolve => { release = resolve; }) : request(method, params);
+    runtime.browser.owner=job.id;
     const stopped = runtime.cancel(job.id);
     expect(interrupted).toBe(true);
     await Bun.sleep(0);
@@ -150,6 +151,7 @@ test('task cleanup blocks the next task, skips queued cancellations and owner ta
     for (const status of ['completed','failed','cancelled','interrupted']) {
       const job = runtime.submit({prompt:'First task'}); await runtime.drain();
       const next = runtime.submit({prompt:'Next task'});
+      browser.owner=job.id;
       runtime.finish(job,status);
       const cleaning = runtime.cleaning, drain = runtime.drain();
       expect(resets).toBe(['completed','failed','cancelled','interrupted'].indexOf(status)+1);
@@ -172,6 +174,7 @@ test('task cleanup blocks the next task, skips queued cancellations and owner ta
     const queued = runtime.submit({prompt:'Cancel queued task'});
     await runtime.cancel(queued.id);
     expect(resets).toBe(4);
+    browser.owner=runtime.active.id;
     await runtime.cancelRoom(room.id);
     expect(resets).toBe(5);
     release(); await runtime.cleaning;
@@ -604,7 +607,8 @@ test('agents keep separate identities, threads and recall while sharing the brow
     const pip = runtime.submit({prompt:'Pip private context'});
     const scout = runtime.submit({prompt:'Scout private context',agentId:'scout'});
     await runtime.drain();
-    expect(pip.status).toBe('running'); expect(scout.status).toBe('queued'); expect(second.calls.some(c => c.method === 'turn/start')).toBe(false);
+    expect(pip.status).toBe('running'); expect(scout.status).toBe('running'); expect(second.calls.some(c => c.method === 'turn/start')).toBe(true);
+    expect(runtime.activeJobs()).toHaveLength(2);
     expect(store.search('private','scout').map(c => c.text)).toEqual(['Scout private context']);
     first.emit('notification',{method:'turn/completed',params:{threadId:pip.threadId,turn:{id:pip.turnId,status:'completed'}}});
     await runtime.drain();
@@ -667,4 +671,64 @@ test('provider completion before a browser response interrupts the task instead 
   expect(job.status).toBe('interrupted');expect(job.error).toContain('browser response');
   release({url:'https://example.com',text:'Read returned',elements:[]});await request;
  }finally{release({url:'about:blank',text:'Finished',elements:[]});await runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('a room progresses alongside another agent and stopping it leaves that agent running',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'odwyn-parallel-room-')),store=openStore(dir),first=new FakeCodex(),second=new FakeCodex();
+  const primary=store.state.agents[0].id;
+  store.state.agents.push({id:'scout',customization:{...defaults,name:'Scout'}});
+  const runtime=new Runtime({store,codex:first,browser:{},workspace:dir});runtime.addProvider('scout',second);
+  try{
+    await runtime.refreshAccount();await runtime.refreshAccount('scout');
+    const chat=runtime.submit({prompt:'Keep working'});await runtime.drain();
+    const room=createRoom(store.state,{spaceId:'legacy',title:'Parallel room',memberIds:[primary,'scout']});
+    const jobs=runtime.submitRoom(room.id,{prompt:'@Scout Research independently',agentId:'scout'});await runtime.drain();
+    expect(chat.status).toBe('running');expect(jobs[0].status).toBe('running');
+    expect(runtime.activeJobs()).toHaveLength(2);
+    const ask=(provider,job,id)=>provider.emit('request',{id,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_ask',arguments:{question:'Continue?'}}});
+    ask(first,chat,101);ask(second,jobs[0],102);await Bun.sleep(1);
+    expect(chat.pending.type).toBe('question');expect(jobs[0].pending.type).toBe('question');
+    runtime.answer(jobs[0].id,{requestId:jobs[0].pending.id,answer:'Yes'});await Bun.sleep(1);
+    expect(chat.status).toBe('waiting');expect(jobs[0].status).toBe('running');
+    await runtime.cancelRoom(room.id);
+    expect(jobs[0].status).toBe('cancelled');expect(chat.status).toBe('waiting');
+  }finally{await runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('activity follows provider output and actual browser work, then returns to working',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'odwyn-activity-')),store=openStore(dir),codex=new FakeCodex();
+  let release;
+  const browser={action:()=>new Promise(resolve=>{release=()=>resolve({text:'Read page'});})};
+  const runtime=new Runtime({store,codex,browser,workspace:dir});
+  try{
+    await runtime.refreshAccount();const job=runtime.submit({prompt:'Research',interactionMode:'allow'});await runtime.drain();
+    expect(job.activity).toBe('working');
+    const notify=(method,extra={})=>codex.emit('notification',{method,params:{threadId:job.threadId,turnId:job.turnId,...extra}});
+    notify('item/started',{item:{id:'reason',type:'reasoning'}});expect(job.activity).toBe('thinking');
+    notify('item/completed',{item:{id:'reason',type:'reasoning'}});expect(job.activity).toBe('working');
+    notify('turn/plan/updated',{plan:[]});expect(job.activity).toBe('planning');
+    notify('item/agentMessage/delta',{itemId:'reply',delta:'Checking sources.'});expect(job.activity).toBe('typing');
+    notify('item/completed',{item:{id:'reply',type:'agentMessage',text:'Checking sources.'}});expect(job.activity).toBe('working');
+    const request=runtime.handleRequest({id:201,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_browser',arguments:{action:'read',reason:'Read the source'}}});
+    await Bun.sleep(1);expect(job.activity).toBe('browsing');expect(job.activeTool).toBe('odwyn_browser');
+    release();await request;expect(job.activity).toBe('working');expect(job.activeTool).toBeUndefined();
+    notify('item/started',{turnId:'stale',item:{id:'old',type:'reasoning'}});expect(job.activity).toBe('working');
+  }finally{release?.();await runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('agent location sharing shows origin and coordinates for approval before browser execution',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'odwyn-location-approval-')),store=openStore(dir),codex=new FakeCodex(),calls=[];
+  const browser={last:{url:'https://example.com',elements:[]},action:async input=>{calls.push(input);return {url:'https://example.com'};}};
+  const runtime=new Runtime({store,codex,browser,workspace:dir});
+  try{
+    await runtime.refreshAccount();const job=runtime.submit({prompt:'Use my supplied location',interactionMode:'safe'});await runtime.drain();
+    const request=runtime.handleRequest({id:301,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_browser',arguments:{action:'set_location',url:'https://example.com/map',latitude:-6.2,longitude:106.8,reason:'Share the owner-supplied location'}}});
+    await Bun.sleep(1);
+    expect(job.pending.title).toBe('Share browser location?');
+    expect(job.pending.target).toBe('https://example.com');
+    expect(job.pending.preview).toBe('Latitude: -6.2, longitude: 106.8');
+    expect(calls).toHaveLength(0);
+    runtime.answer(job.id,{requestId:job.pending.id,decision:'allow'});await request;
+    expect(calls[0]).toMatchObject({action:'set_location',latitude:-6.2,longitude:106.8});
+  }finally{await runtime.close();store.close();rmSync(dir,{recursive:true,force:true});}
 });

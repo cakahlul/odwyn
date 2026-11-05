@@ -3,10 +3,11 @@ import { mkdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { startProxy } from './proxy.js';
-import { validateAction, resolvePublic } from './security.js';
+import { validateAction, validateLocation, resolvePublic } from './security.js';
 
 export class Browser {
-  constructor({ directory, onFile = () => {}, findFile = () => null, executablePath, headless = true, proxyOptions, contextOptions, onContext }) {
+  constructor({ directory, onFile = () => {}, findFile = () => null, executablePath, headless = true, proxyOptions, contextOptions, onContext, getLocation = () => null }) {
+    this.getLocation=getLocation;
     this.proxyOptions=proxyOptions;this.contextOptions=contextOptions;this.onContext=onContext;
     this.directory = directory; this.onFile = onFile; this.findFile = findFile;
     this.executablePath = executablePath; this.headless = headless;
@@ -57,6 +58,11 @@ export class Browser {
       this.launching = launching;
       const context = await launching;
       if (generation !== this.generation) { await context.close(); throw new Error('Browser operation interrupted.'); }
+      const location=this.getLocation();
+      if(location){
+        await context.setGeolocation(validateLocation(location));
+        await context.grantPermissions(['geolocation']);
+      }
       this.context = context;
       await context.route('**/api/connections/oauth/callback?*',async route=>{
         const request=route.request();
@@ -75,6 +81,22 @@ export class Browser {
       this.page = this.context.pages()[0] || await this.context.newPage();
     } catch (error) { proxy.close(); if (this.proxy === proxy) this.proxy = null; throw error; }
     finally { this.launching = null; }
+  }
+
+  setLocation(location, remember = false, allowed = () => true) {
+    const coordinates=location===null ? null : validateLocation(location);
+    return this.serial(async()=>{
+      if(!allowed())throw new Error('Take browser control first.');
+      await this.start();
+      if(!allowed())throw new Error('Browser control changed.');
+      const origin=coordinates && !remember ? new URL(this.page.url()).origin : null;
+      if(origin && !origin.startsWith('https://'))throw new Error('Open an HTTPS website before sharing a temporary location.');
+      await this.context.clearPermissions();
+      await this.context.setGeolocation(coordinates);
+      if(coordinates){
+        await this.context.grantPermissions(['geolocation'],origin ? {origin} : undefined);
+      }
+    });
   }
 
   attach(page) {
@@ -206,9 +228,16 @@ export class Browser {
       if (this.dialog && command.action !== 'dialog') return this.snapshot();
       const page = this.page;
       const element = command.ref !== undefined ? page.locator(`[data-odwyn-ref="${command.ref}"]`) : null;
-      if (['navigate','new_tab'].includes(command.action)) await resolvePublic(command.url);
+      if (['navigate','new_tab','set_location'].includes(command.action)) await resolvePublic(command.url);
       if (generation !== this.generation || !allowed()) throw new Error('Browser control changed.');
       const execute = async () => { switch (command.action) {
+        case 'set_location': {
+          const origin=new URL(command.url).origin;
+          await this.context.clearPermissions();
+          await this.context.setGeolocation({latitude:command.latitude,longitude:command.longitude});
+          await this.context.grantPermissions(['geolocation'],{origin});
+          break;
+        }
         case 'navigate': await page.goto(command.url, { waitUntil: 'domcontentloaded' }); break;
         case 'new_tab': this.page = await this.context.newPage(); await this.page.goto(command.url, { waitUntil: 'domcontentloaded' }); break;
         case 'tab': { const tab = this.context.pages()[command.index]; if (!tab) throw new Error('Tab not found.'); this.page = tab; break; }

@@ -275,6 +275,7 @@ export class AIProvider extends EventEmitter {
         }
         if (message.type === 'stream_event') {
           if (message.event.type === 'message_start') { itemId = randomUUID(); text = ''; }
+          if (message.event.delta?.type === 'thinking_delta') this.notify(run,'odwyn/activity',{label:'Thinking',detail:''});
           if (message.event.delta?.type === 'text_delta') {
             text += message.event.delta.text;
             this.notify(run, 'item/agentMessage/delta', { itemId, delta: message.event.delta.text });

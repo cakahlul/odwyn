@@ -252,3 +252,24 @@ test('managed OAuth handles only approved top-level callbacks and keeps private 
   await browser.page.setContent('<iframe src="'+callback+'"></iframe>');expect(callbacks).toBe(2);expect(requests).toBe(0);
  }finally{await browser.close();local.stop(true);rmSync(directory,{recursive:true,force:true});}
 },15000);
+
+test('location permission returns supplied coordinates only to its configured origin',async()=>{
+  const directory=mkdtempSync(join(tmpdir(),'odwyn-browser-location-')),browser=new Browser({directory});
+  try{
+    await browser.action({action:'read'});
+    await browser.context.route('https://93.184.216.34/**',route=>route.fulfill({contentType:'text/html',body:'<h1>Location site</h1>'}));
+    await browser.context.route('https://1.1.1.1/**',route=>route.fulfill({contentType:'text/html',body:'<h1>Other site</h1>'}));
+    await browser.action({action:'set_location',url:'https://93.184.216.34/map',latitude:-6.2,longitude:106.8});
+    await browser.action({action:'navigate',url:'https://93.184.216.34/'});
+    const position=await browser.page.evaluate(()=>new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(p=>resolve({latitude:p.coords.latitude,longitude:p.coords.longitude}),reject,{timeout:3000})));
+    expect(position).toEqual({latitude:-6.2,longitude:106.8});
+    await browser.action({action:'navigate',url:'https://1.1.1.1/'});
+    expect(await browser.page.evaluate(async()=>(await navigator.permissions.query({name:'geolocation'})).state)).not.toBe('granted');
+    await browser.action({action:'set_location',url:'https://1.1.1.1/',latitude:0,longitude:0});
+    expect(await browser.page.evaluate(async()=>(await navigator.permissions.query({name:'geolocation'})).state)).toBe('granted');
+    await browser.action({action:'navigate',url:'https://93.184.216.34/'});
+    expect(await browser.page.evaluate(async()=>(await navigator.permissions.query({name:'geolocation'})).state)).not.toBe('granted');
+    await browser.reset();await browser.action({action:'read'});
+    expect(await browser.page.evaluate(async()=>(await navigator.permissions.query({name:'geolocation'})).state)).not.toBe('granted');
+  }finally{await browser.close();rmSync(directory,{recursive:true,force:true});}
+});

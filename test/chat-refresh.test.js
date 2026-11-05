@@ -58,7 +58,7 @@ test('messages appear before sending completes, failures keep drafts, and progre
     expect(await page.locator('#prompt').inputValue()).toBe('Hello immediately');
     expect(await page.locator('.message-user').count()).toBe(0);
     await page.unroute('**/api/jobs');await page.locator('#send-button').click();
-    await page.locator('.working-row strong').filter({hasText:'is typing'}).waitFor();
+    await page.locator('.working-row strong').filter({hasText:'is working'}).waitFor();
     expect(await page.locator('.typing-dots i').count()).toBe(3);
     expect(await page.locator('.message-user').count()).toBe(1);
     await page.getByRole('button',{name:'View progress'}).click();

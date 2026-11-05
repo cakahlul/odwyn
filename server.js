@@ -1,7 +1,7 @@
 import { resolve, join } from 'node:path';
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { authorize, allowedOrigin, textInput } from './security.js';
+import { authorize, allowedOrigin, textInput, validateLocation } from './security.js';
 import { openStore, findAgent, deleteAgent, createRoom, updateRoom, createJob } from './store.js';
 import { oddyAction, oddyScreen, oddyHistory, historyCollections } from './oddy.js';
 import { AIProvider, validateProvider, publicProvider, providerModels } from './providers.js';
@@ -48,6 +48,7 @@ export function createApp(options = {}) {
   const codex = new AIProvider({ config: store.state.provider, home, workspace, isolated:!!options.workspaceId&&!options.oddyHome, codex: options.codex, ...options.providerOptions });
   let runtime;
   const browser = options.browser || new Browser({ directory, executablePath: (process.env.ODWYN_BROWSER_EXECUTABLE ?? process.env.SIDEKICK_BROWSER_EXECUTABLE) || undefined, headless: (process.env.ODWYN_HEADLESS ?? process.env.SIDEKICK_HEADLESS) !== 'false',
+    getLocation:()=>store.state.browserLocation || null,
     findFile: id => store.state.files.find(file => file.id === id),
     onFile: file => {
       const path=join(directory,'files',file.id);
@@ -456,7 +457,7 @@ export function createApp(options = {}) {
         if (pathname === '/api/state' && req.method === 'GET') {
           if (url.searchParams.get('revision') === String(runtime.revision)) return new Response(null, { status: 204, headers });
           // ponytail: a JSON state row suits one owner; use indexed tables when history gets large.
-          return response({ revision: runtime.revision, ...store.state, connections:store.state.connections.map(publicConnection), agents:store.state.agents.map(agent => ({ ...agent, provider:publicProvider(agent.provider), runtime:{ ...runtime.accounts.get(agent.id), login:logins.get(agent.id) || null } })), globalProvider:publicProvider(store.state.globalProvider), globalRuntime:{...runtime.accounts.get(globalConnection().id),login:logins.get(globalConnection().id) || null}, provider: publicProvider(store.state.provider), runtime: { account: runtime.account, connectionError: runtime.connectionError, model: store.state.provider.model, activeJobId: runtime.activeJobs()[0]?.id || null, activeJobIds:runtime.activeJobs().map(job=>job.id), takeover: runtime.takeover, browserOpen: !!browser.context, rateLimits: runtime.rateLimits || null, login:logins.get(store.state.agents[0].id) || null } });
+          return response({ revision: runtime.revision, ...store.state, connections:store.state.connections.map(publicConnection), agents:store.state.agents.map(agent => ({ ...agent, provider:publicProvider(agent.provider), runtime:{ ...runtime.accounts.get(agent.id), login:logins.get(agent.id) || null } })), globalProvider:publicProvider(store.state.globalProvider), globalRuntime:{...runtime.accounts.get(globalConnection().id),login:logins.get(globalConnection().id) || null}, provider: publicProvider(store.state.provider), runtime: { account: runtime.account, connectionError: runtime.connectionError, model: store.state.provider.model, activeJobId: browser.owner || runtime.activeJobs()[0]?.id || null, activeJobIds:runtime.activeJobs().map(job=>job.id), takeover: runtime.takeover, browserOpen: !!browser.context, rateLimits: runtime.rateLimits || null, login:logins.get(store.state.agents[0].id) || null } });
         }
         // Allow base64 resources; importSkill enforces source and decoded resource limits.
         if (pathname === '/api/skills/import' && req.method === 'POST') { const input=await json(req,7_200_000); return response(importSkill(input.source,input.files)); }
@@ -643,6 +644,15 @@ export function createApp(options = {}) {
           await runtime.setTakeover(enabled);
           if (enabled) { try { await browser.serial(() => browser.start()); runtime.changed(); } catch (error) { await runtime.setTakeover(false); throw error; } }
           return response({ ok: true });
+        }
+        if (pathname === '/api/browser/location' && req.method === 'POST') {
+          if(!runtime.takeover)return response({error:'Take browser control first.'},409);
+          const input=await json(req);
+          if(typeof input.remember!=='boolean')throw new Error('Choose whether to remember this location.');
+          const location=input.location===null ? null : validateLocation(input.location);
+          await browser.setLocation(location,input.remember,()=>runtime.takeover);
+          store.state.browserLocation=input.remember ? location : null;
+          runtime.changed();return response({ok:true,location:store.state.browserLocation});
         }
         if (pathname === '/api/browser/action' && req.method === 'POST') {
           if (!runtime.takeover) return response({ error: 'Take browser control first.' }, 409);

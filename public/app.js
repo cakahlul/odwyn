@@ -460,7 +460,7 @@ function render() {
 
   $('#run-status').hidden = !state.jobs.some(job => activeStatuses.includes(job.status));
   const conversation = state.conversations.find(c => c.id === conversationId);
-  const permissionJob = state.jobs.find(job=>job.conversationId === conversationId && job.id === state.runtime.activeJobId) || state.jobs.find(job=>job.conversationId === conversationId && job.status === 'queued');
+  const permissionJob = state.jobs.find(job=>job.conversationId === conversationId && ['running','waiting','takeover'].includes(job.status)) || state.jobs.find(job=>job.conversationId === conversationId && job.status === 'queued');
   if (permissionJob && !$('#interaction-mode').disabled) $('#interaction-mode').value = permissionJob.interactionMode;
   $('#prompt').placeholder = conversation?.kind === 'room' ? 'Message the room, or @mention an agent…' : conversation ? 'Reply or ask a follow-up…' : 'Describe a task or ask a question…';
   $('#main').classList.toggle('chat-start', view === 'chat' && !conversation);

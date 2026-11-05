@@ -1351,3 +1351,11 @@ button.attachment-preview:hover { background:var(--paper); }
 
 #file-preview-text { text-align:left; overflow:auto; max-height:calc(100dvh - 180px); overflow-wrap:anywhere; }
 #file-preview-text pre { white-space:pre-wrap; }
+
+.browser-location { margin:12px 0; }
+.browser-location summary { cursor:pointer; font-size:12px; }
+.browser-location-coordinates { display:flex; gap:8px; margin:12px 0; }
+.browser-location-coordinates label { flex:1; min-width:0; font-size:11px; }
+.browser-location-coordinates input { display:block; width:100%; margin-top:4px; }
+.browser-location-remember { display:flex; align-items:center; gap:6px; font-size:11px; }
+.browser-location-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }

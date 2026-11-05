@@ -203,3 +203,16 @@ test('global owner preferences inherit while agent overrides preserve their own 
   expect(resolveProfile({...local,overrideWorkspace:true},{palette:'fern'},owner)).toEqual({...local,overrideWorkspace:true});
   expect(resolveProfile({...local,overrideWorkspace:false},{palette:'fern'},{...owner,ownerName:'Renamed'}).ownerName).toBe('Renamed');
 });
+
+test('browser location validates coordinates and uses interaction approval',()=>{
+  const action={action:'set_location',url:'https://example.com/map',latitude:-6.2,longitude:106.8};
+  expect(validateAction(action)).toEqual(action);
+  expect(browserActionRisk(action)).toBe('interaction');
+  expect(browserApprovalRequired('confirm','interaction')).toBe(true);
+  expect(browserApprovalRequired('safe','interaction')).toBe(true);
+  expect(browserApprovalRequired('allow','interaction')).toBe(false);
+  for(const invalid of [{latitude:91},{latitude:NaN},{longitude:-181},{longitude:Infinity},{latitude:'-6.2'},{longitude:null},{url:undefined},{url:'http://example.com'}]){
+    expect(()=>validateAction({...action,...invalid})).toThrow();
+  }
+  expect(validateAction({...action,latitude:-90,longitude:180}).latitude).toBe(-90);
+});

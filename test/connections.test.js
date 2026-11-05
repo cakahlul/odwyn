@@ -154,7 +154,7 @@ for(const [callbackOrigin,workspaceId,managed] of [[undefined,undefined],['http:
  const request=(path,method='GET',body)=>app.fetch(new Request(origin+path,{method,headers:{authorization:'Basic '+btoa('owner:test-password-long-enough'),origin,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}));
  try{
   const connection=await(await request('/api/connections','POST',{name:'OAuth MCP',type:'mcp',url:`http://localhost:${oauth.port}/mcp`,oauth:true})).json();
-  app.runtime.active={id:'busy'};expect((await request('/api/connections/'+connection.id+'/authorize','POST',{})).status).toBe(400);expect(navigations).toHaveLength(0);app.runtime.active=null;
+  app.runtime.active={id:'busy',agentId:app.runtime.state.agents[0].id};expect((await request('/api/connections/'+connection.id+'/authorize','POST',{})).status).toBe(400);expect(navigations).toHaveLength(0);app.runtime.active=null;
   const start=await request('/api/connections/'+connection.id+'/authorize','POST',{}),result=await start.json();expect(start.status).toBe(200);expect(result.authorizationUrl).toBeString();expect(result.browser).toBe(true);if(!managed)expect(navigations).toEqual([{action:'navigate',url:result.authorizationUrl}]);
   expect(registeredRedirect).toBe((callbackOrigin||origin)+'/api/connections/oauth/callback'+(workspaceId?'?workspace='+workspaceId:''));const authorization=new URL(result.authorizationUrl);expect(authorization.searchParams.get('code_challenge_method')).toBe('S256');
   expect((await request('/api/connections/oauth/callback?state=wrong&code=test-code')).status).toBe(400);expect(tokenRequests).toBe(0);

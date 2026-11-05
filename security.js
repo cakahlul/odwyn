@@ -35,8 +35,8 @@ export async function resolvePublic(raw) {
   return { url, address: addresses[0].address, family: addresses[0].family };
 }
 
-export const actions = ['read','navigate','click','fill','type','press','scroll','select','tab','new_tab','close_tab','back','wait','screenshot','save_screenshot','upload','dialog'];
-export const interactions = new Set(['click','fill','type','press','select','upload','dialog']);
+export const actions = ['read','navigate','click','fill','type','press','scroll','select','tab','new_tab','close_tab','back','wait','screenshot','save_screenshot','upload','dialog','set_location'];
+export const interactions = new Set(['click','fill','type','press','select','upload','dialog','set_location']);
 
 export const interactionModes = ['confirm','safe','allow'];
 
@@ -45,6 +45,7 @@ export const browserApprovalRequired = (mode, risk) => mode === 'allow' ? !['saf
 export function browserActionRisk(action, context = {}) {
   if (!interactions.has(action.action)) return 'safe';
   if (action.action === 'press' && ['Tab','Escape','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','PageUp','PageDown','Home','End'].includes(action.text)) return 'safe';
+  if(action.action==='set_location')return 'interaction';
   const el = context.element;
   // ponytail: payment detection uses DOM heuristics; it cannot prove arbitrary website effects.
   const payment = /\b(pay(?:ment)?|checkout|billing|credit card|card number|cvv|cvc|buy|purchase|place order|donat(?:e|ion)|transfer|subscribe|subscription|book now|confirm booking|bayar|pembayaran|beli)\b/i;
@@ -63,11 +64,22 @@ export function browserActionRisk(action, context = {}) {
   return 'unknown';
 }
 
+export function validateLocation(input) {
+  for(const [key,limit] of [['latitude',90],['longitude',180]]){
+    if(typeof input?.[key]!=='number' || !Number.isFinite(input[key]) || Math.abs(input[key])>limit)throw new Error(`Invalid ${key}: use a number between -${limit} and ${limit}.`);
+  }
+  return {latitude:input.latitude,longitude:input.longitude};
+}
+
 export function validateAction(input) {
   if (!input || !actions.includes(input.action)) throw new Error('Unknown browser action.');
   const result = { ...input };
   if (input.url !== undefined) { if (typeof input.url !== 'string' || input.url.length > 4000) throw new Error('Invalid URL.'); webUrl(input.url); }
   if (['navigate','new_tab'].includes(input.action) && !input.url) throw new Error('A website URL is required.');
+  if(input.action==='set_location'){
+    if(!input.url || new URL(input.url).protocol!=='https:')throw new Error('Location requires an HTTPS website URL.');
+    validateLocation(input);
+  }
   if (input.ref !== undefined && !/^\d{1,5}$/.test(String(input.ref))) throw new Error('Use an element reference from the latest page snapshot.');
   for (const key of ['x','y']) if (input[key] !== undefined && (!Number.isFinite(input[key]) || input[key] < 0 || input[key] > (key === 'x' ? 1280 : 800))) throw new Error('Invalid screen coordinate.');
   if (input.action === 'click' && input.ref === undefined && !(Number.isFinite(input.x) && Number.isFinite(input.y))) throw new Error('Click needs a reference or coordinates.');
