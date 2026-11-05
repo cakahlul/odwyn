@@ -1368,7 +1368,7 @@ details[open]:not(.agent-menu):not(.oddy-menu)>summary::after { content:'−'; t
   padding:20px;
 }
 .approval-card { border-left:3px solid var(--orange-deep); }
-.working-row { border:1px solid var(--glass-border); border-radius:16px; background-color:var(--wash); box-shadow:none; padding:14px 16px; }
+.working-row { width:fit-content; max-width:min(84%,820px); margin-left:0; margin-right:auto; border:1px solid var(--glass-border); border-radius:20px 20px 20px 6px; background-color:color-mix(in srgb,var(--surface) 84%,var(--paper)); box-shadow:none; padding:14px 18px 10px; }
 .badge { border-radius:999px; font-size:10px; padding:4px 8px; letter-spacing:.02em; }
 .file-chip,.attachment-chip,.attachment-card,.answer-summary,.answer-empty { border-radius:12px; box-shadow:none; }
 
