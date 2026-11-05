@@ -1,3 +1,4 @@
+import {renderDiagram} from './diagrams.js';
 import { Marked, Renderer } from '/vendor/marked.js';
 
 export const $ = selector => document.querySelector(selector);
@@ -221,6 +222,8 @@ export function richText(text, { cards = true, response = null } = {}) {
       finally { button.disabled = false; }
     };
     block.before(wrapper); toolbar.append(button); wrapper.append(toolbar,block);
+    const code=block.matches('pre') && block.querySelector('code');
+    if(cards && code && (code.classList.contains('language-mermaid') || !code.className && /^(?:(?:flowchart|graph)\s+(?:TD|TB|BT|RL|LR)\b|(?:sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|mindmap|timeline|pie|gantt|journey|block-beta)\b)/.test(text.trimStart())))renderDiagram(wrapper,block,text);
   });
   container.querySelectorAll('.result-response').forEach(form=>form.addEventListener('submit',async event=>{
     event.preventDefault();const fields=new FormData(form),selected=fields.getAll('selected'),status=form.querySelector('[role=status]'),fieldset=form.querySelector('fieldset');
