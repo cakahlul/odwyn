@@ -224,6 +224,8 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:6px; bac
 .message-footer time { font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; }
 :is(.copy-message,.quote-message) { opacity:0; color:var(--ink); height:24px; width:24px; }
 .message:hover :is(.copy-message,.quote-message),.message:focus-within :is(.copy-message,.quote-message) { opacity:1; }
+.quote-message.quote-selection { opacity:1; width:auto; gap:6px; }
+.quote-message.quote-selection::after { content:'Quote selected text'; font-size:11px; }
 :is(.copy-message,.quote-message) .icon { width:12px; height:12px; }
 .message-owner { width:28px; height:28px; flex-shrink:0; background:var(--selected); color:var(--ink); display:grid; place-items:center; border-radius:50%; font-size:10px; }
 .private-messages .message-meta,.private-messages .message-avatar,.private-messages .message-owner { display:none; }

@@ -5,7 +5,7 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Runtime} from '../runtime.js';
-import {openStore,createJob,createRoom} from '../store.js';
+import {openStore,createJob,createRoom,messageQuote} from '../store.js';
 import {defaults} from '../public/profile.js';
 
 class Provider extends EventEmitter{
@@ -34,6 +34,8 @@ for(const roomMode of [false,true])test(`${roomMode?'room':'chat'} quotes reach 
     else {const seed=createJob(store.state,{agentId:primary,prompt:'Initial request'});seed.status='completed';conversation=runtime.conversation(seed);}
     const source={id:randomUUID(),role:'assistant',agentId:primary,text:'Draft <script>alert(1)</script>\nUnique quoted content',at:new Date().toISOString()};
     conversation.messages.push(source);
+    expect(messageQuote(store.state,conversation.id,source.id,'Unique quoted content').text).toBe('Unique quoted content');
+    for(const selectedText of ['',{},'x'.repeat(20001)])expect(()=>messageQuote(store.state,conversation.id,source.id,selectedText)).toThrow();
     if(!roomMode)delete source.agentId; // Legacy private messages inherit their conversation's agent.
     const input={agentId:primary,conversationId:conversation.id,prompt:'Revise this',replyToMessageId:source.id,replyTo:{text:'Client forgery'}};
     const job=roomMode ? runtime.submitRoom(conversation.id,input)[0] : runtime.submit(input);await runtime.drain();
@@ -75,7 +77,7 @@ for(const roomMode of [false,true])test(`${roomMode?'room':'chat'} quote control
   let conversation;
   if(roomMode)conversation=createRoom(state,{spaceId:'legacy',title:'Quoted room',memberIds:[primary,'peer']});
   else {const seed=createJob(state,{agentId:primary,prompt:'Initial'});seed.status='completed';conversation=app.runtime.conversation(seed);}
-  const source={id:randomUUID(),role:'assistant',agentId:primary,text:'Original draft <script>window.quotePwned=true</script>',at:new Date().toISOString()};conversation.messages.push(source);app.runtime.changed();
+  const source={id:randomUUID(),role:'assistant',agentId:primary,text:'Original **draft** <script>window.quotePwned=true</script>',at:new Date().toISOString()};conversation.messages.push(source);app.runtime.changed();
   const browser=await chromium.launch(),page=await newPageWithoutTutorials(browser,{httpCredentials:{username:'owner',password:'test-password-long-enough'}});
   page.setDefaultTimeout(8000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
   let releaseFailure;
@@ -85,8 +87,16 @@ for(const roomMode of [false,true])test(`${roomMode?'room':'chat'} quote control
     const quote=page.locator(`[data-quote="${source.id}"]`);await quote.click();
     expect(await page.locator('#quoted-message').innerText()).toContain(source.text);
     await page.getByRole('button',{name:'Remove quote',exact:true}).click();expect(await page.locator('#quoted-message').isVisible()).toBe(false);
-    await quote.click();await page.reload();await page.locator('#quoted-message:not([hidden])').waitFor();
-    expect(await page.locator('#quoted-message').innerText()).toContain(source.text);
+    const excerpt='Original draft';
+    await quote.locator('xpath=ancestor::article').locator('.message-text').evaluate(content=>{
+      const paragraph=content.querySelector('p'),range=document.createRange();
+      range.setStart(paragraph.firstChild,0);range.setEnd(paragraph.querySelector('strong').firstChild,5);
+      const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
+    });
+    await page.getByRole('button',{name:'Quote selected text',exact:true}).click();
+    expect(await page.locator('#quoted-message p').innerText()).toBe(excerpt);
+    await page.reload();await page.locator('#quoted-message:not([hidden])').waitFor();
+    expect(await page.locator('#quoted-message p').innerText()).toBe(excerpt);
     const prompt=roomMode ? '@Pip Revise the quoted draft' : 'Revise the quoted draft';
     await page.locator('#prompt').fill(prompt);
     const failure=new Promise(resolve=>{releaseFailure=resolve;});
@@ -96,11 +106,13 @@ for(const roomMode of [false,true])test(`${roomMode?'room':'chat'} quote control
     await page.locator('#toast').filter({hasText:'Temporary test failure'}).waitFor();
     expect(await page.locator('#prompt').inputValue()).toBe(prompt);expect(await page.locator('#quoted-message').isVisible()).toBe(true);
     await page.unroute(endpoint);await page.locator('#send-button').click();
-    await page.locator('.message-user .message-quote').filter({hasText:source.text}).waitFor();
+    await page.locator('.message-user .message-quote').filter({hasText:excerpt}).waitFor();
     await page.waitForFunction(()=>document.querySelector('#quoted-message').hidden);
     expect(await page.evaluate(()=>window.quotePwned)).toBeUndefined();
     const job=state.jobs.find(j=>j.conversationId===conversation.id&&j.status==='running');await app.runtime.drain();
-    expect(provider.calls.filter(c=>c.method==='turn/start').at(-1).params.input[0].text).toContain(source.text);
+    const turn=provider.calls.filter(c=>c.method==='turn/start').at(-1).params.input[0].text;
+    expect(turn).toContain(excerpt);expect(turn).not.toContain(source.text);
+    expect(job.replyTo.text).toBe(excerpt);
     const question=app.runtime.inAgent(primary,()=>app.runtime.handleRequest({id:52,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_ask',arguments:{question:'Which revision should I use?'}}}));
     await page.locator('#owner-answer').fill('Revision two');await page.locator('.answer-form button').click();await question;
     await page.locator('.message-user').filter({hasText:'Revision two'}).locator('.message-quote').filter({hasText:'Which revision should I use?'}).waitFor();

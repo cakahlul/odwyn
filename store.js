@@ -268,18 +268,19 @@ export function validateAttachments(state, ids = []) {
   return [...new Set(ids)];
 }
 
-export function messageQuote(state, conversationId, messageId) {
+export function messageQuote(state, conversationId, messageId, selectedText) {
   if(messageId===undefined || messageId===null)return null;
   const conversation=state.conversations.find(c=>c.id===conversationId);
   const message=typeof messageId==='string' && conversation?.messages.find(m=>m.id===messageId);
   if(!message || !['user','assistant'].includes(message.role))throw new Error('Choose a message from this conversation to quote.');
+  if(selectedText!==undefined)selectedText=textInput(selectedText);
   const agent=state.agents.find(a=>a.id===(message.agentId || state.jobs.find(j=>j.id===message.jobId)?.agentId || conversation.agentId));
   const author=message.role==='user' ? state.owner?.ownerName || 'You' : (agent?.id===state.agents[0].id ? state.customization?.name : agent?.customization?.name) || message.agentProfile?.name || defaults.name;
-  return {messageId:message.id,author,role:message.role,text:message.text || '[Attachment]'};
+  return {messageId:message.id,author,role:message.role,text:selectedText ?? (message.text || '[Attachment]')};
 }
 
 export function createJob(state, input, recordMessage = true) {
-  const replyTo=messageQuote(state,input.conversationId,input.replyToMessageId);
+  const replyTo=messageQuote(state,input.conversationId,input.replyToMessageId,input.replyToSelectedText);
   const attachments = validateAttachments(state,input.attachments);
   const prompt = textInput(input.prompt || (attachments.length ? 'Describe the attached files.' : input.prompt));
   const interactionMode = input.interactionMode || 'confirm';

@@ -905,7 +905,7 @@ $('#composer').onsubmit = async event => {
   conversationId = pendingSend.conversationId; selectState(); signature = ''; render();
   $('#view').scrollTo({top:$('#view').scrollHeight,behavior:'instant'});
   try {
-    const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt, replyToMessageId:replyTo?.messageId, attachments:pendingSend.attachments, agentId:recipient, conversationId:previousConversationId, interactionMode });
+    const result = await api(room ? `/api/rooms/${room.id}/messages` : '/api/jobs', { prompt, replyToMessageId:replyTo?.messageId, replyToSelectedText:replyTo?.selectedText, attachments:pendingSend.attachments, agentId:recipient, conversationId:previousConversationId, interactionMode });
     const job = room ? result.jobs[0] : result;
     pendingSend.job = job; pendingSend.jobId = job.id; pendingSend.conversationId = room?.id || job.conversationId; conversationId = pendingSend.conversationId;
     quoteDrafts.delete(previousConversationId);
@@ -967,6 +967,23 @@ $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(a
   $('#schedule-dialog').close(); await refresh(); await switchAgent(selectedAgent); navigate('routines'); toast(editingId ? 'Routine updated.' : 'Routine scheduled.');
 }); };
 
+let selectedMessageQuote=null;
+document.addEventListener('selectionchange',()=>{
+  const selection=window.getSelection(),node=selection?.anchorNode;
+  const content=(node?.nodeType===Node.ELEMENT_NODE ? node : node?.parentElement)?.closest('.message-text');
+  const button=content?.closest('.message').querySelector('[data-quote]');
+  const text=content?.contains(selection.focusNode) ? selection.toString().trim() : '';
+  selectedMessageQuote=text && button && !button.disabled ? {messageId:button.dataset.quote,text} : null;
+  document.querySelectorAll('[data-quote]').forEach(button=>{
+    const selected=button.dataset.quote===selectedMessageQuote?.messageId;
+    button.classList.toggle('quote-selection',selected);
+    button.title=selected ? 'Quote selected text' : 'Quote message';
+    button.setAttribute('aria-label',button.title);
+  });
+});
+document.addEventListener('pointerdown',event=>{
+  if(event.target.closest('[data-quote]'))event.preventDefault();
+});
 document.addEventListener('click', event => {
   document.querySelectorAll('.agent-menu[open]').forEach(menu => { if (!menu.contains(event.target)) menu.open = false; });
   const target = event.target.closest('button,a,[data-mention-link]'); if (!target) return;
@@ -1058,7 +1075,11 @@ document.addEventListener('click', event => {
   if (target.dataset.filter) { filter = target.dataset.filter; signature = ''; render(); }
   if(target.dataset.quote){
     const message=state.conversations.find(c=>c.id===conversationId)?.messages.find(m=>m.id===target.dataset.quote);
-    if(message){quoteDrafts.set(conversationId,{messageId:message.id,role:message.role,text:message.text || '[Attachment]',author:target.closest('.message').querySelector('.message-meta strong').textContent});renderQuotePreview();$('#prompt').focus();saveDraft();}
+    if(message){
+      const selectedText=selectedMessageQuote?.messageId===message.id ? selectedMessageQuote.text : undefined;
+      quoteDrafts.set(conversationId,{messageId:message.id,role:message.role,text:selectedText ?? (message.text || '[Attachment]'),...(selectedText ? {selectedText}:{}),author:target.closest('.message').querySelector('.message-meta strong').textContent});
+      window.getSelection()?.removeAllRanges();renderQuotePreview();$('#prompt').focus();saveDraft();
+    }
     return;
   }
   if(target.id==='clear-message-quote'){quoteDrafts.delete(conversationId);renderQuotePreview();$('#prompt').focus();saveDraft();return;}

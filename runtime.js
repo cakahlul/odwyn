@@ -260,7 +260,7 @@ export class Runtime {
   }
 
   roomInput(id, input) {
-    messageQuote(this.state,id,input.replyToMessageId);
+    messageQuote(this.state,id,input.replyToMessageId,input.replyToSelectedText);
     const attachments = validateAttachments(this.state,input.attachments);
     const room = findRoom(this.state,id), prompt = textInput(input.prompt || (attachments.length ? 'Describe the attached files.' : input.prompt));
     const mentions = [...prompt.matchAll(/(?:^|\s)@("(?:\\.|[^"\\\n])*"|[\p{L}\p{N}_-]+)/gu)];
