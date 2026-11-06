@@ -77,7 +77,7 @@ for(const roomMode of [false,true])test(`${roomMode?'room':'chat'} quote control
   let conversation;
   if(roomMode)conversation=createRoom(state,{spaceId:'legacy',title:'Quoted room',memberIds:[primary,'peer']});
   else {const seed=createJob(state,{agentId:primary,prompt:'Initial'});seed.status='completed';conversation=app.runtime.conversation(seed);}
-  const source={id:randomUUID(),role:'assistant',agentId:primary,text:'Original **draft** <script>window.quotePwned=true</script>',at:new Date().toISOString()};conversation.messages.push(source);app.runtime.changed();
+  const source={id:randomUUID(),role:'assistant',agentId:primary,text:'Original **draft** <script>window.quotePwned=true</script>'+('\n\nMore content below the selected excerpt.').repeat(30),at:new Date().toISOString()};conversation.messages.push(source);app.runtime.changed();
   const browser=await chromium.launch(),page=await newPageWithoutTutorials(browser,{httpCredentials:{username:'owner',password:'test-password-long-enough'}});
   page.setDefaultTimeout(8000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
   let releaseFailure;
@@ -90,10 +90,20 @@ for(const roomMode of [false,true])test(`${roomMode?'room':'chat'} quote control
     const excerpt='Original draft';
     await quote.locator('xpath=ancestor::article').locator('.message-text').evaluate(content=>{
       const paragraph=content.querySelector('p'),range=document.createRange();
+      paragraph.scrollIntoView({block:'center'});
       range.setStart(paragraph.firstChild,0);range.setEnd(paragraph.querySelector('strong').firstChild,5);
       const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
     });
+    const tooltip=page.getByRole('button',{name:'Quote selected text',exact:true});await tooltip.waitFor();
+    for(const width of [320,768,1024,1440]){
+      await page.setViewportSize({width,height:844});
+      await quote.locator('xpath=ancestor::article').locator('.message-text p').first().evaluate(paragraph=>paragraph.scrollIntoView({block:'center',behavior:'instant'}));
+      await page.waitForFunction(()=>{const button=document.querySelector('.quote-selection-tooltip'),rect=button.getBoundingClientRect();return !button.hidden&&rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight;});
+      expect(await tooltip.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
+    }
+    await page.screenshot({path:`/tmp/odwyn-quote-tooltip-${roomMode?'room':'chat'}.png`});
     await page.getByRole('button',{name:'Quote selected text',exact:true}).click();
+    await tooltip.waitFor({state:'hidden'});
     expect(await page.locator('#quoted-message p').innerText()).toBe(excerpt);
     await page.reload();await page.locator('#quoted-message:not([hidden])').waitFor();
     expect(await page.locator('#quoted-message p').innerText()).toBe(excerpt);

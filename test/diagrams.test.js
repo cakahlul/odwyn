@@ -50,6 +50,16 @@ test('agent diagrams render visually, retain source/downloads, fit mobile, and i
     expect(await first.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
     await first.scrollIntoViewIfNeeded();await page.screenshot({path:'/tmp/odwyn-diagrams-mobile.png'});
     await first.getByRole('button',{name:'Expand diagram'}).click();await page.locator('.diagram-preview[open]').waitFor();expect(await page.locator('.diagram-preview-image').evaluate(img=>img.getBoundingClientRect().width)).toBeGreaterThanOrEqual(1000);
+    for(const width of [320,768,1024,1440,390]){
+      await page.setViewportSize({width,height:844});
+      const toolbar=page.locator('.diagram-preview-toolbar');await toolbar.locator('#oddy-open').waitFor();
+      const close=await toolbar.getByRole('button',{name:'Close diagram'}).boundingBox(),oddy=await toolbar.getByRole('button',{name:'Ask Oddy',exact:true}).boundingBox();
+      expect(close.x+close.width).toBeLessThan(oddy.x);expect(Math.abs(close.y-oddy.y)).toBeLessThan(4);expect(oddy.x+oddy.width).toBeLessThanOrEqual(width);
+      await page.locator('.diagram-preview').evaluate(dialog=>{dialog.scrollLeft=500;});
+      expect((await toolbar.boundingBox()).x).toBeGreaterThanOrEqual(0);
+      await page.locator('.diagram-preview').evaluate(dialog=>{dialog.scrollLeft=0;});
+      if(width===390||width===1440)await page.screenshot({path:`/tmp/odwyn-diagram-toolbar-${width}.png`});
+    }
     await page.getByRole('button',{name:'Close diagram'}).click();await page.locator('.diagram-preview').waitFor({state:'detached'});
     state.agents.push({id:'peer',customization:{...defaults,name:'Scout'},provider:{...state.provider}});state.conversations[0].kind='room';state.conversations[0].memberIds=[primary,'peer'];app.runtime.changed();
     await page.reload();await page.locator('.room-messages .diagram-image').first().waitFor();

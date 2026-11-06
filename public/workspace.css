@@ -2123,5 +2123,5 @@ input[type=color]::-moz-color-swatch { border:0; border-radius:6px; }
 .message-bubble:has(.diagram-block) { width:100%; }
 .diagram-preview { width:min(1200px,calc(100vw - 24px)); max-width:calc(100vw - 24px); max-height:90dvh; padding:16px; border:1px solid var(--glass-border); border-radius:16px; background:var(--surface); color:var(--ink); overflow:auto; }
 .diagram-preview::backdrop { background:#0008; }
-.diagram-preview button { position:sticky; top:0; left:0; margin-bottom:12px; }
+.diagram-preview-toolbar { position:sticky; top:0; left:0; z-index:1; display:flex; align-items:center; justify-content:space-between; gap:12px; padding-bottom:12px; background:var(--surface); }
 .diagram-preview-image { display:block; width:max(100%,1000px); max-width:none; height:auto; background:#fff; }

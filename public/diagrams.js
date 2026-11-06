@@ -38,7 +38,8 @@ export function renderDiagram(wrapper,block,source){
     expand.onclick=()=>{
       const dialog=document.createElement('dialog');dialog.className='diagram-preview';dialog.setAttribute('aria-label','Expanded diagram');
       const close=document.createElement('button');close.type='button';close.className='secondary-button';close.textContent='Close diagram';close.onclick=()=>dialog.close();
-      const preview=image.cloneNode();preview.className='diagram-preview-image';dialog.append(close,preview);dialog.onclose=()=>dialog.remove();document.body.append(dialog);dialog.showModal();
+      const toolbar=document.createElement('header');toolbar.className='diagram-preview-toolbar';toolbar.append(close);
+      const preview=image.cloneNode();preview.className='diagram-preview-image';dialog.append(toolbar,preview);dialog.onclose=()=>dialog.remove();document.body.append(dialog);dialog.showModal();
     };
     wrapper.querySelector('.block-toolbar').prepend(expand);
     const download=document.createElement('a');download.className='text-button';download.textContent='Download SVG';download.href=url;download.download='diagram.svg';wrapper.querySelector('.block-toolbar').prepend(download);

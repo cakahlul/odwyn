@@ -124,6 +124,6 @@ export function setupOddy(getScreen=()=>({})) {
     if(!event.target.matches('dialog') || event.target===dialog)return;
     if(event.newState==='open'&&dialog.open)dialog.close();
     const modal=[...document.querySelectorAll('dialog[open]')].filter(node=>node!==dialog).at(-1);
-    if(modal){const toolbar=modal.querySelector('.modal-top,.profile-top')||modal;toolbar.insertBefore(launcher,toolbar.lastElementChild);}else $('#conversation-menu').append(launcher);
+    if(modal){const toolbar=modal.querySelector('.modal-top,.profile-top,.diagram-preview-toolbar')||modal;if(toolbar.classList.contains('diagram-preview-toolbar'))toolbar.append(launcher);else toolbar.insertBefore(launcher,toolbar.lastElementChild);}else $('#conversation-menu').append(launcher);
   },true);
 }

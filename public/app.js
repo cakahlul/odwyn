@@ -968,21 +968,30 @@ $('#schedule-form').onsubmit = event => { event.preventDefault(); void perform(a
 }); };
 
 let selectedMessageQuote=null;
-document.addEventListener('selectionchange',()=>{
+const quoteSelectionAction=document.createElement('button');
+quoteSelectionAction.type='button';quoteSelectionAction.className='secondary-button quote-selection-tooltip';quoteSelectionAction.textContent='Quote selected text';quoteSelectionAction.hidden=true;
+document.body.append(quoteSelectionAction);
+function updateQuoteSelection(){
   const selection=window.getSelection(),node=selection?.anchorNode;
   const content=(node?.nodeType===Node.ELEMENT_NODE ? node : node?.parentElement)?.closest('.message-text');
   const button=content?.closest('.message').querySelector('[data-quote]');
   const text=content?.contains(selection.focusNode) ? selection.toString().trim() : '';
   selectedMessageQuote=text && button && !button.disabled ? {messageId:button.dataset.quote,text} : null;
-  document.querySelectorAll('[data-quote]').forEach(button=>{
-    const selected=button.dataset.quote===selectedMessageQuote?.messageId;
-    button.classList.toggle('quote-selection',selected);
-    button.title=selected ? 'Quote selected text' : 'Quote message';
-    button.setAttribute('aria-label',button.title);
-  });
-});
+  const view=$('#view').getBoundingClientRect(),top=Math.max(8,view.top),bottom=Math.min(innerHeight-8,view.bottom);
+  const rect=selectedMessageQuote && [...selection.getRangeAt(0).getClientRects()].find(rect=>rect.bottom>top && rect.top<bottom && rect.right>0 && rect.left<innerWidth);
+  quoteSelectionAction.hidden=!rect;
+  if(!rect)return;
+  quoteSelectionAction.onclick=()=>button.click();
+  const width=quoteSelectionAction.offsetWidth,height=quoteSelectionAction.offsetHeight;
+  quoteSelectionAction.style.left=Math.max(8,Math.min(rect.left,innerWidth-width-8))+'px';
+  quoteSelectionAction.style.top=Math.max(top,Math.min(rect.top>=top+height+8 ? rect.top-height-8 : rect.bottom+8,bottom-height))+'px';
+}
+document.addEventListener('selectionchange',updateQuoteSelection);
+document.addEventListener('scroll',updateQuoteSelection,true);
+window.addEventListener('resize',updateQuoteSelection);
+document.addEventListener('keydown',event=>{if(event.key==='Escape'){quoteSelectionAction.hidden=true;selectedMessageQuote=null;}});
 document.addEventListener('pointerdown',event=>{
-  if(event.target.closest('[data-quote]'))event.preventDefault();
+  if(event.target.closest('[data-quote],.quote-selection-tooltip'))event.preventDefault();
 });
 document.addEventListener('click', event => {
   document.querySelectorAll('.agent-menu[open]').forEach(menu => { if (!menu.contains(event.target)) menu.open = false; });
