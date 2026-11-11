@@ -11,6 +11,7 @@ import { validateWorkflow, validateSkill, importSkill } from './workflows.js';
 import { validateProfile, defaults, profileTextLimit, ownerPreferenceKeys, currencies, validateAppearance } from './public/profile.js';
 import { fetchImage } from './proxy.js';
 import { imageMime } from './files.js';
+import {createConversationReports,reportHtml} from './conversation-reports.js';
 import {validateConnection,publicConnection,connectionSecrets,executeConnection,mcpOAuthProvider} from './connections.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {SSEClientTransport} from '@modelcontextprotocol/sdk/client/sse.js';
@@ -59,6 +60,7 @@ export function createApp(options = {}) {
     },
   });
   runtime = new Runtime({store,codex,browser,workspace,workspaceId:options.workspaceId,model:store.state.provider.model});
+  const reports=createConversationReports({state:store.state,redact:text=>store.credentials.redact(text),createProvider:(agent,reportWorkspace)=>new AIProvider({config:{...agent.provider},home,workspace:reportWorkspace,isolated:!!options.workspaceId&&!options.oddyHome,...options.providerOptions})});
   const connectionLogins=new Map();
   const connectionRedirect=mcpOAuthOrigin.origin+'/api/connections/oauth/callback'+(options.workspaceId?'?workspace='+encodeURIComponent(options.workspaceId):'');
   runtime.connectionOptions=connection=>connection.oauth?{authProvider:mcpOAuthProvider(connection,connectionRedirect,()=>runtime.changed(),{state:randomUUID()})}:{};
@@ -485,6 +487,23 @@ export function createApp(options = {}) {
         if (pathname === '/api/rooms' && req.method === 'POST') {
           const room = createRoom(store.state,await json(req)); runtime.changed(); return response(room,201);
         }
+        const reportStart=pathname.match(/^\/api\/conversations\/([a-f0-9-]{36})\/report$/);
+        if(reportStart){
+          if(req.method!=='POST')return response({error:'Method not allowed.'},405);
+          return response(reports.start(reportStart[1]),202);
+        }
+        const reportMatch=pathname.match(/^\/api\/reports\/([a-f0-9-]{36})(?:\/(preview|pdf))?$/);
+        if(reportMatch){
+          const [,id,format]=reportMatch,report=reports.get(id);
+          if(!report)return response({error:'Report expired. Generate it again.'},404);
+          if(req.method==='DELETE'&&!format){reports.remove(id);return response({ok:true});}
+          if(req.method!=='GET')return response({error:'Method not allowed.'},405);
+          if(!format)return response(report);
+          if(report.status!=='ready')return response({error:'The report is not ready.'},409);
+          if(format==='preview')return new Response(reportHtml(report),{headers:{...headers,'content-type':'text/html; charset=utf-8','x-frame-options':'SAMEORIGIN','content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"}});
+          const filename=(report.title.replace(/[^\p{L}\p{N}-]+/gu,'-').slice(0,80)||'Discussion-report')+'.pdf';
+          return new Response(await reports.pdf(id),{headers:{...headers,'content-type':'application/pdf','content-disposition':`attachment; filename*=UTF-8''${encodeURIComponent(filename)}`}});
+        }
         const deletionMatch=pathname.match(/^\/api\/conversations\/([a-f0-9-]{36})\/deletion$/);
         if(deletionMatch&&req.method==='GET')return response(store.conversationDeletion(deletionMatch[1]));
         const conversationMatch = pathname.match(/^\/api\/conversations\/([a-f0-9-]{36})$/);
@@ -686,12 +705,12 @@ export function createApp(options = {}) {
         if (pathname.startsWith('/api/')) return response({ error: 'Endpoint not found.' }, 404);
         if (!['GET','HEAD'].includes(req.method)) return response({ error: 'Method not allowed.' }, 405);
         if(pathname==='/diagram.html')return new Response(Bun.file(join(import.meta.dir,'public/diagram.html')),{headers:{...headers,'content-type':'text/html','x-frame-options':'SAMEORIGIN','content-security-policy':"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'none'"}});
-        const files = { '/diagrams.js':'diagrams.js', '/diagram-renderer.js':'diagram-renderer.js', '/vendor/mermaid.js':'../node_modules/mermaid/dist/mermaid.min.js', '/curl-import.js':'curl-import.js', '/connections-ui.js':'connections-ui.js', '/audit-ui.js':'audit-ui.js', '/': 'index.html', '/app.js': 'app.js', '/oddy-ui.js':'oddy-ui.js', '/chat-composer.js':'chat-composer.js', '/oddy.css':'oddy.css', '/workspace.css':'workspace.css', '/tutorials.js':'tutorials.js', '/knowledge-ui.js':'knowledge-ui.js', '/workspace-settings.js':'workspace-settings.js', '/workspace-homes.js':'workspace-homes.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/room-policy.js':'room-policy.js', '/room-work-ui.js':'room-work-ui.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/studio/home.svg':'icons/studio/home.svg', '/icons/studio/conversations.svg':'icons/studio/conversations.svg', '/icons/studio/tools.svg':'icons/studio/tools.svg', '/icons/studio/agents.svg':'icons/studio/agents.svg', '/icons/studio/settings.svg':'icons/studio/settings.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
+        const files = { '/conversation-reports-ui.js':'conversation-reports-ui.js', '/diagrams.js':'diagrams.js', '/diagram-renderer.js':'diagram-renderer.js', '/vendor/mermaid.js':'../node_modules/mermaid/dist/mermaid.min.js', '/curl-import.js':'curl-import.js', '/connections-ui.js':'connections-ui.js', '/audit-ui.js':'audit-ui.js', '/': 'index.html', '/app.js': 'app.js', '/oddy-ui.js':'oddy-ui.js', '/chat-composer.js':'chat-composer.js', '/oddy.css':'oddy.css', '/workspace.css':'workspace.css', '/tutorials.js':'tutorials.js', '/knowledge-ui.js':'knowledge-ui.js', '/workspace-settings.js':'workspace-settings.js', '/workspace-homes.js':'workspace-homes.js', '/ui.js': 'ui.js', '/profile.js': 'profile.js', '/customize.js': 'customize.js', '/views.js': 'views.js', '/room-policy.js':'room-policy.js', '/room-work-ui.js':'room-work-ui.js', '/browser-ui.js': 'browser-ui.js', '/workflows-ui.js':'workflows-ui.js', '/workflow-editor.js':'workflow-editor.js', '/style.css': 'style.css', '/mark.svg': 'mark.svg', '/icons/studio/home.svg':'icons/studio/home.svg', '/icons/studio/conversations.svg':'icons/studio/conversations.svg', '/icons/studio/tools.svg':'icons/studio/tools.svg', '/icons/studio/agents.svg':'icons/studio/agents.svg', '/icons/studio/settings.svg':'icons/studio/settings.svg', '/icons/fluent/home.png':'icons/fluent/home.png', '/icons/fluent/conversations.png':'icons/fluent/conversations.png', '/icons/fluent/tools.png':'icons/fluent/tools.png', '/icons/fluent/agents.png':'icons/fluent/agents.png', '/icons/fluent/settings.png':'icons/fluent/settings.png', '/icons/lucide/panel-left-close.svg':'icons/lucide/panel-left-close.svg', '/icons/lucide/panel-left-open.svg':'icons/lucide/panel-left-open.svg', '/vendor/marked.js': '../node_modules/marked/lib/marked.esm.js' };
         if (!files[pathname]) return response({ error: 'Not found.' }, 404);
         return new Response(Bun.file(join(root, 'public', files[pathname])), { headers });
       } catch (error) { let message='Something went wrong. Try again.';try{message=store.credentials.redact(error.message||message);}catch{}return response({error:message},400); }
     },
-    async close() { if(oddyApp)await oddyApp.close(); await workspaceWrites; for (const child of homes.values()) if (child !== app) await child.close(); clearInterval(accountTimer); await runtime.close(); for (const provider of runtime.providers.values()) provider.stop(); await browser.close(); store.close(); },
+    async close() { if(oddyApp)await oddyApp.close(); await workspaceWrites; for (const child of homes.values()) if (child !== app) await child.close(); clearInterval(accountTimer); await reports.close(); await runtime.close(); for (const provider of runtime.providers.values()) provider.stop(); await browser.close(); store.close(); },
   };
   const accountTimer = setInterval(() => { for (const agent of store.state.agents) if (agent.provider.configured || agent === store.state.agents[0]) void runtime.refreshAccount(agent.id); }, 30_000); accountTimer.unref();
   void runtime.refreshAccount();

@@ -79,11 +79,12 @@ test('workspace dock separates conversations, agents, and tools while keeping ch
     await page.keyboard.press('Escape');expect(await page.locator('#agents-dialog').evaluate(node=>node.open)).toBe(true);
     await page.screenshot({path:join(artifacts,'workspace-agents.png')});
     await page.getByRole('button',{name:'Open Rei',exact:true}).click();
+    await page.locator('.library-actions [data-new-chat]').click();
     await page.waitForFunction(()=>document.querySelector('#agent-name').textContent==='Rei' && !document.querySelector('#minimize-agent').disabled);
     expect(await page.locator('#agents-dialog').evaluate(node=>node.open)).toBe(false);
     await page.locator('#menu-button').click();
     expect(await page.locator('#search-dialog').evaluate(node=>node.matches(':modal'))).toBe(true);
-    expect(await page.locator('#history [data-conversation]').count()).toBe(30);
+    expect(await page.locator('#history [data-conversation^="chat-"]').count()).toBe(30);
     await page.locator('#search-input').fill('Conversation 30');
     expect(await page.locator('.library-browse').isVisible()).toBe(false);
     expect(await page.locator('#search-results .search-result').count()).toBe(1);

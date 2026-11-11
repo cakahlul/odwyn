@@ -43,7 +43,7 @@ CLI providers use their connected accounts and available limits; API endpoints f
 
 ## Get started
 
-Install [Bun](https://bun.sh) and your chosen provider’s CLI, or have an OpenAI-compatible API endpoint ready. From the project directory:
+Install [Bun](https://bun.sh) 1.4.2 or newer and your chosen provider’s CLI, or have an OpenAI-compatible API endpoint ready. From the project directory:
 
 ```sh
 bun install --frozen-lockfile

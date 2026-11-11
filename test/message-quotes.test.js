@@ -90,7 +90,7 @@ for(const roomMode of [false,true])test(`${roomMode?'room':'chat'} quote control
     const excerpt='Original draft';
     await quote.locator('xpath=ancestor::article').locator('.message-text').evaluate(content=>{
       const paragraph=content.querySelector('p'),range=document.createRange();
-      paragraph.scrollIntoView({block:'center'});
+      paragraph.scrollIntoView({block:'center',behavior:'instant'});
       range.setStart(paragraph.firstChild,0);range.setEnd(paragraph.querySelector('strong').firstChild,5);
       const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
     });

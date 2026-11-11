@@ -111,9 +111,10 @@ test('conversation rooms create, discuss, target agents, stop, edit, and survive
     await page.locator('.working-row strong').filter({hasText:'Scout'}).waitFor();
     complete(second,jobs[1],'Scout agrees; compare transport costs.');
     await page.getByText('Scout agrees; compare transport costs.',{exact:true}).waitFor();
-    expect(await page.locator('.message-assistant .message-meta strong').allTextContents()).toEqual(['Pip','Scout']);
+    expect(await page.locator('.message-assistant .message-meta strong').allTextContents()).toEqual(['Pip','Pip','Scout']);
+    expect(await page.locator('.message-assistant').first().textContent()).toContain('Which destination?');
     await page.waitForFunction(()=>document.querySelector('.answer-file img')?.naturalWidth===1);
-    expect(await page.locator('.message-assistant').first().locator('.answer-file').count()).toBe(2);
+    expect(await page.locator('.message-assistant').filter({hasText:'Pip suggests Kyoto.'}).locator('.answer-file').count()).toBe(2);
     const downloading = page.waitForEvent('download'); await page.getByRole('link',{name:'itinerary.csv',exact:true}).click();
     const downloaded = await downloading; expect(downloaded.suggestedFilename()).toBe('itinerary.csv');
     expect(readFileSync(await downloaded.path(),'utf8')).toBe('City,Days\nKyoto,2\n');

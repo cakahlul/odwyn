@@ -209,7 +209,7 @@ export class AIProvider extends EventEmitter {
       const response = await this.fetch(`${run.config.baseUrl}/chat/completions`, {
         method: 'POST', redirect: 'error', signal: AbortSignal.any([run.controller.signal, AbortSignal.timeout(120_000)]),
         headers: { 'content-type': 'application/json', ...(run.config.apiKey ? { authorization: `Bearer ${run.config.apiKey}` } : {}) },
-        body: JSON.stringify({ model: run.config.model, ...(run.config.effort && run.config.effort !== 'default' ? {reasoning_effort:run.config.effort} : {}), messages, tools, stream: false }),
+        body: JSON.stringify({ model: run.config.model, ...(run.config.effort && run.config.effort !== 'default' ? {reasoning_effort:run.config.effort} : {}), messages, ...(tools.length?{tools}:{}), stream: false }),
       });
       if (!response.ok) throw new Error(`AI API returned HTTP ${response.status}. Check your base URL, model, API key, and quota.`);
       const data=await response.json();

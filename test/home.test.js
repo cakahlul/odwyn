@@ -76,12 +76,12 @@ test('Home prioritizes work across agents, updates live, preserves drafts and re
         await page.screenshot({path:join(artifacts,'home-mobile.png')});
       }
     }
-    await page.getByRole('button',{name:'Find a conversation',exact:true}).click();await page.locator('#search-dialog[open]').waitFor();await page.keyboard.press('Escape');
+    await page.locator('.home').getByRole('button',{name:'Find a conversation',exact:true}).click();await page.locator('#search-dialog[open]').waitFor();await page.keyboard.press('Escape');
     await page.locator('.home [data-conversation="ready"]').click();await page.locator('.message-assistant').waitFor();
     expect(await page.locator('.message-assistant').textContent()).toContain('The itinerary is ready.');
     await page.reload();await page.locator('.message-assistant').waitFor();expect(await page.locator('.home').count()).toBe(0);
     await page.goto(server.url.href);await page.locator('.home').waitFor();
-    await page.locator('#agents-open').click();await page.locator(`[data-select-agent="${first}"]`).click();await page.locator('#composer-area').waitFor();
+    await page.locator('#agents-open').click();await page.locator(`[data-select-agent="${first}"]`).click();await page.locator('#agent-history-latest').click();await page.locator('#composer-area').waitFor();
     expect(await page.locator('.home').count()).toBe(0);
     await page.locator('.workspace-dock [data-view=home]').click();await page.locator('.home').waitFor();
     await page.getByRole('button',{name:'Start a conversation',exact:true}).click();await page.locator('.welcome').waitFor();expect(await page.locator('#prompt').isVisible()).toBe(true);
@@ -89,7 +89,7 @@ test('Home prioritizes work across agents, updates live, preserves drafts and re
     await page.goto(server.url.href);await page.getByRole('heading',{name:'Conversations'}).waitFor();
     expect(await page.locator('.home-section').count()).toBe(0);
     expect(await page.locator('.home .home-agent').first().textContent()).toContain('Connect provider');
-    await page.locator('.home .home-agent').first().click();await page.locator('.welcome').waitFor();
+    await page.locator('.home .home-agent').first().click();await page.locator('.library-actions [data-new-chat]').click();await page.locator('.welcome').waitFor();
     expect(await page.locator('#prompt').evaluate(node=>node===document.activeElement)).toBe(true);
     await page.screenshot({path:join(artifacts,'redesign-chat.png')});
     await page.locator('.workspace-dock [data-view=home]').click();await page.locator('.home').waitFor();

@@ -4,7 +4,7 @@
 
 ## Run locally
 
-Install Bun and the CLI for your chosen provider, or use an OpenAI-compatible API. Install Chromium with the command below for browser work.
+Install Bun 1.4.2 or newer and the CLI for your chosen provider, or use an OpenAI-compatible API. Older Bun releases can close Chromium's control pipes during garbage collection; run `bun upgrade` before setup. Install Chromium with the command below for browser work.
 
 From the project directory:
 

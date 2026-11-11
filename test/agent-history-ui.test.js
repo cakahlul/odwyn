@@ -1,4 +1,5 @@
 import {test,expect} from 'bun:test';
+import {randomUUID} from 'node:crypto';
 import {EventEmitter} from 'node:events';
 import {mkdtempSync,rmSync,mkdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -13,7 +14,8 @@ test('agent history searches only that agent and opens current or latest activit
   app=createApp({directory,user:'owner',password:'test-password-long-enough',origin:server.url.origin,codex:Object.assign(new EventEmitter(),{request:async()=>({account:null}),stop(){}}),browser:{close:async()=>{}}});
   const state=app.runtime.state,id=state.agents[0].id;
   state.globalProvider.configured=true;state.agents[0].provider.configured=true;
-  const chat=(id,agentId,title,at,text='')=>({id,agentId,title,createdAt:at,messages:text?[{id:id+'-message',role:'user',text,at}]:[]});
+  const ids={older:randomUUID(),latest:randomUUID(),foreign:randomUUID()};
+  const chat=(key,agentId,title,at,text='')=>({id:ids[key],agentId,title,createdAt:at,messages:text?[{id:ids[key]+'-message',role:'user',text,at}]:[]});
   state.conversations=[chat('older',id,'Older chat','2026-01-01T00:00:00Z','needle'),{...chat('latest',id,'Latest activity','2025-01-01T00:00:00Z'),messages:[{id:'new-message',role:'user',text:'Recent work',at:'2026-02-01T00:00:00Z'}]},chat('foreign','other','Foreign needle','2026-03-01T00:00:00Z')];
   app.runtime.changed();
   const browser=await chromium.launch({channel:process.env.ODWYN_TEST_BROWSER_CHANNEL}),page=await newPageWithoutTutorials(browser,{httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:960}});
@@ -37,14 +39,14 @@ test('agent history searches only that agent and opens current or latest activit
       await page.screenshot({path:`artifacts/conversation-search-${width}.png`});
     }
     expect(await page.locator('#history [data-conversation]').count()).toBe(2);
-    expect(await page.locator('#agent-history-latest').getAttribute('data-conversation')).toBe('latest');
+    expect(await page.locator('#agent-history-latest').getAttribute('data-conversation')).toBe(ids.latest);
     await page.locator('#search-input').fill('needle');
     expect(await page.locator('#search-results [data-conversation]').count()).toBe(1);
-    expect(await page.locator('#search-results [data-conversation]').getAttribute('data-conversation')).toBe('older');
+    expect(await page.locator('#search-results [data-conversation]').getAttribute('data-conversation')).toBe(ids.older);
     await page.locator('#search-results [data-conversation]').click();
-    await page.waitForURL('**/#chat/older');
+    await page.waitForURL('**/#chat/'+ids.older);
     await page.locator('#agent-roster [data-agent]').first().click();
-    expect(await page.locator('#agent-history-latest').getAttribute('data-conversation')).toBe('older');
+    expect(await page.locator('#agent-history-latest').getAttribute('data-conversation')).toBe(ids.older);
     await page.locator('#agent-history-latest').click();
     expect(await page.locator('#search-dialog').evaluate(n=>n.open)).toBe(false);
     await page.setViewportSize({width:375,height:812});
@@ -53,15 +55,15 @@ test('agent history searches only that agent and opens current or latest activit
     await page.locator('#conversation-name').fill('Renamed on mobile');
     await page.locator('#rename-save').click();
     await page.waitForFunction(()=>!document.querySelector('#rename-dialog').open);
-    expect(state.conversations.find(c=>c.id==='older').title).toBe('Renamed on mobile');
+    expect(state.conversations.find(c=>c.id===ids.older).title).toBe('Renamed on mobile');
     await page.locator('#conversation-menu-open').click();
     await page.locator('#rename-conversation').click();
     page.once('dialog',dialog=>dialog.accept());
     await page.locator('#delete-conversation').click();
     await page.waitForFunction(()=>!document.querySelector('#rename-dialog').open);
-    expect(state.conversations.some(c=>c.id==='older')).toBe(false);
-    await page.locator('[data-view="home"]').first().click();
-    await page.locator('#agent-roster [data-agent]').first().click();
+    expect(state.conversations.some(c=>c.id===ids.older)).toBe(false);
+    await page.locator('.mobile-back').click();
+    await page.locator('#view .home-agent').first().click();
     expect(await page.locator('#search-input').evaluate(n=>n===document.activeElement)).toBe(false);
     await page.locator('.library-actions [data-new-chat]').click();
     await page.locator('.welcome').waitFor();

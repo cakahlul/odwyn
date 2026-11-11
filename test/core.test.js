@@ -87,7 +87,7 @@ test('existing single-agent data migrates without losing identity, chats or rout
   const legacy = openStore(dir); legacy.close();
   const database = new Database(join(dir,'odwyn.db'));
   const profile = {...defaults,name:'Pip',ownerName:'Alex',language:'id'};
-  database.query('INSERT INTO state VALUES (1, ?)').run(JSON.stringify({customization:profile,preferences:'Jakarta time',conversations:[{id:'chat',messages:[{id:'message',role:'user',text:'Legacy trip',at:'2026-10-05T00:00:00Z'}]}],jobs:[{id:'job',conversationId:'chat',status:'completed'}],schedules:[{id:'routine',prompt:'Check again',enabled:true,nextAt:'2026-10-05T00:00:00Z'}]}));
+  database.query('UPDATE state SET value = ? WHERE id = 1').run(JSON.stringify({customization:profile,preferences:'Jakarta time',conversations:[{id:'chat',messages:[{id:'message',role:'user',text:'Legacy trip',at:'2026-10-05T00:00:00Z'}]}],jobs:[{id:'job',conversationId:'chat',status:'completed'}],schedules:[{id:'routine',prompt:'Check again',enabled:true,nextAt:'2026-10-05T00:00:00Z'}]}));
   database.close();
   const store = openStore(dir);
   try {
@@ -172,12 +172,12 @@ test('browser risk checks fail closed for checkout, credentials, dialogs and unk
   expect(browserActionRisk({action:'click',ref:'0'},{element:{tag:'a',href:'https://shop.test/?action=delete',label:'Link'}})).toBe('interaction');
 });
 
-test('conversation deletion removes messages, runs and indexed recall, preserving agents and files', () => {
+test('conversation deletion removes messages, runs and indexed recall, preserving agents and unrelated files', () => {
   const dir=mkdtempSync(join(tmpdir(),'odwyn-delete-chat-')); let store=openStore(dir);
   try {
     const job=createJob(store.state,{prompt:'Uniquedeletedphrase'}), chat=store.state.conversations[0];
     const retained=createJob(store.state,{prompt:'Keep this conversation'}); retained.status='completed';
-    store.state.files.push({id:'keep-file',jobId:job.id,name:'Saved result'}); store.save();
+    store.state.files.push({id:'keep-file',jobId:retained.id,name:'Saved result'}); store.save();
     for (const status of ['queued','running','waiting','takeover','stopping']) {
       job.status=status; expect(()=>store.deleteConversation(chat.id)).toThrow('Stop');
       expect(store.state.conversations.some(c=>c.id===chat.id)).toBe(true);

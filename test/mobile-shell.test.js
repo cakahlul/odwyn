@@ -19,7 +19,7 @@ test('mobile shell keeps conversations, actions and sheets within thumb reach',a
   try {
     await page.goto(server.url.href);await page.locator('.home .home-agent').waitFor();
     await page.screenshot({path:join(artifacts,'mobile-home.png'),animations:'disabled'});
-    await page.locator('.home .home-agent').first().tap();await page.locator('#prompt').waitFor({state:'visible'});
+    await page.locator('.home .home-agent').first().tap();await page.locator('.library-actions [data-new-chat]').tap();await page.locator('#prompt').waitFor({state:'visible'});
     for(const width of [320,390,760]) {
       await page.setViewportSize({width,height:844});
       expect(await page.locator('#view').evaluate(node=>node.getBoundingClientRect().left)).toBe(0);

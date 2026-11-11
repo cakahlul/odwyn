@@ -5,6 +5,7 @@ import {setupOddy} from './oddy-ui.js';
 import {setupTutorials} from './tutorials.js';
 import {renderKnowledge,setupKnowledge} from './knowledge-ui.js';
 import {setupRoomWork} from './room-work-ui.js';
+import {setupConversationReports} from './conversation-reports-ui.js';
 import {setupWorkspaceHomes} from './workspace-homes.js';
 import {setupWorkspaceSettings} from './workspace-settings.js';
 import { renderWorkflows, setupWorkflows } from './workflows-ui.js';
@@ -103,6 +104,7 @@ hydrateIcons(); setupBrowser(() => state);
 const visitTutorial=setupTutorials();
 setupWorkspaceSettings(refresh);
 setupKnowledge(() => state,refresh);
+setupConversationReports(()=>view==='chat'?workspace?.conversations.find(c=>c.id===conversationId):null);
 setupCustomization(() => state, async (result, adding, onboarding) => { $('#provider-api-key').value = ''; signature = ''; await refresh(); if (adding) await switchAgent(result.id); if (onboarding && !workspace.globalProvider.configured) openSettings(); }, () => $('#provider-source').value === 'global' ? {inherit:true} : {...providerInput(),inherit:false});
 
 function selectState() {
@@ -483,6 +485,7 @@ function render() {
   $('#agent-name').textContent = view === 'home' ? 'Odwyn' : state.customization?.name || defaults.name;
   $('#page-title').disabled = view !== 'chat' || !conversation;
   $('#rename-conversation').hidden = view !== 'chat' || !conversation;
+  $('#export-report').hidden = view !== 'chat' || !conversation;
   $('#page-title').title = conversation && view === 'chat' ? 'Rename conversation' : '';
   $('#page-title').setAttribute('aria-label',conversation && view === 'chat' ? `Rename conversation: ${conversation.title}` : $('#page-title').textContent);
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active',button.dataset.view === view));
@@ -800,7 +803,7 @@ async function deleteConversation(id) {
     const linked=plan.conversations.filter(c=>c.id!==id);
     const dependencies=linked.length?`\n\nLinked rooms and stages will also be deleted:\n${linked.map(c=>`• ${c.title}`).join('\n')}`:'';
     const runs=plan.workflowRunIds.length?`\n${plan.workflowRunIds.length} associated workflow run(s) will also be deleted.`:'';
-    if(!confirm(`Delete “${conversation.title}” permanently?${dependencies}${runs}\n\nMessages and task runs will be removed. Agents, saved files and workflow templates are kept.`))return;
+    if(!confirm(`Delete “${conversation.title}” permanently?${dependencies}${runs}\n\nMessages, task runs and attachments used only by these conversations will be removed. Agents, other files and workflow templates are kept.`))return;
     const deleted=await api(`/api/conversations/${id}`,{conversationIds:plan.conversationIds,workflowRunIds:plan.workflowRunIds},'DELETE');
     const ids=new Set(deleted.conversationIds);
     for (const [key,draft] of drafts) if (ids.has(draft.conversationId)) drafts.delete(key);
@@ -808,7 +811,7 @@ async function deleteConversation(id) {
     for(const deletedId of ids)roomRecipients.delete(deletedId);
     if (ids.has(conversationId)) { $('#prompt').value=''; $('#prompt').style.height=''; attachments=[]; renderAttachments(); }
     $('#rename-dialog').close(); $('#room-header').close();
-    await refresh(); navigate(); toast('Conversation and linked stages deleted. Agents and files kept.');
+    await refresh(); navigate(); toast('Conversation and linked stages deleted. Agents and other files kept.');
     $('#prompt').focus();
   } catch(error) { handleError(error); }
   finally { busy=false; render(); }

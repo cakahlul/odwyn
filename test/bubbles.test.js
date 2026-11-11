@@ -15,7 +15,7 @@ test('minimized agents float as staggered circles, preserve dragging, and respec
   const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:(req,srv)=>app.fetch(req,srv)});
   app=createApp({directory,user:'owner',password:'test-password-long-enough',origin:server.url.origin,codex,browser:{close:async()=>{}}});
   app.runtime.state.customization={...defaults,name:'Oddy',bodyColor:'#81ae76'};app.runtime.state.provider.configured=true;app.runtime.state.globalProvider.configured=true;
-  app.runtime.state.appearance={palette:'harbor',motion:'system'};
+  app.runtime.state.appearance={palette:'harbor',motion:'system',navigation:'dock'};
   for (const [index,name] of ['Rei','Kai','Eve','Momo'].entries()) app.runtime.state.agents.push({id:'agent-'+index,customization:{...defaults,name,bodyColor:['#658bbd','#b8d7ec','#d98bab','#d6a77e'][index],shape:['orb','robot','cat','bean'][index]},provider:{...app.runtime.state.provider}});
   app.runtime.changed();
   const browser=await chromium.launch(), context=await browser.newContext({httpCredentials:{username:'owner',password:'test-password-long-enough'},viewport:{width:1440,height:900}});
@@ -25,7 +25,7 @@ test('minimized agents float as staggered circles, preserve dragging, and respec
     expect(await page.locator('.sidebar-agent .agent-avatar').first().evaluate(node=>getComputedStyle(node).animationName)).toBe('agent-breathe');
     await page.locator('[data-mascot-toggle]').click();
     expect(await page.locator('.sidebar-agent .agent-avatar').first().evaluate(node=>getComputedStyle(node).animationPlayState)).toBe('paused');
-    await page.locator('[data-mascot-toggle]').click();await page.locator('#minimize-agent').click();
+    await page.locator('[data-mascot-toggle]').click();await page.locator('#conversation-menu-open').click();await page.locator('#minimize-agent').click();
     await page.getByRole('heading',{name:'Your agents are minimized'}).waitFor();
     const slots=page.locator('.agent-slot');expect(await slots.count()).toBe(5);
     const boxes=await slots.evaluateAll(nodes=>nodes.map(node=>({x:node.offsetLeft,y:node.offsetTop,width:node.offsetWidth,height:node.offsetHeight})));
@@ -57,7 +57,7 @@ test('minimized agents float as staggered circles, preserve dragging, and respec
       else for (const box of await slots.evaluateAll(nodes=>nodes.map(node=>({x:node.offsetLeft,y:node.offsetTop,width:node.offsetWidth,height:node.offsetHeight})))) {expect(box.x).toBeGreaterThanOrEqual(8);expect(box.x+box.width).toBeLessThanOrEqual(width);expect(box.y).toBeGreaterThanOrEqual(8);expect(box.y+box.height).toBeLessThanOrEqual(700);}
       if(width===320) await page.screenshot({path:join(artifacts,'floating-agents-mobile.png'),fullPage:true});
     }
-    await page.locator(`[data-agent="${id}"]`).click();await page.getByRole('heading',{name:'Your agents are minimized'}).waitFor({state:'hidden'});
+    await page.locator(`.bubble-restore[data-agent="${id}"]`).click();await page.getByRole('heading',{name:'Your agents are minimized'}).waitFor({state:'hidden'});
     expect(await slots.count()).toBe(4);
     const closedId=await slots.first().getAttribute('data-bubble');await page.locator(`[data-close-agent="${closedId}"]`).click();
     expect(await page.locator(`[data-bubble="${closedId}"]`).count()).toBe(0);
