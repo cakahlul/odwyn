@@ -667,7 +667,7 @@ body.mascot-paused .home-agent-avatar { animation-play-state:paused; }
 .search-result span { min-width:0; text-align:left; }
 .search-result strong,.search-result small { display:block; }
 .search-result small { margin-top:4px; color:var(--muted); font-size:12px; }
-#agent-history-latest { margin-bottom:18px; }
+.library-actions { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px; }
 :root[data-navigation=dock] #workspace-navigation {
   grid-column:2;
   grid-row:3;

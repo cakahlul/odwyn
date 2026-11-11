@@ -110,14 +110,17 @@ function selectState() {
   const agent = workspace.agents.find(a => a.id === agentId) || workspace.agents[0];
   const running = workspace.jobs.find(j => j.id === workspace.runtime.activeJobId);
   state = { ...workspace, agentId:agent.id, customization:agent.customization, provider:agent.provider, schedules:workspace.schedules.filter(s => (s.agentId || workspace.agents[0].id) === agent.id), runtime:{ ...workspace.runtime, ...agent.runtime, model:agent.provider.model, activeAgentName:workspace.agents.find(a => a.id === running?.agentId)?.customization?.name } };
-  if (pendingSend?.jobId && workspace.jobs.some(job=>job.id===pendingSend.jobId)) pendingSend = null;
+  if (pendingSend?.answerRequestId) {
+    const job = workspace.jobs.find(job=>job.id===pendingSend.job.id);
+    if (!job || job.pending?.id !== pendingSend.answerRequestId) pendingSend = null;
+  } else if (pendingSend?.jobId && workspace.jobs.some(job=>job.id===pendingSend.jobId)) pendingSend = null;
   if (pendingSend) {
     const pending = pendingSend, existing = workspace.conversations.find(c=>c.id===pending.conversationId);
     const conversation = existing || {id:pending.conversationId,agentId:pending.agentId,title:pending.text.slice(0,70) || 'New conversation',createdAt:pending.at,messages:[]};
-    const message = {id:pending.id,role:'user',replyTo:pending.replyTo,agentId:pending.agentId,text:pending.text,attachments:pending.attachments,at:pending.at,jobId:pending.jobId || pending.id};
-    const job = pending.job ? {...pending.job,pendingSend:true} : {id:pending.id,agentId:pending.agentId,conversationId:pending.conversationId,prompt:pending.text,attachments:pending.attachments,interactionMode:pending.interactionMode,status:'sending',createdAt:pending.at,events:[],files:[],toolCount:0,pendingSend:true,optimistic:true};
+    const message = {id:pending.id,role:'user',replyTo:pending.replyTo,agentId:pending.agentId,text:pending.text,attachments:pending.attachments,at:pending.at,jobId:pending.jobId || pending.job?.id || pending.id};
+    const job = pending.job ? {...pending.job,pendingSend:true,...(pending.answerRequestId ? {pending:null,status:'sending',optimistic:true} : {})} : {id:pending.id,agentId:pending.agentId,conversationId:pending.conversationId,prompt:pending.text,attachments:pending.attachments,interactionMode:pending.interactionMode,status:'sending',createdAt:pending.at,events:[],files:[],toolCount:0,pendingSend:true,optimistic:true};
     state.conversations = [ ...workspace.conversations.filter(c=>c.id!==conversation.id), {...conversation,messages:[...conversation.messages,message]} ];
-    state.jobs = [job,...workspace.jobs];
+    state.jobs = [job,...workspace.jobs.filter(existing=>existing.id!==job.id)];
   }
 }
 
@@ -386,7 +389,7 @@ function closeAgent(id) {
 
 function saveDraft() {
   if (!agentId) return;
-  const pending = pendingSend && !pendingSend.jobId && pendingSend.ownerAgentId === agentId ? pendingSend : null;
+  const pending = pendingSend && !pendingSend.jobId && !pendingSend.answerRequestId && pendingSend.ownerAgentId === agentId ? pendingSend : null;
   drafts.set(agentId, { view, conversationId:pending ? pending.previousConversationId : conversationId, filter, replyTo:quoteDrafts.get(conversationId) || null, prompt:pending ? pending.draftPrompt : $('#prompt').value, height:pending ? pending.draftHeight : $('#prompt').style.height, attachments, mode:$('#interaction-mode').value, scroll:$('#view').scrollTop, mainScroll:$('#agent-workspace').scrollTop, paused:document.body.classList.contains('mascot-paused') });
   sessionStorage.setItem(storageKey('odwyn-drafts'),JSON.stringify([...drafts]));
 }
@@ -414,12 +417,13 @@ function renderAttachments() {
     return `<div class="attachment-chip">${image && !file.uploading ? `<button type="button" class="attachment-preview" data-preview-file="${esc(file.id)}" aria-label="Preview ${esc(file.name)}">${content}</button>` : `<div class="attachment-preview">${content}</div>`}${file.uploading ? '' : `<button type="button" class="attachment-remove" data-remove-attachment="${esc(file.id)}" aria-label="Remove ${esc(file.name)}">${icon('close')}</button>`}</div>`;
   }).join('');
 }
-function setNavigation(open) {
-  if (open && $('#search-dialog').open) { $('#search-input').focus(); return; }
+function setNavigation(open, {focusSearch = true} = {}) {
+  const focusTarget = focusSearch ? $('#search-input') : $('#search-dialog .modal-top button');
+  if (open && $('#search-dialog').open) { focusTarget.focus(); return; }
   for (const id of ['search-dialog','agents-dialog','tools-dialog']) {
     if ($('#'+id).open) $('#'+id).close();
   }
-  if (open) { $('#search-dialog').showModal(); search(); $('#search-input').focus(); }
+  if (open) { $('#search-dialog').showModal(); search(); focusTarget.focus(); }
 }
 for (const [buttonId, dialogId] of [['menu-button','search-dialog'],['agents-open','agents-dialog'],['tools-open','tools-dialog']]) {
   $('#'+dialogId).addEventListener('close', () => $('#'+buttonId).setAttribute('aria-expanded','false'));
@@ -478,6 +482,7 @@ function render() {
   $('#page-title').textContent = view === 'chat' ? conversation?.title || 'New conversation' : { home:'Home', audit:'Audit log', runs:'Task runs', routines:'Routines', files:'Files & results', workflows:'Workflows', skills:'Skills', connections:'Connections', knowledge:'Knowledge' }[view];
   $('#agent-name').textContent = view === 'home' ? 'Odwyn' : state.customization?.name || defaults.name;
   $('#page-title').disabled = view !== 'chat' || !conversation;
+  $('#rename-conversation').hidden = view !== 'chat' || !conversation;
   $('#page-title').title = conversation && view === 'chat' ? 'Rename conversation' : '';
   $('#page-title').setAttribute('aria-label',conversation && view === 'chat' ? `Rename conversation: ${conversation.title}` : $('#page-title').textContent);
   document.querySelectorAll('[data-view]').forEach(button => button.classList.toggle('active',button.dataset.view === view));
@@ -748,7 +753,7 @@ let historyAgentId = null;
 function openAgentHistory(id) {
   historyAgentId = id;
   $('#search-input').value = '';
-  setNavigation(true);
+  setNavigation(true,{focusSearch:false});
   search();
 }
 function search() {
@@ -784,6 +789,7 @@ function openRename() {
   $('#rename-dialog').showModal(); $('#conversation-name').focus(); $('#conversation-name').select();
 }
 $('#page-title').onclick = openRename;
+$('#rename-conversation').onclick = openRename;
 $('#rename-room').onclick = openRename;
 async function deleteConversation(id) {
   const conversation=workspace.conversations.find(c=>c.id===id);
@@ -809,13 +815,12 @@ async function deleteConversation(id) {
 }
 $('#delete-conversation').onclick = () => deleteConversation(renamingConversationId);
 $('#delete-room').onclick = () => deleteConversation(currentRoom()?.id);
-$('#rename-dialog').onclose = () => (currentRoom() ? $('#room-details-open') : $('#page-title')).focus();
+$('#rename-dialog').onclose = () => (mobileLayout.matches ? $('#conversation-menu-open') : currentRoom() ? $('#room-details-open') : $('#page-title')).focus();
 $('#rename-form').onsubmit = async event => {
   event.preventDefault(); $('#rename-save').disabled=true;
   try {
     await api(`/api/conversations/${renamingConversationId}`,{title:$('#conversation-name').value},'PATCH');
     $('#rename-dialog').close(); await refresh(); toast('Conversation renamed.');
-    (currentRoom() ? $('#room-details-open') : $('#page-title')).focus();
   } catch(error) { $('#rename-status').textContent='';handleError(error); }
   finally { $('#rename-save').disabled=false; }
 };
@@ -1102,9 +1107,29 @@ document.addEventListener('click', event => {
   if (target.dataset.copy) { const message = state.conversations.flatMap(c => c.messages).find(m => m.id === target.dataset.copy); void navigator.clipboard.writeText(message.text).then(() => toast('Copied.')).catch(handleError); }
   if (target.dataset.removeAttachment) { attachments = attachments.filter(f => f.id !== target.dataset.removeAttachment); target.closest('.attachment-chip').remove(); updateComposerSend(); }
 });
-document.addEventListener('submit', event => {
+document.addEventListener('submit', async event => {
   const form = event.target.closest('[data-answer-job]'); if (!form) return;
-  event.preventDefault(); void perform(() => api(`/api/jobs/${form.dataset.answerJob}/answer`,{ requestId:form.dataset.request, answer:new FormData(form).get('answer'), selected:new FormData(form).getAll('selected') }));
+  event.preventDefault();
+  if (busy || pendingSend) return;
+  const job = workspace.jobs.find(job=>job.id===form.dataset.answerJob);
+  if (job?.pending?.id !== form.dataset.request) return;
+  const data = new FormData(form), answer = data.get('answer'), selected = data.getAll('selected');
+  const card = form.closest('.approval-card'), question = workspace.conversations.find(c=>c.id===job.conversationId)?.messages.find(m=>m.id===form.dataset.request);
+  const author = workspace.agents.find(a=>a.id===job.agentId)?.customization?.name || defaults.name;
+  pendingSend = {id:crypto.randomUUID(),answerRequestId:form.dataset.request,job,conversationId:job.conversationId,agentId:job.agentId,text:answer || (selected.length ? 'Selected items confirmed.' : ''),attachments:[],at:new Date().toISOString(),replyTo:question ? {messageId:question.id,role:question.role,text:question.text,author} : null};
+  busy = true; $('#composer').setAttribute('aria-busy','true'); $('#composer-status').textContent = 'Sending…';
+  selectState(); signature = ''; render();
+  $('#view').scrollTo({top:$('#view').scrollHeight,behavior:'instant'});
+  let failed = false;
+  try {
+    await api(`/api/jobs/${job.id}/answer`,{requestId:form.dataset.request,answer,selected});
+    void refresh();
+  } catch (error) { failed = true; pendingSend = null; selectState(); handleError(error); }
+  finally {
+    busy = false; $('#composer').setAttribute('aria-busy','false'); $('#composer-status').textContent = ''; render();
+    const next = failed && $('#view').querySelector(`[data-request="${CSS.escape(form.dataset.request)}"]`);
+    if (next) { next.replaceWith(card); form.querySelector('textarea').focus({preventScroll:true}); }
+  }
 });
 document.addEventListener('result-response-sent',() => { signature='';void refresh(); });
 document.addEventListener('keydown', event => {

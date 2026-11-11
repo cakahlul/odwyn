@@ -24,6 +24,8 @@ test('agent history searches only that agent and opens current or latest activit
     await page.evaluate(()=>document.querySelectorAll('dialog[open]').forEach(d=>d.close()));
     await page.locator('#agent-roster [data-agent]').first().click();
     await page.locator('#search-dialog[open]').waitFor();
+    expect(await page.locator('#search-input').evaluate(n=>n===document.activeElement)).toBe(false);
+    expect(await page.locator('.library-actions [data-new-chat]').isVisible()).toBe(true);
     mkdirSync('artifacts',{recursive:true});
     for(const width of [375,1440]){
       await page.setViewportSize({width,height:960});
@@ -45,6 +47,25 @@ test('agent history searches only that agent and opens current or latest activit
     expect(await page.locator('#agent-history-latest').getAttribute('data-conversation')).toBe('older');
     await page.locator('#agent-history-latest').click();
     expect(await page.locator('#search-dialog').evaluate(n=>n.open)).toBe(false);
+    await page.setViewportSize({width:375,height:812});
+    await page.locator('#conversation-menu-open').click();
+    await page.locator('#rename-conversation').click();
+    await page.locator('#conversation-name').fill('Renamed on mobile');
+    await page.locator('#rename-save').click();
+    await page.waitForFunction(()=>!document.querySelector('#rename-dialog').open);
+    expect(state.conversations.find(c=>c.id==='older').title).toBe('Renamed on mobile');
+    await page.locator('#conversation-menu-open').click();
+    await page.locator('#rename-conversation').click();
+    page.once('dialog',dialog=>dialog.accept());
+    await page.locator('#delete-conversation').click();
+    await page.waitForFunction(()=>!document.querySelector('#rename-dialog').open);
+    expect(state.conversations.some(c=>c.id==='older')).toBe(false);
+    await page.locator('[data-view="home"]').first().click();
+    await page.locator('#agent-roster [data-agent]').first().click();
+    expect(await page.locator('#search-input').evaluate(n=>n===document.activeElement)).toBe(false);
+    await page.locator('.library-actions [data-new-chat]').click();
+    await page.locator('.welcome').waitFor();
+    await page.setViewportSize({width:1440,height:960});
     await page.locator('#sidebar-collapse').click();
     expect(await page.locator('.rail-search [data-icon]').isVisible()).toBe(true);
     expect(await page.locator('#menu-button .dock-tooltip').isVisible()).toBe(false);

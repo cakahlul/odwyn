@@ -68,3 +68,44 @@ test('messages appear before sending completes, failures keep drafts, and progre
     await page.waitForFunction(()=>!document.querySelector('.typing-dots'));
   }finally{release();await browser.close();await app.close();await server.stop(true);rmSync(directory,{recursive:true,force:true});}
 },20_000);
+
+test('question answers appear immediately, prevent duplicate submits, and restore failed answers',async()=>{
+  const directory=mkdtempSync(join(tmpdir(),'odwyn-instant-answer-'));let app;
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,fetch:req=>app.fetch(req)});
+  const codex=Object.assign(new EventEmitter(),{child:{},stop(){},respond(){},reject(){},request:async method=>method==='account/read' ? {account:{type:'chatgpt'}} : method.startsWith('thread/') ? {thread:{id:'thread-answer'}} : {turn:{id:'turn-answer'}}});
+  app=createApp({directory,user:'owner',password:'test-password-long-enough',origin:server.url.origin,codex,browser:{close:async()=>{}}});
+  app.runtime.state.customization={...defaults};app.runtime.state.globalProvider.configured=true;await app.runtime.refreshAccount();
+  const job=app.runtime.submit({prompt:'Prepare the change'});await app.runtime.drain();
+  const question=app.runtime.handleRequest({id:1,method:'item/tool/call',params:{threadId:job.threadId,turnId:job.turnId,tool:'odwyn_ask',arguments:{question:'Which project?'}}});
+  while(!job.pending)await Bun.sleep(1);
+  const requestId=job.pending.id;
+  const browser=await chromium.launch(),page=await newPageWithoutTutorials(browser,{httpCredentials:{username:'owner',password:'test-password-long-enough'}});
+  page.setDefaultTimeout(5000);let release;const gate=new Promise(resolve=>{release=resolve;});let requests=0;
+  try{
+    await page.goto(server.url.href+'#chat/'+job.conversationId);
+    await page.locator('#owner-answer').fill('Use the existing project.');
+    await page.route('**/api/jobs/*/answer',async route=>{requests++;await gate;await route.fulfill({status:400,json:{error:'Try again.'}});});
+    await page.locator('.answer-form button').click();
+    await page.locator('.message-user').filter({hasText:'Use the existing project.'}).waitFor();
+    expect(await page.locator('.answer-form').count()).toBe(0);
+    expect(await page.locator('.working-row').textContent()).toContain('Sending…');
+    expect(job.pending.id).toBe(requestId);
+    release();await page.locator('.answer-form').waitFor();
+    expect(await page.locator('#owner-answer').inputValue()).toBe('Use the existing project.');
+    expect(await page.locator('.message-user').filter({hasText:'Use the existing project.'}).count()).toBe(0);
+    expect(requests).toBe(1);
+    await page.unroute('**/api/jobs/*/answer');
+    let releaseState;const stateGate=new Promise(resolve=>{releaseState=resolve;});
+    await page.route('**/api/state?*',async route=>{await stateGate;await route.continue();});
+    try{
+      await page.locator('.answer-form button').click();
+      await page.waitForFunction(()=>document.querySelector('#composer').getAttribute('aria-busy')==='false');
+      expect(await page.locator('.answer-form').count()).toBe(0);
+      expect(await page.locator('.message-user').filter({hasText:'Use the existing project.'}).count()).toBe(1);
+    }finally{releaseState();}
+    await question;
+    await page.waitForFunction(()=>!document.querySelector('.working-row')?.textContent.includes('Sending…'));
+    expect(await page.locator('.message-user').filter({hasText:'Use the existing project.'}).count()).toBe(1);
+    expect(await page.locator('.answer-form').count()).toBe(0);
+  }finally{release();await browser.close();await app.close();server.stop(true);rmSync(directory,{recursive:true,force:true});}
+},20_000);
